@@ -41,6 +41,7 @@ class WithingsDataHandler:
         self.refresh_token = refresh_token or ""
         self.access_token = access_token or ""
         self.db = db or GarminDatabase()
+        self.last_error: Optional[str] = None
 
     @staticmethod
     def get_auth_url(client_id: str, redirect_uri: str = "http://localhost:8000") -> str:
@@ -131,8 +132,10 @@ class WithingsDataHandler:
 
     def fetch_measurements(self, days: int = 365) -> List[Dict[str, Any]]:
         """
-        Fetch all historical body composition measurements from Withings Health Mate API.
+        Fetch body composition measurements from Withings Health Mate API.
+        If days >= 3650, fetches full lifetime history (lastupdate=0).
         """
+        self.last_error = None
         if not self.access_token and self.refresh_token:
             res = self.refresh_access_token()
             if not res.get("success"):
@@ -141,9 +144,14 @@ class WithingsDataHandler:
         if not self.access_token:
             return []
 
+        if days >= 3650:
+            lastupdate = 0
+        else:
+            lastupdate = int((datetime.now() - timedelta(days=days)).timestamp())
+
         payload = {
             "action": "getmeas",
-            "lastupdate": 0
+            "lastupdate": lastupdate
         }
         headers = {
             "Authorization": f"Bearer {self.access_token}"

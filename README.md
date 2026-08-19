@@ -195,8 +195,8 @@ See the detailed [Ollama Setup Guide](OLLAMA_SETUP_GUIDE.md) for troubleshooting
 
 ## Privacy & Data Security
 
-- **Local Storage**: All data is stored locally on your computer
-- **Encrypted Credentials**: Garmin passwords stored securely
+- **Local Storage**: All health data and chat logs are stored locally on your computer
+- **Protected Credentials**: API keys and session tokens stored locally in `~/.healthchat/` (protected by Windows OS user profile permissions)
 - **No Telemetry**: We don't collect usage data or analytics
 - **Ollama Option**: Keep everything 100% on your machine
 

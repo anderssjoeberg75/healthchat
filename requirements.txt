@@ -1,4 +1,4 @@
-# HealthChat Desktop v4.1.0 Dependencies
+# HealthChat Desktop v4.0.4 Dependencies
 
 # Core Application
 garth==0.4.46              # Garmin Connect API wrapper

@@ -269,35 +269,37 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
 6. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
 """
         
-        # Build message with context
-        if garmin_context:
-            full_message = f"{garmin_context}\n\nUser Question: {user_message}"
-        else:
-            full_message = user_message
-        
-        # Add to conversation history
+        # Store ONLY user_message in history (not duplicated garmin_context) to prevent token explosion
         self.conversation_history.append({
             'role': 'user',
-            'content': full_message
+            'content': user_message
         })
         
-        try:
-            # Call appropriate provider
-            if self.provider == 'anthropic' and hasattr(self.client, 'messages'):
-                # Use native Anthropic SDK
-                response = self._call_anthropic(system_prompt)
-            elif self.provider == 'gemini':
-                # Use native Gemini SDK (new google-genai package)
-                response = self._call_gemini(system_prompt, full_message)
-            else:
-                # Use OpenAI-compatible interface
-                response = self._call_openai_compatible(system_prompt)
+        # Keep a sliding window of recent conversation history (max 20 messages = 10 exchanges)
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
             
-            # Add response to history
+        # Build current message with garmin_context for this turn
+        current_user_content = f"{garmin_context}\n\nUser Question: {user_message}" if garmin_context else user_message
+        
+        try:
+            # Call appropriate provider with current_user_content
+            if self.provider == 'anthropic' and hasattr(self.client, 'messages'):
+                response = self._call_anthropic(system_prompt, current_user_content)
+            elif self.provider == 'gemini':
+                response = self._call_gemini(system_prompt, current_user_content)
+            else:
+                response = self._call_openai_compatible(system_prompt, current_user_content)
+            
+            # Add assistant response to history
             self.conversation_history.append({
                 'role': 'assistant',
                 'content': response
             })
+
+            # Keep a sliding window of recent conversation history (max 20 messages = 10 turns)
+            if len(self.conversation_history) > 20:
+                self.conversation_history = self.conversation_history[-20:]
             
             return response
             
@@ -407,159 +409,100 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                            f"2. 💳 Upgrade to paid tier at: {dashboard_link}\n"
                            f"   - Paid tier: 2,000 RPM, much higher limits\n"
                            f"3. 🔄 Switch to a different AI provider in Settings\n"
-                           f"   - Try xAI, OpenAI, or Anthropic (no free tier limits)\n\n"
-                           f"💡 Tip: Gemini free tier is great but has strict rate limits.\n"
-                           f"For heavy usage, consider:\n"
-                           f"• Upgrading Gemini to paid ($$$)\n"
-                           f"• Switching to OpenAI gpt-4o-mini ($ cheap!)\n"
-                           f"• Switching to Anthropic claude-haiku ($ cheap!)\n\n"
-                           f"Error details: {str(e)}")
+                           f"   - Try xAI, OpenAI, or Anthropic (no free tier limits)\n\n")
                     return msg
-                else:
-                    # Generic rate limit error for other providers
-                    return (f"⚠️ API Quota Exceeded\n\n"
-                           f"Your {self.PROVIDERS[self.provider]['name']} account has exceeded its quota or rate limit.\n\n"
-                           f"Solutions:\n"
-                           f"1. Add credits or upgrade your plan at: {dashboard_link}\n"
-                           f"2. Wait a few minutes if you hit a rate limit\n"
-                           f"3. Switch to a different AI provider in Settings\n\n"
-                           f"Common causes:\n"
-                           f"• Unpaid bill or expired credit card\n"
-                           f"• Free tier exhausted\n"
-                           f"• Too many requests in a short time\n\n"
-                           f"Error details: {str(e)}")
+                
+                return (f"⚠️ Quota or Rate Limit Exceeded\n\n"
+                        f"Your {self.PROVIDERS[self.provider]['name']} account has reached its rate limit or quota.\n\n"
+                        f"Error details: {str(e)}")
             
-            elif '401' in error_str or 'unauthorized' in error_str or 'invalid' in error_str and 'key' in error_str:
+            elif ('401' in error_str) or ('unauthorized' in error_str) or ('invalid' in error_str and 'key' in error_str):
                 return (f"🔑 Invalid API Key\n\n"
-                       f"Your {self.PROVIDERS[self.provider]['name']} API key appears to be invalid or expired.\n\n"
-                       f"Solutions:\n"
-                       f"• Check your API key in Settings\n"
-                       f"• Generate a new API key from the provider's website\n"
-                       f"• Make sure you copied the entire key with no extra spaces\n\n"
-                       f"Error details: {str(e)}")
+                        f"Your {self.PROVIDERS[self.provider]['name']} API key appears to be invalid.\n\n"
+                        f"Error details: {str(e)}")
             
-            elif '403' in error_str or 'forbidden' in error_str:
+            elif ('403' in error_str) or ('forbidden' in error_str):
                 return (f"🚫 Access Denied\n\n"
-                       f"Your {self.PROVIDERS[self.provider]['name']} API key doesn't have permission to access this resource.\n\n"
-                       f"Solutions:\n"
-                       f"• Check that your API key has the correct permissions\n"
-                       f"• Verify your account is in good standing\n"
-                       f"• For Azure: verify your endpoint and deployment name\n\n"
-                       f"Error details: {str(e)}")
+                        f"Your {self.PROVIDERS[self.provider]['name']} API key doesn't have permission.\n\n"
+                        f"Error details: {str(e)}")
             
-            elif 'timeout' in error_str or 'timed out' in error_str:
-                return (f"⏱️ Request Timeout\n\n"
-                       f"The request to {self.PROVIDERS[self.provider]['name']} took too long.\n\n"
-                       f"Solutions:\n"
-                       f"• Check your internet connection\n"
-                       f"• Try again in a moment\n"
-                       f"• The AI service may be experiencing high load\n\n"
-                       f"Error details: {str(e)}")
-            
-            elif 'connection' in error_str or 'network' in error_str:
-                return (f"🌐 Connection Error\n\n"
-                       f"Could not connect to {self.PROVIDERS[self.provider]['name']}.\n\n"
-                       f"Solutions:\n"
-                       f"• Check your internet connection\n"
-                       f"• Verify the provider's service is online\n"
-                       f"• Try again in a moment\n\n"
-                       f"Error details: {str(e)}")
-            
-            else:
-                return (f"❌ AI Service Error\n\n"
-                       f"An error occurred while communicating with {self.PROVIDERS[self.provider]['name']}.\n\n"
-                       f"Error details: {str(e)}\n\n"
-                       f"You can try:\n"
-                       f"• Switching to a different AI provider in Settings\n"
-                       f"• Checking the provider's status page\n"
-                       f"• Trying again in a moment")
-    
-    def _call_openai_compatible(self, system_prompt: str) -> str:
-        """Call providers using OpenAI-compatible interface."""
-        messages = [
-            {'role': 'system', 'content': system_prompt}
-        ] + self.conversation_history
+            return f"Error: {str(e)}"
+
+    def _call_openai_compatible(self, system_prompt: str, current_user_content: str) -> str:
+        """Call OpenAI/xAI/Azure/Ollama with sliding window history and expanded max_tokens=4000."""
+        messages = [{"role": "system", "content": system_prompt}]
         
-        # For Azure, use deployment name instead of model
-        model_param = self.azure_deployment if self.provider == 'azure' else self.model
+        # Add prior turns
+        for msg in self.conversation_history[:-1]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+            
+        # Add current turn with context
+        messages.append({"role": "user", "content": current_user_content})
         
+        model_param = self.model
+        if self.provider == 'xai' and not model_param:
+            model_param = 'grok-beta'
+            
         timeout_val = 300.0 if self.provider == 'ollama' else 120.0
         response = self.client.chat.completions.create(
             model=model_param,
             messages=messages,
-            max_tokens=2000,
+            max_tokens=4000,
             temperature=0.5 if self.provider == 'ollama' else 0.7,
             timeout=timeout_val
         )
         
         content = response.choices[0].message.content or ""
-        # Clean CJK (Chinese/Japanese/Korean) tokens leaking from pre-training models like Qwen
+        if self.provider == 'ollama' or 'qwen' in self.model.lower():
+            import re
+            content = re.sub(r'[\u4e00-\u9fff]+', '', content)
         import re
-        content = re.sub(r'[\u4e00-\u9fff]+', '', content)
-        # Clean template dollar artifacts (e.g. ="$8.5")
         content = re.sub(r'=\s*\\?"\$[\d.]+\\?"', '', content)
-        # Clean up any residual double spaces created by string replacements
         content = re.sub(r' +', ' ', content)
         return content.strip()
-    
-    def _call_anthropic(self, system_prompt: str) -> str:
-        """Call Anthropic using native SDK."""
-        # Anthropic uses a different message format
+        
+    def _call_anthropic(self, system_prompt: str, current_user_content: str) -> str:
+        """Call Anthropic using native SDK with full history memory and max_tokens=4000."""
+        messages = []
+        for msg in self.conversation_history[:-1]:
+            messages.append({'role': msg['role'], 'content': msg['content']})
+        messages.append({'role': 'user', 'content': current_user_content})
+        
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=2000,
+            max_tokens=4000,
             system=system_prompt,
-            messages=self.conversation_history
+            messages=messages
         )
-        
         return response.content[0].text
-    
-    def _call_gemini(self, system_prompt: str, user_message: str) -> str:
-        """Call Gemini using new google-genai SDK."""
+        
+    def _call_gemini(self, system_prompt: str, current_user_content: str) -> str:
+        """Call Gemini using google-genai SDK with full conversation history memory."""
         try:
-            from google.genai import types
+            contents = []
+            contents.append(f"System Instruction:\n{system_prompt}\n")
             
-            # Prepare the full prompt with system message
-            # New API doesn't have separate system role, so combine them
-            if len(self.conversation_history) == 1:  # First message
-                full_prompt = f"{system_prompt}\n\nUser: {user_message}"
-            else:
-                # For continuing conversations, just send the user message
-                # The history already has context
-                full_prompt = user_message
+            for msg in self.conversation_history[:-1]:
+                role_prefix = "User" if msg['role'] == 'user' else "Model"
+                contents.append(f"{role_prefix}: {msg['content']}")
+                
+            contents.append(f"User: {current_user_content}")
+            full_prompt = "\n\n".join(contents)
             
-            # The model name for the new API
-            # Strip any existing prefix and use just the base name
             model_name = self.model.replace('models/', '').strip()
-            
-            logger.info(f"Calling Gemini with model: {model_name}")
-            
-            # The new google-genai API is simpler
-            # Just pass the model name and content as strings
             response = self.client.models.generate_content(
                 model=model_name,
                 contents=full_prompt
             )
             
-            logger.info(f"Gemini response type: {type(response)}")
-            logger.info(f"Gemini response attributes: {dir(response)}")
-            
-            # Extract text from response - try multiple approaches
-            # Approach 1: Direct text attribute
-            if hasattr(response, 'text'):
-                logger.info("Using response.text")
+            if hasattr(response, 'text') and response.text:
                 return response.text
-            
-            # Approach 2: Candidates structure
             elif hasattr(response, 'candidates') and len(response.candidates) > 0:
-                logger.info("Using response.candidates")
                 candidate = response.candidates[0]
-                if hasattr(candidate, 'content'):
-                    content = candidate.content
-                    if hasattr(content, 'parts') and len(content.parts) > 0:
-                        return content.parts[0].text
-                    elif hasattr(content, 'text'):
-                        return content.text
+                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                    parts = candidate.content.parts
+                    if len(parts) > 0 and hasattr(parts[0], 'text'):
+                        return parts[0].text
             
             # Approach 3: Try to convert to string
             elif hasattr(response, '__str__'):

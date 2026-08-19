@@ -1248,22 +1248,25 @@ class HealthChatApp:
             self.dark_mode = False  # Default to light mode on error
             
     def save_config(self):
-        """Save configuration to file"""
+        """Save configuration to file safely from any thread."""
         try:
-            # Get current window state
-            try:
-                # Parse geometry string (widthxheight+x+y)
-                geometry = self.root.geometry()
-                match = geometry.split('+')
-                size = match[0].split('x')
-                window_state = {
-                    'width': int(size[0]),
-                    'height': int(size[1]),
-                    'x': int(match[1]) if len(match) > 1 else None,
-                    'y': int(match[2]) if len(match) > 2 else None
-                }
-            except:
-                window_state = {}
+            import threading
+            # Only query Tkinter widget on the main UI thread
+            if threading.current_thread() is threading.main_thread():
+                try:
+                    geometry = self.root.geometry()
+                    match = geometry.split('+')
+                    size = match[0].split('x')
+                    self.last_window_state = {
+                        'width': int(size[0]),
+                        'height': int(size[1]),
+                        'x': int(match[1]) if len(match) > 1 else None,
+                        'y': int(match[2]) if len(match) > 2 else None
+                    }
+                except Exception:
+                    pass
+
+            window_state = getattr(self, 'last_window_state', {})
             
             config = {
                 # AI Provider settings
@@ -2887,6 +2890,7 @@ class HealthChatApp:
             # Detect if user wants activities by date range or by count
             activity_limit = 5  # Default
             use_date_range = False
+            garmin_context = ""
             
             # Check for date range requests (last X days/weeks/months)
             import re
@@ -2947,7 +2951,6 @@ class HealthChatApp:
                 use_date_range = True
                 
             if use_date_range:
-                
                 # Fetch activities by date range
                 try:
                     activities = self.garmin_handler.get_activities_by_date(
@@ -2974,8 +2977,10 @@ class HealthChatApp:
                             context_parts.append("")
                         
                         garmin_context = "\n".join(context_parts)
-                        use_date_range = True
                         logger.info(f"Fetched {len(activities)} activities for date range")
+                    else:
+                        garmin_context = f"=== Activities from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} ===\nNo workouts or activities recorded during this period."
+                        logger.info("No activities found for requested date range")
                 except Exception as e:
                     logger.error(f"Error fetching activities by date: {e}")
                     # Fall back to regular method

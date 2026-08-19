@@ -95,3 +95,18 @@ def test_reset_conversation_clears_history():
     client.conversation_history.append({"role": "user", "content": "hi"})
     client.reset_conversation()
     assert client.conversation_history == []
+
+
+def test_sliding_window_caps_history_at_20_messages(monkeypatch):
+    client = AIClient(provider="xai", api_key="test-key")
+    # Mock the internal call so no network occurs
+    monkeypatch.setattr(client, "_call_openai_compatible", lambda prompt, current: "mock response")
+    
+    for i in range(15):
+        client.chat(f"Question {i}", garmin_context="HUGE CONTEXT STRING " * 100)
+
+    # Total messages added = 15 users + 15 assistants = 30, but should cap at 20
+    assert len(client.conversation_history) == 20
+    # Verify that garmin_context is NOT stored in user message in history
+    assert client.conversation_history[0]["content"] == "Question 5"
+
