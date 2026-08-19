@@ -1,0 +1,45 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- PyInstaller build artifacts ---
+build/
+dist/
+*.manifest
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# --- Local databases & Garmin tokens ---
+*.db
+*.db-wal
+*.db-shm
+healthdata.db
+.garmin_tokens/
+oauth1_token.json
+oauth2_token.json
+
+# --- App configuration (contains secrets: API keys, Garmin password) ---
+config.json
+.healthchat/
+.garmin_chat/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

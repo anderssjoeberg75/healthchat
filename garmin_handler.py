@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 import logging
 
+from garmin_db import GarminDatabase
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,9 @@ class GarminDataHandler:
         self.client: Optional[Garmin] = None
         self._authenticated = False
         
+        # Initialize Local SQLite Database
+        self.db = GarminDatabase()
+        
         # Token store directory - garth will create oauth1_token.json and oauth2_token.json files
         if token_store_path is None:
             self.token_store = Path.home() / ".garmin_tokens"
@@ -39,6 +44,120 @@ class GarminDataHandler:
         
         self.token_store.mkdir(parents=True, exist_ok=True)
         self.client_state = None
+
+    def sync_garmin_history(
+        self, 
+        days: int = 30, 
+        on_progress: Optional[Callable[[int, int, str], None]] = None,
+        on_complete: Optional[Callable[[], None]] = None
+    ):
+        """Fetch health metrics and activities for recent days and store in local SQLite database (runs in background)."""
+        if not self._authenticated:
+            return
+            
+        def _sync_worker():
+            try:
+                logger.info(f"Starting background Garmin DB sync for last {days} days...")
+                if on_progress:
+                    try:
+                        on_progress(0, days, "Hämtar träningspass...")
+                    except Exception:
+                        pass
+
+                # 1. Sync activities (fetch up to 2000 workouts for full history)
+                act_limit = 2000 if days >= 365 else max(100, days * 2)
+                activities = self.get_activities(limit=act_limit)
+                for act in activities:
+                    self.db.upsert_activity(act)
+                    
+                # 2. Sync daily metrics for each day
+                from datetime import datetime, timedelta
+                for i in range(days):
+                    d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                    if on_progress:
+                        try:
+                            on_progress(i + 1, days, f"Synkar {d}...")
+                        except Exception:
+                            pass
+
+                    try:
+                        # Sleep
+                        sleep = self.client.get_sleep_data(d)
+                        if sleep and "dailySleepDTO" in sleep:
+                            sd = sleep["dailySleepDTO"]
+                            self.db.upsert_sleep(
+                                date=d,
+                                total_hours=(sd.get("sleepTimeSeconds", 0) or 0) / 3600.0,
+                                deep_hours=(sd.get("deepSleepSeconds", 0) or 0) / 3600.0,
+                                light_hours=(sd.get("lightSleepSeconds", 0) or 0) / 3600.0,
+                                rem_hours=(sd.get("remSleepSeconds", 0) or 0) / 3600.0,
+                                awake_hours=(sd.get("awakeSleepSeconds", 0) or 0) / 3600.0,
+                                score=sd.get("sleepQualityScore", 0) or 0,
+                                raw_data=sleep
+                            )
+                    except Exception as e:
+                        logger.debug(f"Sync sleep failed for {d}: {e}")
+                        
+                    try:
+                        # Body Battery
+                        bb = self.client.get_body_battery(d)
+                        if bb:
+                            bb_metrics = self.extract_bb_metrics(bb, d)
+                            if bb_metrics:
+                                self.db.upsert_body_battery(
+                                    date=d,
+                                    charged=bb_metrics.get("charged", 0) or 0,
+                                    drained=bb_metrics.get("drained", 0) or 0,
+                                    highest=bb_metrics.get("highest", 0) or 0,
+                                    lowest=bb_metrics.get("lowest", 0) or 0,
+                                    current=bb_metrics.get("current", 0) or 0
+                                )
+                    except Exception as e:
+                        logger.debug(f"Sync Body Battery failed for {d}: {e}")
+                        
+                    try:
+                        # Stress
+                        st = self.client.get_stress_data(d)
+                        if st and isinstance(st, dict):
+                            self.db.upsert_stress(
+                                date=d,
+                                average=st.get("avgStressLevel", st.get("averageStressLevel", 0)) or 0,
+                                max_stress=st.get("maxStressLevel", 0) or 0,
+                                rest=st.get("restStressDuration", st.get("restStressLevel", 0)) or 0,
+                                activity=st.get("activityStressDuration", st.get("activityStressLevel", 0)) or 0,
+                                low_min=(st.get("lowStressDuration", 0) or 0) // 60,
+                                med_min=(st.get("mediumStressDuration", 0) or 0) // 60,
+                                high_min=(st.get("highStressDuration", 0) or 0) // 60
+                            )
+                    except Exception as e:
+                        logger.debug(f"Sync stress failed for {d}: {e}")
+                        
+                    try:
+                        # HRV
+                        hrv = self.client.get_hrv_data(d)
+                        if hrv and isinstance(hrv, dict):
+                            summary = hrv.get("hrvSummary", {})
+                            self.db.upsert_hrv(
+                                date=d,
+                                last_night_avg=summary.get("lastNightAvg", hrv.get("lastNightAvg", 0)) or 0,
+                                weekly_avg=summary.get("weeklyAvg", hrv.get("weeklyAvg", 0)) or 0,
+                                status=summary.get("status", "") or ""
+                            )
+                    except Exception as e:
+                        logger.debug(f"Sync HRV failed for {d}: {e}")
+                        
+                logger.info("Garmin DB background sync completed successfully!")
+                if on_complete:
+                    try:
+                        on_complete()
+                    except Exception as cb_err:
+                        logger.error(f"Error in on_complete callback: {cb_err}")
+            except Exception as sync_err:
+                logger.error(f"Error during Garmin DB sync: {sync_err}")
+                
+        import threading
+        t = threading.Thread(target=_sync_worker, daemon=True)
+        t.start()
         
     def authenticate(self, mfa_callback: Optional[Callable[[], str]] = None) -> Dict:
         """
@@ -132,6 +251,7 @@ class GarminDataHandler:
                             garth.client.oauth1_token = OAuth1Token(**oauth1_data)
                             garth.client.oauth2_token = OAuth2Token(**oauth2_data)
                             logger.info("âœ… Manually loaded tokens into garth.client")
+                            logger.info("✅ Manually loaded tokens into garth.client")
                             
                         except Exception as manual_load_error:
                             logger.error(f"Failed to manually load tokens: {manual_load_error}")
@@ -139,10 +259,12 @@ class GarminDataHandler:
                     else:
                         raise
                 
-                logger.info("Creating Garmin client...")
-                self.client = Garmin()
-                self.client.garth = garth.client
-                logger.info("âœ… Garmin client initialized with garth.client")
+                logger.info("Creating Garmin client and logging in with saved tokens...")
+                self.client = Garmin(self.email, self.password)
+                self.client.login(str(self.token_store))
+                if hasattr(self.client, 'garth') and hasattr(self.client.garth, 'sess'):
+                    self.client.garth.sess.headers.update({'User-Agent': 'python-requests/2.32.3'})
+                logger.info("Garmin client initialized and logged in via tokens")
                 
                 self.client.display_name = self._resolve_display_name()
                 
@@ -151,7 +273,7 @@ class GarminDataHandler:
                 return {'success': True}
                         
             except Exception as resume_error:
-                logger.info(f"âŒ Could not resume session: {type(resume_error).__name__}: {resume_error}")
+                logger.info(f"❌ Could not resume session: {type(resume_error).__name__}: {resume_error}")
                 logger.info("Will attempt fresh login...")
             
             # Attempt fresh login
@@ -773,32 +895,25 @@ class GarminDataHandler:
     
     def get_sleep_data(self, date: Optional[str] = None) -> Dict:
         """
-        Get sleep data for a specific date.
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            Dictionary containing sleep data
+        Get sleep data for a specific date (or fall back to recent days if empty).
         """
         self._ensure_authenticated()
-        if date is None:
-            date = datetime.now().strftime("%Y-%m-%d")
-        try:
-            return self.client.get_sleep_data(date)
-        except Exception as e:
-            logger.error(f"Error fetching sleep data: {e}")
-            return {}
-    
+        from datetime import datetime, timedelta
+        dates_to_try = [date] if date else [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+        
+        for d in dates_to_try:
+            try:
+                data = self.client.get_sleep_data(d)
+                if data and (data.get("dailySleepDTO") or data.get("sleepTimeSeconds")):
+                    data["_retrieved_date"] = d
+                    return data
+            except Exception as e:
+                logger.debug(f"Sleep data for {d} not available: {e}")
+        return {}
+
     def get_body_composition(self, date: Optional[str] = None) -> Dict:
         """
         Get body composition data.
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            Dictionary containing body composition data
         """
         self._ensure_authenticated()
         if date is None:
@@ -808,78 +923,112 @@ class GarminDataHandler:
         except Exception as e:
             logger.error(f"Error fetching body composition: {e}")
             return {}
-    
+
+    @staticmethod
+    def extract_bb_metrics(data, date_str: str) -> Dict:
+        """Robustly extract Body Battery values from various Garmin Connect API response schemas."""
+        if not data:
+            return {}
+        
+        entry = data[0] if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) else {})
+        if not isinstance(entry, dict):
+            return {}
+        
+        charged = entry.get('charged') or entry.get('bodyBatteryChargedValue') or 0
+        drained = entry.get('drained') or entry.get('bodyBatteryDrainedValue') or 0
+        highest = entry.get('highest') or entry.get('bodyBatteryHighestValue') or 0
+        lowest = entry.get('lowest') or entry.get('bodyBatteryLowestValue') or 0
+        current = entry.get('current') or entry.get('mostRecentValue') or entry.get('bodyBatteryMostRecentValue') or 0
+
+        # Check bodyBatteryStatList if present
+        stat_list = entry.get('bodyBatteryStatList') or entry.get('statList')
+        if isinstance(stat_list, list) and len(stat_list) > 0:
+            stat = stat_list[0]
+            if isinstance(stat, dict):
+                if not charged: charged = stat.get('charged') or stat.get('bodyBatteryChargedValue', 0)
+                if not drained: drained = stat.get('drained') or stat.get('bodyBatteryDrainedValue', 0)
+                if not highest: highest = stat.get('highest') or stat.get('bodyBatteryHighestValue', 0)
+                if not lowest: lowest = stat.get('lowest') or stat.get('bodyBatteryLowestValue', 0)
+                if not current: current = stat.get('current') or stat.get('mostRecentValue', 0)
+
+        # Check time series values array (bodyBatteryValuesArray) if min/max not present
+        val_array = entry.get('bodyBatteryValuesArray') or entry.get('values') or []
+        if isinstance(val_array, list) and len(val_array) > 0:
+            valid_vals = []
+            for item in val_array:
+                if isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], (int, float)):
+                    valid_vals.append(item[1])
+                elif isinstance(item, (int, float)):
+                    valid_vals.append(item)
+                elif isinstance(item, dict) and 'value' in item:
+                    valid_vals.append(item['value'])
+            
+            if valid_vals:
+                if not highest:
+                    highest = max(valid_vals)
+                if not lowest:
+                    lowest = min(valid_vals)
+                if not current:
+                    current = valid_vals[-1]
+
+        return {
+            'date': entry.get('date', date_str),
+            'charged': charged,
+            'drained': drained,
+            'highest': highest,
+            'lowest': lowest,
+            'current': current
+        }
+
     def get_body_battery(self, date: Optional[str] = None) -> Dict:
         """
-        Get Body Battery data (energy levels throughout the day).
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            Dictionary containing Body Battery data with charged/drained values
+        Get Body Battery data (energy levels throughout the day), with recent day fallback.
         """
         self._ensure_authenticated()
-        self._ensure_display_name()  # Ensure display_name is set
-        if date is None:
-            date = datetime.now().strftime("%Y-%m-%d")
-        try:
-            # Try to get Body Battery data from available API
-            # Body Battery may not be available for all devices
-            data = self.client.get_body_battery(date)
-            if data:
-                return {
-                    'date': date,
-                    'charged': data.get('bodyBatteryChargedValue', 0),
-                    'drained': data.get('bodyBatteryDrainedValue', 0),
-                    'highest': data.get('bodyBatteryHighestValue', 0),
-                    'lowest': data.get('bodyBatteryLowestValue', 0),
-                    'current': data.get('bodyBatteryMostRecentValue', 0)
-                }
-            return {}
-        except AttributeError:
-            # Method doesn't exist in this version of garminconnect
-            logger.debug("Body Battery API not available")
-            return {}
-        except Exception as e:
-            logger.debug(f"Body Battery not available: {e}")
-            return {}
-    
+        self._ensure_display_name()
+        from datetime import datetime, timedelta
+        dates_to_try = [date] if date else [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+
+        for d in dates_to_try:
+            try:
+                data = self.client.get_body_battery(d)
+                if data:
+                    res = self.extract_bb_metrics(data, d)
+                    if res.get('charged') or res.get('highest') or res.get('current') or res.get('drained'):
+                        return res
+            except Exception as e:
+                logger.debug(f"Body Battery for {d} not available: {e}")
+        return {}
+
     def get_stress_data(self, date: Optional[str] = None) -> Dict:
         """
-        Get stress level data for the day.
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            Dictionary containing stress levels (0-100 scale)
+        Get stress level data for the day (with recent day fallback).
         """
         self._ensure_authenticated()
-        self._ensure_display_name()  # Ensure display_name is set
-        if date is None:
-            date = datetime.now().strftime("%Y-%m-%d")
-        try:
-            # Try to get stress data
-            data = self.client.get_stress_data(date)
-            if data and isinstance(data, dict):
-                return {
-                    'date': date,
-                    'average': data.get('averageStressLevel', 0),
-                    'max': data.get('maxStressLevel', 0),
-                    'rest': data.get('restStressLevel', 0),
-                    'activity': data.get('activityStressLevel', 0),
-                    'low_duration': data.get('lowStressDuration', 0),
-                    'medium_duration': data.get('mediumStressDuration', 0),
-                    'high_duration': data.get('highStressDuration', 0)
-                }
-            return {}
-        except AttributeError:
-            logger.debug("Stress data API not available")
-            return {}
-        except Exception as e:
-            logger.debug(f"Stress data not available: {e}")
-            return {}
+        self._ensure_display_name()
+        from datetime import datetime, timedelta
+        dates_to_try = [date] if date else [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+
+        for d in dates_to_try:
+            try:
+                data = self.client.get_stress_data(d)
+                if data and isinstance(data, dict):
+                    avg = data.get('avgStressLevel') or data.get('averageStressLevel') or 0
+                    max_st = data.get('maxStressLevel') or 0
+                    if avg > 0 or max_st > 0:
+                        return {
+                            'date': data.get('calendarDate', d),
+                            'average': avg,
+                            'max': max_st,
+                            'rest': data.get('restStressDuration', data.get('restStressLevel', 0)),
+                            'activity': data.get('activityStressDuration', data.get('activityStressLevel', 0)),
+                            'low_duration': data.get('lowStressDuration', 0),
+                            'medium_duration': data.get('mediumStressDuration', 0),
+                            'high_duration': data.get('highStressDuration', 0)
+                        }
+            except Exception as e:
+                logger.debug(f"Stress data for {d} not available: {e}")
+        return {}
     
     def get_respiration_data(self, date: Optional[str] = None) -> Dict:
         """
@@ -1204,35 +1353,25 @@ class GarminDataHandler:
     
     def get_hrv_data(self, date: Optional[str] = None) -> Dict:
         """
-        Get Heart Rate Variability (HRV) data.
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            Dictionary containing HRV metrics
+        Get Heart Rate Variability (HRV) data (with recent day fallback).
         """
         self._ensure_authenticated()
-        if date is None:
-            date = datetime.now().strftime("%Y-%m-%d")
-        try:
-            return self.client.get_hrv_data(date) or {}
-        except AttributeError:
-            logger.debug("HRV API not available")
-            return {}
-        except Exception as e:
-            logger.debug(f"HRV data not available: {e}")
-            return {}
+        from datetime import datetime, timedelta
+        dates_to_try = [date] if date else [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+        
+        for d in dates_to_try:
+            try:
+                data = self.client.get_hrv_data(d)
+                if data and (data.get("hrvSummary") or data.get("hrvReadings") or data.get("lastNightAvg")):
+                    data["_retrieved_date"] = d
+                    return data
+            except Exception as e:
+                logger.debug(f"HRV data for {d} not available: {e}")
+        return {}
     
     def get_all_day_stress(self, date: Optional[str] = None) -> List[Dict]:
         """
         Get all-day stress measurements (every few minutes).
-        
-        Args:
-            date: Date in YYYY-MM-DD format (defaults to today)
-            
-        Returns:
-            List of stress readings throughout the day
         """
         self._ensure_authenticated()
         if date is None:
@@ -1250,44 +1389,30 @@ class GarminDataHandler:
     def format_data_for_context(self, data_type: str = "summary", activity_limit: int = 5) -> str:
         """
         Format Garmin data into a readable string for LLM context.
-        
-        Args:
-            data_type: Type of data to format
-                      Options: "summary", "activities", "steps", "sleep", "all",
-                               "body_battery", "stress", "nutrition", "floors", 
-                               "intensity", "spo2", "hrv", "training", "comprehensive",
-                               "strength" (detailed strength training data)
-            activity_limit: Number of activities to include (default: 5, max recommended: 20)
-            
-        Returns:
-            Formatted string containing the requested data
-            
-        Note:
-            - Increase activity_limit for queries about longer time periods
-            - Keep under 20 activities to avoid token limits in AI context
-            - Use "comprehensive" for detailed health metrics (Body Battery, stress, HRV, etc.)
-            - Use "strength" for detailed exercise, sets, reps, and weight data
         """
         self._ensure_authenticated()
         
         context_parts = []
         today = datetime.now().strftime("%Y-%m-%d")
         
-        if data_type == "summary" or data_type == "all":
+        if data_type in ["summary", "all", "comprehensive"]:
             # Get user summary
             summary = self.get_user_summary()
             if summary:
-                context_parts.append("=== Today's Summary ===")
-                context_parts.append(f"Date: {today}")
+                context_parts.append(f"=== Daily Summary (Date: {today}) ===")
                 if "totalSteps" in summary:
                     context_parts.append(f"Steps: {summary.get('totalSteps', 'N/A')}")
                 if "totalKilocalories" in summary:
                     context_parts.append(f"Calories: {summary.get('totalKilocalories', 'N/A')}")
                 if "activeKilocalories" in summary:
                     context_parts.append(f"Active Calories: {summary.get('activeKilocalories', 'N/A')}")
+                if "restingHeartRate" in summary:
+                    context_parts.append(f"Resting Heart Rate (RHR): {summary.get('restingHeartRate', 'N/A')} bpm")
+                if "maxHeartRate" in summary:
+                    context_parts.append(f"Max Heart Rate Today: {summary.get('maxHeartRate', 'N/A')} bpm")
                 context_parts.append("")
         
-        if data_type == "activities" or data_type == "all":
+        if data_type in ["activities", "all", "comprehensive"]:
             # Get recent activities with configurable limit
             activities = self.get_activities(activity_limit)
             if activities:
@@ -1299,58 +1424,98 @@ class GarminDataHandler:
                     duration = activity.get("duration", 0) / 60 if activity.get("duration") else 0  # Convert to minutes
                     calories = activity.get("calories", "N/A")
                     start_time = activity.get("startTimeLocal", "N/A")
+                    avg_hr = activity.get("averageHR")
+                    max_hr = activity.get("maxHR")
                     
                     context_parts.append(f"{i}. {act_name} ({act_type})")
                     context_parts.append(f"   Date: {start_time}")
                     if distance > 0:
                         context_parts.append(f"   Distance: {distance:.2f} km")
                     context_parts.append(f"   Duration: {duration:.1f} minutes")
+                    if distance > 0 and duration > 0:
+                        is_cycling = any(k in act_type.lower() or k in act_name.lower() for k in ['cyc', 'ride', 'biking', 'bike', 'cykel'])
+                        if is_cycling:
+                            speed_kmh = distance / (duration / 60)
+                            context_parts.append(f"   Avg Speed: {speed_kmh:.1f} km/h")
+                        else:
+                            pace_sec = (duration * 60) / distance
+                            pace_min = int(pace_sec // 60)
+                            pace_rem_sec = int(pace_sec % 60)
+                            context_parts.append(f"   Pace: {pace_min}:{pace_rem_sec:02d} /km")
+                    if avg_hr:
+                        context_parts.append(f"   Avg HR: {avg_hr} bpm (Max HR: {max_hr or 'N/A'} bpm)")
                     context_parts.append(f"   Calories: {calories}")
                     
-                    # Add note for strength training activities
                     if 'strength' in act_type.lower():
-                        context_parts.append(f"   ðŸ’ª Strength Training - detailed exercise data available")
+                        context_parts.append(f"   💪 Strength Training - detailed exercise data available")
                     
                     context_parts.append("")
         
-        if data_type == "sleep" or data_type == "all":
+        if data_type in ["sleep", "all", "comprehensive"]:
             # Get sleep data
             sleep = self.get_sleep_data()
             if sleep and "dailySleepDTO" in sleep:
                 sleep_data = sleep["dailySleepDTO"]
-                context_parts.append("=== Last Night's Sleep ===")
+                sleep_date = sleep.get("_retrieved_date") or sleep_data.get("calendarDate") or today
+                context_parts.append(f"=== Sleep Data (Date: {sleep_date}) ===")
                 sleep_seconds = sleep_data.get("sleepTimeSeconds", 0)
                 sleep_hours = sleep_seconds / 3600 if sleep_seconds else 0
                 context_parts.append(f"Total Sleep: {sleep_hours:.1f} hours")
-                context_parts.append(f"Deep Sleep: {sleep_data.get('deepSleepSeconds', 0) / 3600:.1f} hours")
-                context_parts.append(f"Light Sleep: {sleep_data.get('lightSleepSeconds', 0) / 3600:.1f} hours")
-                context_parts.append(f"REM Sleep: {sleep_data.get('remSleepSeconds', 0) / 3600:.1f} hours")
-                context_parts.append(f"Awake Time: {sleep_data.get('awakeSleepSeconds', 0) / 3600:.1f} hours")
+                if "sleepScores" in sleep_data and "overall" in sleep_data.get("sleepScores", {}):
+                    overall = sleep_data["sleepScores"]["overall"]
+                    score = overall.get("value", "N/A")
+                    qual = overall.get("qualifierKey", "")
+                    context_parts.append(f"Sleep Score: {score} ({qual})")
+                context_parts.append(f"Deep Sleep: {(sleep_data.get('deepSleepSeconds') or 0) / 3600:.1f} hours")
+                context_parts.append(f"Light Sleep: {(sleep_data.get('lightSleepSeconds') or 0) / 3600:.1f} hours")
+                context_parts.append(f"REM Sleep: {(sleep_data.get('remSleepSeconds') or 0) / 3600:.1f} hours")
+                context_parts.append(f"Awake Time: {(sleep_data.get('awakeSleepSeconds') or 0) / 3600:.1f} hours")
+                if sleep_data.get("averageSpO2Value"):
+                    context_parts.append(f"Avg SpO2 during Sleep: {sleep_data.get('averageSpO2Value')}%")
                 context_parts.append("")
+
+        # Heart Rate Data
+        if data_type in ["heart_rate", "hr", "all", "comprehensive"]:
+            try:
+                hr_data = self.get_heart_rate_data(today)
+                if hr_data:
+                    context_parts.append(f"=== Heart Rate Data (Date: {today}) ===")
+                    if "restingHeartRate" in hr_data:
+                        context_parts.append(f"Resting Heart Rate (RHR): {hr_data.get('restingHeartRate')} bpm")
+                    if "maxHeartRate" in hr_data:
+                        context_parts.append(f"Max Heart Rate Today: {hr_data.get('maxHeartRate')} bpm")
+                    context_parts.append("")
+            except Exception as e:
+                logger.debug(f"Heart rate data error: {e}")
         
         # Body Battery data
         if data_type in ["body_battery", "comprehensive", "all"]:
-            bb_data = self.get_body_battery(today)
-            if bb_data and bb_data.get('current'):
-                context_parts.append("=== Body Battery ===")
-                context_parts.append(f"Current: {bb_data.get('current', 'N/A')}")
-                context_parts.append(f"Highest Today: {bb_data.get('highest', 'N/A')}")
-                context_parts.append(f"Lowest Today: {bb_data.get('lowest', 'N/A')}")
+            bb_data = self.get_body_battery()
+            if bb_data and (bb_data.get('charged') or bb_data.get('highest') or bb_data.get('drained') or bb_data.get('current')):
+                bb_date = bb_data.get('date', today)
+                context_parts.append(f"=== Body Battery Data (Date: {bb_date}) ===")
                 context_parts.append(f"Charged: +{bb_data.get('charged', 0)}")
                 context_parts.append(f"Drained: -{bb_data.get('drained', 0)}")
+                if bb_data.get('highest'):
+                    context_parts.append(f"Highest: {bb_data.get('highest')}")
+                if bb_data.get('lowest'):
+                    context_parts.append(f"Lowest: {bb_data.get('lowest')}")
+                if bb_data.get('current'):
+                    context_parts.append(f"Current: {bb_data.get('current')}")
                 context_parts.append("")
         
         # Stress data
         if data_type in ["stress", "comprehensive", "all"]:
-            stress_data = self.get_stress_data(today)
+            stress_data = self.get_stress_data()
             if stress_data and stress_data.get('average'):
-                context_parts.append("=== Stress Levels ===")
+                stress_date = stress_data.get('date', today)
+                context_parts.append(f"=== Stress Levels Data (Date: {stress_date}) ===")
                 context_parts.append(f"Average: {stress_data.get('average', 'N/A')}/100")
                 context_parts.append(f"Max: {stress_data.get('max', 'N/A')}/100")
                 context_parts.append(f"Rest Stress: {stress_data.get('rest', 'N/A')}")
                 context_parts.append(f"Activity Stress: {stress_data.get('activity', 'N/A')}")
-                context_parts.append(f"Low Stress Duration: {stress_data.get('low_duration', 0) / 60:.0f} min")
-                context_parts.append(f"High Stress Duration: {stress_data.get('high_duration', 0) / 60:.0f} min")
+                context_parts.append(f"Low Stress Duration: {(stress_data.get('low_duration') or 0) / 60:.0f} min")
+                context_parts.append(f"High Stress Duration: {(stress_data.get('high_duration') or 0) / 60:.0f} min")
                 context_parts.append("")
         
         # Respiration data
@@ -1367,7 +1532,7 @@ class GarminDataHandler:
             hydration = self.get_hydration_data(today)
             if hydration:
                 context_parts.append("=== Hydration ===")
-                total_ml = hydration.get('valueInML', 0)
+                total_ml = hydration.get('valueInML') or 0
                 context_parts.append(f"Water Intake: {total_ml} ml ({total_ml / 236.588:.1f} cups)")
                 context_parts.append("")
         
@@ -1452,14 +1617,21 @@ class GarminDataHandler:
         if data_type in ["hrv", "comprehensive"]:
             hrv = self.get_hrv_data(today)
             if hrv:
-                context_parts.append("=== Heart Rate Variability ===")
+                context_parts.append("=== Heart Rate Variability (HRV) ===")
                 if 'lastNightAvg' in hrv:
                     context_parts.append(f"Last Night Average: {hrv.get('lastNightAvg', 'N/A')} ms")
                 if 'weeklyAvg' in hrv:
                     context_parts.append(f"Weekly Average: {hrv.get('weeklyAvg', 'N/A')} ms")
+                if 'status' in hrv:
+                    context_parts.append(f"HRV Status: {hrv.get('status', 'N/A')}")
+                if 'baseline' in hrv and isinstance(hrv['baseline'], dict):
+                    low = hrv['baseline'].get('balancedLow')
+                    high = hrv['baseline'].get('balancedUpper')
+                    if low and high:
+                        context_parts.append(f"Baseline Range: {low}-{high} ms")
                 context_parts.append("")
         
-        # Training metrics
+        # Training metrics & readiness
         if data_type in ["training", "comprehensive"]:
             try:
                 max_metrics = self.get_max_metrics()
@@ -1470,8 +1642,8 @@ class GarminDataHandler:
                     if 'fitnessAge' in max_metrics:
                         context_parts.append(f"Fitness Age: {max_metrics.get('fitnessAge', 'N/A')}")
                     context_parts.append("")
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Max metrics error: {e}")
             
             try:
                 training = self.get_training_status()
@@ -1481,9 +1653,23 @@ class GarminDataHandler:
                         context_parts.append(f"Load: {training.get('trainingLoad', 'N/A')}")
                     if 'loadFocus' in training:
                         context_parts.append(f"Focus: {training.get('loadFocus', 'N/A')}")
+                    if 'trainingStatusKey' in training:
+                        context_parts.append(f"Status: {training.get('trainingStatusKey', 'N/A')}")
                     context_parts.append("")
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Training status error: {e}")
+
+            try:
+                readiness = self.get_training_readiness(today)
+                if readiness:
+                    context_parts.append("=== Training Readiness ===")
+                    if 'score' in readiness:
+                        context_parts.append(f"Readiness Score: {readiness.get('score')}")
+                    if 'scoreClassification' in readiness:
+                        context_parts.append(f"Classification: {readiness.get('scoreClassification')}")
+                    context_parts.append("")
+            except Exception as e:
+                logger.debug(f"Training readiness error: {e}")
         
         # Strength Training detailed data
         if data_type == "strength":
@@ -1517,4 +1703,26 @@ class GarminDataHandler:
                 context_parts.append("No strength training activities found in recent workouts.")
                 context_parts.append("")
         
+        # Body Composition & Weight (Withings / Garmin)
+        try:
+            from garmin_db import GarminDatabase
+            db = GarminDatabase()
+            body_comp = db.get_latest_body_composition()
+            if body_comp and (body_comp.get('weight_kg') or body_comp.get('fat_ratio_pct')):
+                context_parts.append(f"=== Body Composition & Weight (Source: {body_comp.get('source', 'Withings').title()}) ===")
+                context_parts.append(f"Date: {body_comp.get('date')}")
+                if body_comp.get('weight_kg'):
+                    context_parts.append(f"Weight: {body_comp.get('weight_kg'):.1f} kg")
+                if body_comp.get('fat_ratio_pct'):
+                    context_parts.append(f"Body Fat: {body_comp.get('fat_ratio_pct'):.1f} %")
+                if body_comp.get('muscle_mass_kg'):
+                    context_parts.append(f"Muscle Mass: {body_comp.get('muscle_mass_kg'):.1f} kg")
+                if body_comp.get('bone_mass_kg'):
+                    context_parts.append(f"Bone Mass: {body_comp.get('bone_mass_kg'):.1f} kg")
+                if body_comp.get('water_pct'):
+                    context_parts.append(f"Body Water: {body_comp.get('water_pct'):.1f} %")
+                context_parts.append("")
+        except Exception as e:
+            logger.debug(f"Body composition context error: {e}")
+
         return "\n".join(context_parts) if context_parts else "No data available"

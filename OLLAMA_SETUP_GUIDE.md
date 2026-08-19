@@ -1,6 +1,6 @@
-# Ollama Setup Guide for Garmin Chat Desktop
+# Ollama Setup Guide for HealthChat Desktop
 
-Garmin Chat Desktop now supports **Ollama**, a free, local AI solution that runs entirely on your computer. This means:
+HealthChat Desktop now supports **Ollama**, a free, local AI solution that runs entirely on your computer. This means:
 - ✅ **No API costs** - Unlimited usage with no subscription fees
 - ✅ **Complete privacy** - Your data never leaves your machine
 - ✅ **Works offline** - No internet connection needed after initial setup
@@ -82,9 +82,9 @@ ollama list
 
 This should show your installed models. If you see models listed, you're ready!
 
-## Configuring Garmin Chat Desktop
+## Configuring HealthChat Desktop
 
-1. Open Garmin Chat Desktop
+1. Open HealthChat Desktop
 2. Click **Settings** (gear icon)
 3. Under **AI Provider Selection**, choose **Ollama (Local)**
 4. The endpoint should auto-fill as `http://localhost:11434`
@@ -116,7 +116,7 @@ You need to pull at least one model:
 ollama pull llama2
 ```
 
-Then restart Garmin Chat Desktop.
+Then restart HealthChat Desktop.
 
 ### Slow Performance
 
@@ -153,7 +153,7 @@ Model downloads can be large (2-40GB). Download times depend on your internet sp
 
 If you're running Ollama on a different port or machine:
 
-1. In Garmin Chat settings, change the endpoint to:
+1. In HealthChat settings, change the endpoint to:
    - Different port: `http://localhost:PORT`
    - Different machine: `http://192.168.1.100:11434`
 
@@ -166,7 +166,7 @@ ollama pull llama2          # Fast responses
 ollama pull llama3.1:70b    # Detailed analysis
 ```
 
-Switch models in Garmin Chat Desktop based on your needs!
+Switch models in HealthChat Desktop based on your needs!
 
 ## Cost Comparison
 
@@ -189,13 +189,13 @@ Switch models in Garmin Chat Desktop based on your needs!
 
 ## Support
 
-If you encounter issues with Ollama integration in Garmin Chat Desktop:
+If you encounter issues with Ollama integration in HealthChat Desktop:
 
 1. Check this troubleshooting guide first
-2. Review the logs in Garmin Chat Desktop
+2. Review the logs in HealthChat Desktop
 3. Test Ollama directly with: `ollama run llama2 "Hello"`
 4. Report issues at: [Your GitHub Issues URL]
 
 ---
 
-**Note**: Ollama is a third-party tool maintained by Ollama Team. Garmin Chat Desktop integrates with Ollama but does not control its development or support.
+**Note**: Ollama is a third-party tool maintained by Ollama Team. HealthChat Desktop integrates with Ollama but does not control its development or support.

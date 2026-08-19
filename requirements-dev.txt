@@ -1,0 +1,4 @@
+# Development / test dependencies for HealthChat Desktop
+# Install with: pip install -r requirements-dev.txt
+
+pytest==9.1.1

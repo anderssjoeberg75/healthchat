@@ -1,6 +1,6 @@
 @echo off
 echo ============================================================
-echo Garmin Chat Desktop v4.0 - Setup
+echo HealthChat Desktop v4.0 - Setup
 echo ============================================================
 echo.
 echo This will install all required dependencies...
@@ -54,7 +54,7 @@ echo   4. Google Gemini - Free tier available!
 echo   5. Anthropic (Claude) - Long context
 echo.
 echo Next steps:
-echo 1. Run Startup.bat to launch Garmin Chat Desktop
+echo 1. Run Startup.bat to launch HealthChat Desktop
 echo 2. Open Settings and select your AI provider
 echo 3. Configure your credentials
 echo.

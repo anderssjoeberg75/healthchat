@@ -1,4 +1,4 @@
-# Garmin Chat Desktop v4.0.4 Release Notes
+# HealthChat Desktop v4.0.4 Release Notes
 
 **Release Date:** March 2026
 
@@ -34,6 +34,6 @@ From v4.0.3: Just install the new version — all settings and API keys are pres
 
 ## Downloads
 
-- **Installer**: `GarminChatSetup_v4.0.4.exe`
+- **Installer**: `HealthChatSetup_v4.0.4.exe`
 
 **Full details**: See [README.md](README.md)

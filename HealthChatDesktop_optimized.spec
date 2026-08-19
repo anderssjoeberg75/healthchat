@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Garmin Chat Desktop v4.1.0 - PyInstaller Specification
+HealthChat Desktop v4.1.0 - PyInstaller Specification
 Only excludes large third-party packages that are definitely unused.
 Never excludes stdlib modules - they are small and have hidden dependencies.
 """
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_all
 
 block_cipher = None
 
@@ -14,17 +14,33 @@ datas = [
     ('logo.png', '.'),
 ]
 
+binaries = []
+extra_hidden = []
+
+for pkg in ['numpy', 'matplotlib', 'chardet', 'charset_normalizer', 'requests', 'garth', 'garminconnect']:
+    try:
+        p_datas, p_binaries, p_hidden = collect_all(pkg)
+        datas += p_datas
+        binaries += p_binaries
+        extra_hidden += p_hidden
+    except Exception:
+        pass
+
 try:
     datas += collect_data_files('anthropic')
 except Exception:
     pass
 
 a = Analysis(
-    ['GarminChatDesktop.py'],
+    ['HealthChatDesktop.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
-    hiddenimports=[
+    hiddenimports=extra_hidden + [
+        'garmin_db',
+        'fitbit_handler',
+        'charts_view',
+        'sqlite3',
         'garth',
         'garth.http',
         'garth.sso',
@@ -57,8 +73,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # Large unused third-party packages only - never exclude stdlib
-        'matplotlib',
-        'numpy',
         'pandas',
         'scipy',
         'sklearn',
@@ -121,7 +135,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='GarminChatDesktop',
+    name='HealthChatDesktop',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -143,5 +157,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='GarminChatDesktop',
+    name='HealthChatDesktop',
 )

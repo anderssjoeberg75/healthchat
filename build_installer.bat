@@ -1,24 +1,24 @@
 @echo off
-REM Garmin Chat Desktop v4.1.0 Installer Build Script
+REM HealthChat Desktop v4.1.0 Installer Build Script
 REM Requires: Inno Setup 6.x installed
 REM This script creates the Windows installer from the built executable
 
 echo ==========================================
-echo Garmin Chat Desktop Installer Build
+echo HealthChat Desktop Installer Build
 echo ==========================================
 echo.
 
 REM Check if dist folder exists
-if not exist "dist\GarminChatDesktop" (
-    echo ERROR: dist\GarminChatDesktop folder not found!
+if not exist "dist\HealthChatDesktop" (
+    echo ERROR: dist\HealthChatDesktop folder not found!
     echo Please run build.bat first to create the executable.
     pause
     exit /b 1
 )
 
 REM Check if executable exists
-if not exist "dist\GarminChatDesktop\GarminChatDesktop.exe" (
-    echo ERROR: GarminChatDesktop.exe not found in dist folder!
+if not exist "dist\HealthChatDesktop\HealthChatDesktop.exe" (
+    echo ERROR: HealthChatDesktop.exe not found in dist folder!
     echo Please run build.bat first.
     pause
     exit /b 1
@@ -102,7 +102,7 @@ if %errorlevel% neq 0 (
 echo [4/4] Verifying installer...
 
 REM Find the created installer
-set INSTALLER_NAME=GarminChatSetup_v4.0.4.exe
+set INSTALLER_NAME=HealthChatSetup_v4.0.4.exe
 if not exist "%INSTALLER_NAME%" (
     echo ERROR: Installer not created!
     echo Expected: %INSTALLER_NAME%

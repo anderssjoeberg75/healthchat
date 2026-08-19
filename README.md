@@ -1,8 +1,8 @@
-# Garmin Chat Desktop v4.0.4
+# HealthChat Desktop v4.0.4
 
 **AI-Powered Insights for Your Garmin Connect Fitness Data**
 
-Garmin Chat Desktop is a Windows application that lets you interact with your Garmin Connect fitness data through natural language conversations. Ask questions, analyze trends, and get personalized insights using the power of AI.
+HealthChat Desktop is a Windows application that lets you interact with your Garmin Connect fitness data through natural language conversations. Ask questions, analyze trends, and get personalized insights using the power of AI.
 
 ## What's New in v4.0.4
 
@@ -74,10 +74,10 @@ Choose from six AI providers to suit your needs and budget:
 ## Installation
 
 ### Quick Install
-1. Download `GarminChatSetup.exe` from the [Releases](../../releases) page
+1. Download `HealthChatSetup.exe` from the [Releases](../../releases) page
 2. Run the installer
 3. Follow the setup wizard
-4. Launch Garmin Chat Desktop from your Start menu
+4. Launch HealthChat Desktop from your Start menu
 
 ### First-Time Setup
 1. Enter your Garmin Connect credentials
@@ -96,7 +96,7 @@ For free, unlimited AI with complete privacy:
    ```bash
    ollama pull llama2
    ```
-3. **Configure Garmin Chat**:
+3. **Configure HealthChat**:
    - Open Settings
    - Select "Ollama (Local)" as your AI provider
    - Click "Test Connection"
@@ -112,7 +112,7 @@ See the complete [Ollama Setup Guide](OLLAMA_SETUP_GUIDE.md) for detailed instru
 - Claude Pro: **$20/month**
 - Gemini Advanced: **$20/month**
 
-### Garmin Chat Desktop
+### HealthChat Desktop
 - **With Ollama**: **$0** (free forever)
 - **With pay-per-use APIs**: Typically **$1-5/month** for casual use
 - **Savings**: Up to **$240/year** compared to subscriptions!
@@ -122,7 +122,7 @@ See the complete [Ollama Setup Guide](OLLAMA_SETUP_GUIDE.md) for detailed instru
 ### Basic Queries
 ```
 You: What was my last workout?
-Garmin Chat: Your last workout was a Treadmill Running session on 
+HealthChat: Your last workout was a Treadmill Running session on 
 February 16, 2026 at 6:20 PM. You ran 3.25 km in 19 minutes, burning 
 202 calories at an average pace of 5:51 min/km.
 ```
@@ -130,7 +130,7 @@ February 16, 2026 at 6:20 PM. You ran 3.25 km in 19 minutes, burning
 ### Trend Analysis
 ```
 You: How has my average running pace changed over the last 3 months?
-Garmin Chat: Your running pace has improved significantly! In November, 
+HealthChat: Your running pace has improved significantly! In November, 
 your average pace was 6:15 min/km. By January, it improved to 5:45 min/km, 
 and this month you're averaging 5:30 min/km - that's a 12% improvement!
 ```
@@ -138,7 +138,7 @@ and this month you're averaging 5:30 min/km - that's a 12% improvement!
 ### Training Insights
 ```
 You: Am I overtraining?
-Garmin Chat: Based on your recent activity, you're managing your training 
+HealthChat: Based on your recent activity, you're managing your training 
 load well. Your 7-day training load is 245, which is in the optimal range. 
 However, your recovery time shows you need 48 hours rest after yesterday's 
 long run. Consider a rest day or light activity tomorrow.
@@ -208,7 +208,7 @@ Requirements:
 
 Build executable:
 ```bash
-pyinstaller GarminChatDesktop.spec
+pyinstaller HealthChatDesktop.spec
 ```
 
 Create installer:
@@ -222,25 +222,25 @@ iscc installer_script.iss
 1. Visit https://console.x.ai/
 2. Create an account
 3. Generate an API key
-4. Paste into Garmin Chat settings
+4. Paste into HealthChat settings
 
 ### OpenAI
 1. Visit https://platform.openai.com/api-keys
 2. Sign in or create an account
 3. Create a new API key
-4. Paste into Garmin Chat settings
+4. Paste into HealthChat settings
 
 ### Google Gemini
 1. Visit https://makersuite.google.com/app/apikey
 2. Sign in with your Google account
 3. Create an API key
-4. Paste into Garmin Chat settings
+4. Paste into HealthChat settings
 
 ### Anthropic (Claude)
 1. Visit https://console.anthropic.com/
 2. Create an account
 3. Generate an API key
-4. Paste into Garmin Chat settings
+4. Paste into HealthChat settings
 
 ### Ollama (No API Key Needed!)
 1. Install from https://ollama.com/download
@@ -287,4 +287,4 @@ iscc installer_script.iss
 
 **Made with ❤️ for the Garmin fitness community**
 
-*Garmin Chat Desktop is not affiliated with or endorsed by Garmin Ltd.*
+*HealthChat Desktop is not affiliated with or endorsed by Garmin Ltd.*

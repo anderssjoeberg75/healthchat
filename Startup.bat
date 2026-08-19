@@ -1,6 +1,6 @@
 @echo off
 echo ============================================================
-echo Garmin Chat Desktop - Starting...
+echo HealthChat Desktop - Starting...
 echo ============================================================
 echo.
 
@@ -15,21 +15,21 @@ if %errorlevel% neq 0 (
 )
 
 REM Check if the main script exists
-if not exist GarminChatDesktop.py (
-    echo ERROR: GarminChatDesktop.py not found!
+if not exist HealthChatDesktop.py (
+    echo ERROR: HealthChatDesktop.py not found!
     echo Please make sure you're running this from the correct directory.
     echo.
     pause
     exit /b 1
 )
 
-echo Starting Garmin Chat Desktop...
+echo Starting HealthChat Desktop...
 echo.
 echo ============================================================
 echo.
 
 REM Run the desktop application
-py GarminChatDesktop.py
+py HealthChatDesktop.py
 
 REM If the app exits with an error, pause so user can see the error
 if %errorlevel% neq 0 (

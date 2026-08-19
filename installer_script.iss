@@ -1,12 +1,12 @@
-; Garmin Chat Desktop v4.0.4 Installer Script
+; HealthChat Desktop v4.0.4 Installer Script
 ; Inno Setup 6.x Required
 ; This script creates a professional Windows installer
 
-#define MyAppName "Garmin Chat Desktop"
+#define MyAppName "HealthChat Desktop"
 #define MyAppVersion "4.0.4"
 #define MyAppPublisher "Rod Trent"
-#define MyAppURL "https://github.com/rod-trent/GarminChatDesktop"
-#define MyAppExeName "GarminChatDesktop.exe"
+#define MyAppURL "https://github.com/rod-trent/HealthChatDesktop"
+#define MyAppExeName "HealthChatDesktop.exe"
 #define MyAppAssocName MyAppName + " Chat File"
 #define MyAppAssocExt ".gchat"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
@@ -14,7 +14,7 @@
 [Setup]
 ; NOTE: Generate a new GUID for your application
 ; You can generate one at https://www.guidgenerator.com/
-AppId={{8F7C9A4B-2E1D-4F3A-9B8C-5D6E7F8A9B0C}
+AppId={{8F7C9A4B-2E1D-4F3A-9B8C-5D6E7F8A9B0C}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -29,7 +29,7 @@ LicenseFile=LICENSE.txt
 ; Uncomment the following line if you want to show README during install
 ; InfoBeforeFile=README.md
 OutputDir=.
-OutputBaseFilename=GarminChatSetup_v{#MyAppVersion}
+OutputBaseFilename=HealthChatSetup_v{#MyAppVersion}
 SetupIconFile=logo.ico
 Compression=lzma2/ultra64
 InternalCompressLevel=ultra64
@@ -60,21 +60,19 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 
 [Files]
 ; Main application files
-Source: "dist\GarminChatDesktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\HealthChatDesktop\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Documentation
-Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
-Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "INSTALLATION_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "OLLAMA_SETUP_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
-; NOTE: Don't use "Flags: ignoreversion" on any shared system files
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme skipifsourcedoesntexist
+Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "OLLAMA_SETUP_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-; Start Menu
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; Start Menu (Direct Program Shortcut + Folder)
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:ProgramOnTheWeb,{#MyAppName}}"; Filename: "{#MyAppURL}"
 Name: "{group}\Documentation\README"; Filename: "{app}\README.md"
-Name: "{group}\Documentation\Installation Guide"; Filename: "{app}\INSTALLATION_GUIDE.md"
 Name: "{group}\Documentation\Ollama Setup Guide"; Filename: "{app}\OLLAMA_SETUP_GUIDE.md"
 Name: "{group}\Documentation\Changelog"; Filename: "{app}\CHANGELOG.md"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
@@ -180,6 +178,6 @@ Type: filesandordirs; Name: "{app}\*.tmp"
 
 [Messages]
 ; Custom messages
-WelcomeLabel2=This will install [name/ver] on your computer.%n%nGarmin Chat Desktop lets you analyze your Garmin Connect fitness data using AI. Choose from cloud providers or run Ollama locally for free, unlimited queries with complete privacy.%n%nIt is recommended that you close all other applications before continuing.
+WelcomeLabel2=This will install [name/ver] on your computer.%n%nHealthChat Desktop lets you analyze your Garmin Connect fitness data using AI. Choose from cloud providers or run Ollama locally for free, unlimited queries with complete privacy.%n%nIt is recommended that you close all other applications before continuing.
 FinishedHeadingLabel=Completing [name] Setup
 FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%nNext steps:%n• Launch the application%n• Configure your Garmin credentials%n• Select your AI provider%n• For free local AI, see OLLAMA_SETUP_GUIDE.md

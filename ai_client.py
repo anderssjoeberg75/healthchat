@@ -1,5 +1,5 @@
 """
-Multi-provider AI client for Garmin Chat Desktop.
+Multi-provider AI client for HealthChat Desktop.
 Supports: xAI (Grok), OpenAI (ChatGPT), Azure OpenAI, Google Gemini, Anthropic (Claude)
 """
 
@@ -42,8 +42,8 @@ class AIClient:
         'gemini': {
             'name': 'Google Gemini',
             'base_url': 'https://generativelanguage.googleapis.com/v1beta',
-            'models': ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'],
-            'default_model': 'gemini-1.5-flash',
+            'models': ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.0-pro-exp-02-05', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash-8b'],
+            'default_model': 'gemini-2.0-flash',
             'supports_streaming': True,
             'uses_native_sdk': True,  # Use native Google SDK (google-genai package)
             'note': 'Requires google-genai package (replaces deprecated google-generativeai)'
@@ -182,13 +182,42 @@ class AIClient:
                 )
             raise
     
+    @classmethod
+    def normalize_ollama_url(cls, raw_url: str) -> str:
+        """
+        Smart-format custom Ollama URLs/IPs into a full OpenAI-compatible endpoint.
+        Examples:
+            192.168.107.15               -> http://192.168.107.15:11434/v1
+            http:/192.168.107.15:11434   -> http://192.168.107.15:11434/v1
+            http://192.168.107.15        -> http://192.168.107.15:11434/v1
+        """
+        if not raw_url or not raw_url.strip():
+            return 'http://localhost:11434/v1'
+        
+        import re
+        from urllib.parse import urlparse
+
+        url = raw_url.strip()
+        url = re.sub(r'^(https?):/(?!/)', r'\1://', url)
+        if not (url.startswith('http://') or url.startswith('https://')):
+            url = 'http://' + url
+
+        parsed = urlparse(url)
+        host = parsed.hostname or 'localhost'
+        port = parsed.port or 11434
+        scheme = parsed.scheme or 'http'
+
+        return f"{scheme}://{host}:{port}/v1"
+
     def _init_ollama(self, kwargs):
-        """Initialize Ollama local client using OpenAI-compatible API."""
-        base_url = kwargs.get('ollama_base_url', self.PROVIDERS['ollama']['base_url'])
-        # Ollama uses OpenAI-compatible API, no real API key needed
+        """Initialize Ollama local/network client using OpenAI-compatible API."""
+        raw_url = kwargs.get('ollama_base_url', self.PROVIDERS['ollama']['base_url'])
+        base_url = self.normalize_ollama_url(raw_url)
+        logger.info(f"Connecting to Ollama server at: {base_url}")
         return OpenAI(
             api_key='ollama',  # Ollama ignores the key but OpenAI client requires one
-            base_url=base_url
+            base_url=base_url,
+            timeout=300.0  # 5-minute timeout for local/network LLM generation
         )
     
     def chat(
@@ -210,51 +239,35 @@ class AIClient:
         """
         # Default system prompt
         if system_prompt is None:
-            system_prompt = """You are a helpful fitness and health assistant with access to the user's Garmin Connect data. 
-You help users understand their fitness data, track their progress, and provide insights about their health metrics.
+            system_prompt = """Du är en professionell personlig tränare och hälsocoach (COACH AI).
+Du analyserar användarens hälso- och träningsdata (Garmin Connect & Withings: sömn, Body Battery, stress, vikt, fett%, muskelmassa, puls och träningspass) för att ge skräddarsydda och professionella tränings- och hälsoråd.
 
-AVAILABLE DATA TYPES:
-The system can access the following Garmin data:
-- Activities (runs, walks, bike rides, workouts, etc.)
-- Sleep data (total, deep, light, REM, awake time)
-- Steps and distance
-- Heart rate (resting, active, zones)
-- Body Battery (energy levels throughout the day)
-- Stress levels (average, rest, activity, duration by intensity)
-- Respiration rate (waking and sleeping)
-- Hydration (water intake)
-- Nutrition (calories consumed and burned)
-- Floors climbed (ascended and descended)
-- Intensity minutes (moderate and vigorous activity)
-- Blood oxygen / SpO2 (pulse oximetry)
-- Heart Rate Variability (HRV)
-- VO2 Max and fitness age
-- Training status and load
-- Body composition
+OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
+1. Svara ALLTID på ren, grammatiskt felfri och naturlig svenska.
+2. Förbjudna felöversättningar (använd ALDRIG dessa felaktiga ord):
+   - Skriv "Analys & Bedömning" (ALDRIG "Sälsnämnd").
+   - Skriv "Slutsats" (ALDRIG "Conclusio").
+   - Skriv "Sömnpoäng" eller "Sömnbetyg" (ALDRIG "sömnskore").
+   - Skriv "Andetag per minut" (ALDRIG "åtgärder per minut").
+   - Skriv "Backar" eller "Stigning" (ALDRIG "häller").
+   - Skriv "Dricka ordentligt" eller "Hålla vätskebalansen" (ALDRIG "hålla dig hyddrad").
+   - För cykling: Använd HASTIGHET i km/h eller watt (skriv INTE cykeltempo som 8-9 min/km).
+3. Håll en uppmuntrande, professionell och tydligt strukturerad ton.
+4. OBLIGATORISK DATAKÄLLA: Du MÅSTE inkludera följande lista med exakta datum för din analys:
+   📊 **Data & Datum som använts för denna analys:**
+   - 🛌 **Sömn:** [Datum]
+   - ⚡ **Body Battery & Stress:** [Datum]
+   - ⚖️ **Vikt & Kroppssammansättning (Withings/Garmin):** [Datum och vikt om tillgängligt]
+   - 🏃 **Träningspass:** [Datumintervall]
 
-IMPORTANT DATA CONTEXT:
-- The activity data shows the user's most recent activities (typically 5-30 depending on the query)
-- Activities are ordered by date (newest first)
-- When users ask about TIME PERIODS (like "last 30 days", "this month", "last week"), the data will cover that specific date range
-- When users ask about ACTIVITY COUNTS (like "last 10 runs"), the data shows that many activities
+5. Strukturera ditt svar med tydliga rubriker:
+   - **Analys & Bedömning**
+   - **Rekommenderat träningspass**
+   - **Vätska, Näring & Återhämtning**
+   - **Slutsats & Mål**
 
-When users ask about HEALTH METRICS (Body Battery, stress, HRV, etc.):
-- Provide the specific numbers and explain what they mean
-- Offer context on whether the values are good/normal
-- Suggest factors that might influence these metrics
-- Connect metrics when relevant (e.g., low Body Battery and high stress often correlate)
-
-When answering questions:
-- Be conversational and friendly
-- Provide specific numbers and data when available
-- Be precise about date ranges - check the actual dates in the activity data
-- Offer insights and trends when relevant
-- Suggest actionable advice when appropriate
-- If you need more data or a different date range, clearly explain what you need
-- NEVER apologize for limitations - instead, explain what you CAN do
-- When discussing health metrics like Body Battery or stress, provide context and interpretation
-
-The user's Garmin data will be provided in the context below."""
+6. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
+"""
         
         # Build message with context
         if garmin_context:
@@ -353,7 +366,7 @@ The user's Garmin data will be provided in the context below."""
                     msg += f"Recommended: Use '{suggested_model}' instead.\n\n"
                 
                 msg += (f"Solutions:\n"
-                       f"1. Open Settings in Garmin Chat\n"
+                       f"1. Open Settings in HealthChat\n"
                        f"2. Select {self.PROVIDERS[self.provider]['name']}\n"
                        f"3. Choose a different model from the dropdown\n"
                        f"4. Save and try again\n\n"
@@ -470,14 +483,24 @@ The user's Garmin data will be provided in the context below."""
         # For Azure, use deployment name instead of model
         model_param = self.azure_deployment if self.provider == 'azure' else self.model
         
+        timeout_val = 300.0 if self.provider == 'ollama' else 120.0
         response = self.client.chat.completions.create(
             model=model_param,
             messages=messages,
             max_tokens=2000,
-            temperature=0.7
+            temperature=0.5 if self.provider == 'ollama' else 0.7,
+            timeout=timeout_val
         )
         
-        return response.choices[0].message.content
+        content = response.choices[0].message.content or ""
+        # Clean CJK (Chinese/Japanese/Korean) tokens leaking from pre-training models like Qwen
+        import re
+        content = re.sub(r'[\u4e00-\u9fff]+', '', content)
+        # Clean template dollar artifacts (e.g. ="$8.5")
+        content = re.sub(r'=\s*\\?"\$[\d.]+\\?"', '', content)
+        # Clean up any residual double spaces created by string replacements
+        content = re.sub(r' +', ' ', content)
+        return content.strip()
     
     def _call_anthropic(self, system_prompt: str) -> str:
         """Call Anthropic using native SDK."""
@@ -572,3 +595,86 @@ The user's Garmin data will be provided in the context below."""
         if provider in cls.PROVIDERS:
             return cls.PROVIDERS[provider]['models']
         return []
+
+    @classmethod
+    def fetch_models(cls, provider: str, api_key: str = "", base_url: str = "") -> List[str]:
+        """
+        Dynamically fetch available models directly from the provider's API.
+        Falls back to default model list if API key is missing or request fails.
+        """
+        fallback = cls.get_provider_models(provider)
+        
+        if provider == 'gemini':
+            if not api_key:
+                return fallback
+            try:
+                import requests
+                url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key.strip()}"
+                resp = requests.get(url, timeout=6)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models_list = []
+                    for item in data.get('models', []):
+                        name = item.get('name', '').replace('models/', '').strip()
+                        methods = item.get('supportedGenerationMethods', [])
+                        if 'generateContent' in methods and name and 'gemini' in name.lower():
+                            models_list.append(name)
+                    if models_list:
+                        # Sort models: newest/highest versions first
+                        models_list = sorted(list(set(models_list)), reverse=True)
+                        logger.info(f"Dynamically fetched {len(models_list)} Gemini models from API")
+                        return models_list
+                else:
+                    logger.warning(f"Gemini API returned status {resp.status_code} when fetching models: {resp.text}")
+            except Exception as e:
+                logger.warning(f"Could not dynamically fetch Gemini models: {e}")
+                
+        elif provider == 'openai':
+            if not api_key:
+                return fallback
+            try:
+                import requests
+                headers = {"Authorization": f"Bearer {api_key.strip()}"}
+                resp = requests.get("https://api.openai.com/v1/models", headers=headers, timeout=6)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models_list = [m['id'] for m in data.get('data', []) if m['id'].startswith(('gpt-', 'o1-', 'o3-'))]
+                    if models_list:
+                        return sorted(list(set(models_list)), reverse=True)
+            except Exception as e:
+                logger.warning(f"Could not dynamically fetch OpenAI models: {e}")
+                
+        elif provider == 'ollama':
+            url = base_url or 'http://localhost:11434/v1'
+            base_host = url.rstrip('/').replace('/v1', '')
+            hosts_to_try = [base_host]
+            if 'localhost' in base_host:
+                hosts_to_try.append(base_host.replace('localhost', '127.0.0.1'))
+            elif '127.0.0.1' in base_host:
+                hosts_to_try.append(base_host.replace('127.0.0.1', 'localhost'))
+
+            import requests
+            for h in hosts_to_try:
+                # Try native /api/tags
+                try:
+                    resp = requests.get(f"{h}/api/tags", timeout=3)
+                    if resp.status_code == 200:
+                        models_list = [m['name'] for m in resp.json().get('models', [])]
+                        if models_list:
+                            logger.info(f"Dynamically fetched {len(models_list)} Ollama models from {h}/api/tags")
+                            return sorted(models_list)
+                except Exception as e:
+                    logger.debug(f"Could not fetch Ollama models from {h}/api/tags: {e}")
+                
+                # Try OpenAI-compatible /v1/models
+                try:
+                    resp = requests.get(f"{h}/v1/models", timeout=3)
+                    if resp.status_code == 200:
+                        models_list = [m['id'] for m in resp.json().get('data', [])]
+                        if models_list:
+                            logger.info(f"Dynamically fetched {len(models_list)} Ollama models from {h}/v1/models")
+                            return sorted(models_list)
+                except Exception as e:
+                    logger.debug(f"Could not fetch Ollama models from {h}/v1/models: {e}")
+                
+        return fallback
