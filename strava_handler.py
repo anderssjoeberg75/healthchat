@@ -247,6 +247,7 @@ class StravaHandler:
                         "averageHR": avg_hr,
                         "maxHR": max_hr,
                         "averageSpeed": avg_speed,
+                        "source": "Strava",
                         "raw_json": act
                     })
 
@@ -322,6 +323,7 @@ class StravaHandler:
                             "averageHR": item.get("average_heartrate", 0) or 0,
                             "maxHR": item.get("max_heartrate", 0) or 0,
                             "averageSpeed": item.get("average_speed", 0) or 0,
+                            "source": "Strava",
                             "raw_json": item
                         })
                         imported_records["activities"] += 1
@@ -403,6 +405,7 @@ class StravaHandler:
                 "calories": calories,
                 "averageHR": avg_hr,
                 "maxHR": max_hr,
+                "source": "Strava",
                 "raw_json": dict(row)
             })
             count += 1

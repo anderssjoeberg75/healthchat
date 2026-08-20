@@ -2481,7 +2481,7 @@ class HealthChatApp:
                                      style='Accent.TButton',
                                      state=tk.NORMAL)
         self.checkin_btn.grid(row=0, column=1, padx=4)
-        self.create_tooltip(self.checkin_btn, "Hämta och spara senaste data från alla anslutna källor (Garmin, Fitbit m.fl.)")
+        self.create_tooltip(self.checkin_btn, "Hämta och spara senaste data från alla anslutna källor (Garmin, Fitbit, Withings, Strava)")
         
         self.refresh_btn = ttk.Button(control_card,
                                      text="Refresh",

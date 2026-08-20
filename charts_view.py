@@ -297,10 +297,11 @@ class HealthChartsView(ttk.Frame):
         tree_frame = ttk.Frame(card, style='Card.TFrame')
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
-        columns = ("date", "name", "type", "distance", "duration", "calories", "hr")
+        columns = ("date", "source", "name", "type", "distance", "duration", "calories", "hr")
         self.act_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=15)
 
         self.act_tree.heading("date", text="Datum")
+        self.act_tree.heading("source", text="Källa")
         self.act_tree.heading("name", text="Namn")
         self.act_tree.heading("type", text="Typ")
         self.act_tree.heading("distance", text="Distans (km)")
@@ -308,13 +309,14 @@ class HealthChartsView(ttk.Frame):
         self.act_tree.heading("calories", text="Kalorier (kcal)")
         self.act_tree.heading("hr", text="Snittpuls (bpm)")
 
-        self.act_tree.column("date", width=110, anchor=tk.CENTER)
-        self.act_tree.column("name", width=220, anchor=tk.W)
-        self.act_tree.column("type", width=140, anchor=tk.CENTER)
-        self.act_tree.column("distance", width=110, anchor=tk.E)
-        self.act_tree.column("duration", width=100, anchor=tk.E)
-        self.act_tree.column("calories", width=110, anchor=tk.E)
-        self.act_tree.column("hr", width=110, anchor=tk.E)
+        self.act_tree.column("date", width=100, anchor=tk.CENTER)
+        self.act_tree.column("source", width=100, anchor=tk.CENTER)
+        self.act_tree.column("name", width=200, anchor=tk.W)
+        self.act_tree.column("type", width=130, anchor=tk.CENTER)
+        self.act_tree.column("distance", width=100, anchor=tk.E)
+        self.act_tree.column("duration", width=90, anchor=tk.E)
+        self.act_tree.column("calories", width=100, anchor=tk.E)
+        self.act_tree.column("hr", width=100, anchor=tk.E)
 
         scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.act_tree.yview)
         self.act_tree.configure(yscroll=scrollbar.set)
@@ -606,6 +608,24 @@ class HealthChartsView(ttk.Frame):
 
         for act in sorted(act_hist, key=_sort_key, reverse=True):
             d_str = str(act.get("date") or act.get("start_time") or "N/A")[:10]
+            
+            src_raw = str(act.get("source") or "").strip()
+            if not src_raw or src_raw.lower() == "garmin":
+                raw = act.get("raw_json") or {}
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw)
+                    except Exception:
+                        raw = {}
+                if isinstance(raw, dict) and ("athlete" in raw or "sport_type" in raw or "map" in raw or "kilojoules" in raw or "resource_state" in raw or "Activity ID" in raw):
+                    src_str = "Strava"
+                elif isinstance(raw, dict) and ("logId" in raw or "dateOfSleep" in raw):
+                    src_str = "Fitbit"
+                else:
+                    src_str = src_raw.capitalize() if src_raw else "Garmin"
+            else:
+                src_str = src_raw.capitalize()
+
             name_str = str(act.get("activity_name") or "Workout")
             type_str = str(act.get("activity_type") or "General")
             dist_val = float(act.get('distance_km') or 0.0)
@@ -615,6 +635,7 @@ class HealthChartsView(ttk.Frame):
 
             self.act_tree.insert("", tk.END, values=(
                 d_str,
+                src_str,
                 name_str,
                 type_str,
                 f"{dist_val:.2f}",

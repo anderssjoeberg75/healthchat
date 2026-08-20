@@ -113,9 +113,14 @@ class GarminDatabase:
                 avg_hr INTEGER DEFAULT 0,
                 max_hr INTEGER DEFAULT 0,
                 avg_pace_min_km REAL DEFAULT 0,
+                source TEXT DEFAULT 'Garmin',
                 raw_json TEXT
             )
             """)
+            try:
+                cursor.execute("ALTER TABLE activities ADD COLUMN source TEXT DEFAULT 'Garmin'")
+            except sqlite3.OperationalError:
+                pass
 
             # Body Composition Table (Withings / Garmin)
             cursor.execute("""
@@ -272,10 +277,12 @@ class GarminDatabase:
             avg_speed_ms = float(activity.get('averageSpeed') or 0.0)
             avg_pace_min_km = (1000 / (avg_speed_ms * 60)) if avg_speed_ms > 0 else 0.0
         
+        source = str(activity.get('source') or 'Garmin')
+
         with self.get_connection() as conn:
             conn.execute("""
-            INSERT INTO activities (activity_id, activity_name, activity_type, start_time, date, distance_km, duration_min, calories, avg_hr, max_hr, avg_pace_min_km, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO activities (activity_id, activity_name, activity_type, start_time, date, distance_km, duration_min, calories, avg_hr, max_hr, avg_pace_min_km, source, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(activity_id) DO UPDATE SET
                 activity_name=excluded.activity_name,
                 activity_type=excluded.activity_type,
@@ -287,8 +294,9 @@ class GarminDatabase:
                 avg_hr=excluded.avg_hr,
                 max_hr=excluded.max_hr,
                 avg_pace_min_km=excluded.avg_pace_min_km,
+                source=excluded.source,
                 raw_json=excluded.raw_json
-            """, (act_id, act_name, act_type, start_time, date_str, distance_km, duration_min, calories, avg_hr, max_hr, avg_pace_min_km, json.dumps(activity)))
+            """, (act_id, act_name, act_type, start_time, date_str, distance_km, duration_min, calories, avg_hr, max_hr, avg_pace_min_km, source, json.dumps(activity)))
             conn.commit()
 
     # --- QUERY METHODS FOR CHARTS & LLM CONTEXT ---
