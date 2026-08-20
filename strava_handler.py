@@ -100,13 +100,17 @@ class StravaHandler:
 
     def exchange_code_for_token(self, code: str, client_id: str, client_secret: str, redirect_uri: str = "http://localhost:8081/") -> Dict:
         """Exchange authorization code for OAuth access and refresh tokens."""
-        self.client_id = client_id
-        self.client_secret = client_secret
+        clean_cid = str(client_id).strip().strip('"').strip("'")
+        clean_secret = str(client_secret).strip().strip('"').strip("'")
+        clean_code = str(code).strip().strip('"').strip("'")
+
+        self.client_id = clean_cid
+        self.client_secret = clean_secret
         
         data = {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
+            "client_id": clean_cid,
+            "client_secret": clean_secret,
+            "code": clean_code,
             "grant_type": "authorization_code"
         }
         
@@ -116,7 +120,14 @@ class StravaHandler:
             self.save_tokens(tokens)
             return tokens
         else:
-            err_msg = f"Strava Token Exchange Failed ({res.status_code}): {res.text}"
+            try:
+                err_json = res.json()
+                if res.status_code in (400, 401) and ("Application" in str(err_json) or "code" in str(err_json)):
+                    err_msg = "Ogiltigt Client ID eller Client Secret. Vänligen kontrollera dina uppgifter på strava.com/settings/api och se till att du kopierat hela Client ID och Client Secret utan extra tecken."
+                else:
+                    err_msg = f"Strava-fel ({res.status_code}): {err_json.get('message', res.text)}"
+            except Exception:
+                err_msg = f"Strava Token Exchange Failed ({res.status_code}): {res.text}"
             self.last_error = err_msg
             raise Exception(err_msg)
 
