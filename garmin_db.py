@@ -214,42 +214,63 @@ class GarminDatabase:
             """, (date, last_night_avg, weekly_avg, status))
             conn.commit()
 
+    @staticmethod
+    def _normalize_date(date_input: Optional[str]) -> str:
+        if not date_input:
+            return datetime.now().strftime('%Y-%m-%d')
+        date_str = str(date_input).strip()
+        if len(date_str) >= 10 and date_str[0:4].isdigit() and date_str[4] in ('-', '/') and date_str[7] in ('-', '/'):
+            return date_str[:10].replace('/', '-')
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ",
+            "%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y",
+            "%d.%m.%Y %H:%M:%S", "%d.%m.%Y", "%Y.%m.%d",
+            "%b %d, %Y, %I:%M:%S %p", "%b %d, %Y, %H:%M:%S", "%b %d, %Y",
+            "%d %b %Y, %H:%M:%S", "%d %b %Y"
+        ):
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        return datetime.now().strftime('%Y-%m-%d')
+
     def upsert_activity(self, activity: Dict):
         act_id = activity.get('activityId')
-        if not act_id:
+        if act_id is None or act_id == '':
             return
             
-        act_name = activity.get('activityName', 'Unknown')
-        act_type_raw = activity.get('activityType', 'Unknown')
+        act_name = activity.get('activityName') or 'Aktivitet'
+        act_type_raw = activity.get('activityType') or 'Träning'
         if isinstance(act_type_raw, dict):
-            act_type = act_type_raw.get('typeKey', 'Unknown')
+            act_type = act_type_raw.get('typeKey') or 'Träning'
         elif act_type_raw is not None:
             act_type = str(act_type_raw)
         else:
-            act_type = 'Unknown'
+            act_type = 'Träning'
             
-        start_time = activity.get('startTimeLocal', '')
-        date_str = start_time[:10] if start_time else datetime.now().strftime('%Y-%m-%d')
+        start_time = activity.get('startTimeLocal') or activity.get('start_time') or ''
+        date_str = self._normalize_date(start_time)
         
-        if 'distance_km' in activity:
-            distance_km = float(activity.get('distance_km', 0) or 0)
+        if 'distance_km' in activity and activity['distance_km'] is not None:
+            distance_km = float(activity.get('distance_km') or 0.0)
         else:
-            distance_km = (activity.get('distance', 0) or 0) / 1000.0
+            distance_km = float(activity.get('distance') or 0.0) / 1000.0
             
-        if 'duration_min' in activity:
-            duration_min = float(activity.get('duration_min', 0) or 0)
+        if 'duration_min' in activity and activity['duration_min'] is not None:
+            duration_min = float(activity.get('duration_min') or 0.0)
         else:
-            duration_min = (activity.get('duration', 0) or 0) / 60.0
+            duration_min = float(activity.get('duration') or 0.0) / 60.0
 
-        calories = int(activity.get('calories', 0) or 0)
-        avg_hr = int(activity.get('averageHR', 0) or 0)
-        max_hr = int(activity.get('maxHR', 0) or 0)
+        calories = int(float(activity.get('calories') or 0))
+        avg_hr = int(float(activity.get('averageHR') or activity.get('avg_hr') or 0))
+        max_hr = int(float(activity.get('maxHR') or activity.get('max_hr') or 0))
         
-        if 'avg_pace_min_km' in activity:
-            avg_pace_min_km = float(activity.get('avg_pace_min_km', 0) or 0)
+        if 'avg_pace_min_km' in activity and activity['avg_pace_min_km'] is not None:
+            avg_pace_min_km = float(activity.get('avg_pace_min_km') or 0.0)
         else:
-            avg_speed_ms = activity.get('averageSpeed', 0) or 0
-            avg_pace_min_km = (1000 / (avg_speed_ms * 60)) if avg_speed_ms > 0 else 0
+            avg_speed_ms = float(activity.get('averageSpeed') or 0.0)
+            avg_pace_min_km = (1000 / (avg_speed_ms * 60)) if avg_speed_ms > 0 else 0.0
         
         with self.get_connection() as conn:
             conn.execute("""
@@ -317,13 +338,16 @@ class GarminDatabase:
             """, (start_date,))
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_activities_history(self, days: int = 30) -> List[Dict]:
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    def get_activities_history(self, days: int = 365) -> List[Dict]:
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-            SELECT * FROM activities WHERE date >= ? ORDER BY date ASC
-            """, (start_date,))
+            if days <= 0 or days >= 3650:
+                cursor.execute("SELECT * FROM activities ORDER BY date DESC")
+            else:
+                start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+                cursor.execute("""
+                SELECT * FROM activities WHERE date >= ? ORDER BY date DESC
+                """, (start_date,))
             return [dict(row) for row in cursor.fetchall()]
 
     def upsert_body_composition(

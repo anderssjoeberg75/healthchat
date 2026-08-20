@@ -355,7 +355,7 @@ class HealthChartsView(ttk.Frame):
             bb_hist = self.db.get_body_battery_history(self.days_range)
             stress_hist = self.db.get_stress_history(self.days_range)
             hrv_hist = self.db.get_hrv_history(self.days_range)
-            act_hist = self.db.get_activities_history(self.days_range)
+            act_hist = self.db.get_activities_history(max(365, self.days_range))
             body_comp = self.db.get_latest_body_composition()
 
             self.update_dashboard_cards(sleep_hist, bb_hist, stress_hist, act_hist, body_comp)
@@ -373,9 +373,9 @@ class HealthChartsView(ttk.Frame):
 
         fit_score = 70.0
         if act_hist:
-            valid_runs = [a for a in act_hist if a.get('distance_km', 0) > 0 and a.get('avg_hr', 0) > 0]
+            valid_runs = [a for a in act_hist if (a.get('distance_km') or 0) > 0 and (a.get('avg_hr') or 0) > 0]
             if valid_runs:
-                ratios = [(a['distance_km'] / (a['duration_min'] or 1)) * (180.0 / a['avg_hr']) for a in valid_runs]
+                ratios = [((a.get('distance_km') or 0) / (a.get('duration_min') or 1)) * (180.0 / (a.get('avg_hr') or 140)) for a in valid_runs]
                 avg_ratio = sum(ratios) / len(ratios)
                 fit_score = min(99.0, max(45.0, 50.0 + (avg_ratio * 15.0)))
 
@@ -582,7 +582,7 @@ class HealthChartsView(ttk.Frame):
                 self.ax_evo_dist.set_title("Kaloriförbrukning per Pass (kcal)", fontsize=9, fontweight='bold', color='#1F2937')
                 self._format_axis_dates(self.ax_evo_dist, dates)
             else:
-                durations = [d.get('duration_min', 0) for d in act_hist]
+                durations = [float(d.get('duration_min') or 0) for d in act_hist]
                 self.ax_evo_dist.bar(dates, durations, color='#10B981', alpha=0.85, width=0.45)
                 self.ax_evo_dist.set_title("Träningstid per Pass (min)", fontsize=9, fontweight='bold', color='#1F2937')
                 self._format_axis_dates(self.ax_evo_dist, dates)
@@ -600,13 +600,25 @@ class HealthChartsView(ttk.Frame):
         if not act_hist:
             return
 
-        for act in sorted(act_hist, key=lambda x: x.get('date', ''), reverse=True):
+        def _sort_key(x):
+            d = x.get('date') or x.get('start_time') or ''
+            return str(d)
+
+        for act in sorted(act_hist, key=_sort_key, reverse=True):
+            d_str = str(act.get("date") or act.get("start_time") or "N/A")[:10]
+            name_str = str(act.get("activity_name") or "Workout")
+            type_str = str(act.get("activity_type") or "General")
+            dist_val = float(act.get('distance_km') or 0.0)
+            dur_val = float(act.get('duration_min') or 0.0)
+            cal_val = int(float(act.get("calories") or 0))
+            hr_val = int(float(act.get("avg_hr") or 0))
+
             self.act_tree.insert("", tk.END, values=(
-                act.get("date", "N/A"),
-                act.get("activity_name", "Workout"),
-                act.get("activity_type", "General"),
-                f"{act.get('distance_km', 0.0):.2f}",
-                f"{act.get('duration_min', 0.0):.1f}",
-                act.get("calories", 0),
-                act.get("avg_hr", 0)
+                d_str,
+                name_str,
+                type_str,
+                f"{dist_val:.2f}",
+                f"{dur_val:.1f}",
+                cal_val,
+                hr_val
             ))

@@ -330,21 +330,37 @@ class StravaHandler:
 
     def _parse_strava_csv(self, csv_content: str) -> int:
         """Parse Strava activities.csv content and insert records into database."""
-        reader = csv.DictReader(csv_content.splitlines())
+        lines = csv_content.splitlines()
+        if not lines:
+            return 0
+
+        reader = csv.DictReader(lines)
         count = 0
         for row in reader:
-            act_id = row.get("Activity ID") or row.get("ID") or row.get("id")
-            act_date = row.get("Activity Date") or row.get("Date") or row.get("start_date")
-            act_name = row.get("Activity Name") or row.get("Title") or row.get("name") or "Strava Pass"
-            act_type = row.get("Activity Type") or row.get("Type") or "Run"
+            if not row:
+                continue
+
+            norm_row = {str(k).strip().lower(): (str(v).strip() if v is not None else "") for k, v in row.items() if k}
+            
+            def get_val(*possible_keys):
+                for pk in possible_keys:
+                    pk_clean = pk.strip().lower()
+                    if pk_clean in norm_row and norm_row[pk_clean]:
+                        return norm_row[pk_clean]
+                return None
+
+            act_id = get_val("activity id", "aktivitets-id", "id för aktivitet", "id")
+            act_date = get_val("activity date", "aktivitetsdatum", "datum för aktivitet", "date", "datum", "start_date")
+            act_name = get_val("activity name", "aktivitetsnamn", "namn på aktivitet", "title", "namn", "name") or "Strava Pass"
+            act_type = get_val("activity type", "aktivitetstyp", "typ av aktivitet", "type", "typ", "sport_type") or "Run"
             
             if not act_date and not act_id:
                 continue
                 
             if not act_id:
-                act_id = hash(f"{act_date}_{act_name}")
+                act_id = abs(hash(f"{act_date}_{act_name}_{count}"))
 
-            dist_str = row.get("Distance", "0").replace(",", ".").strip()
+            dist_str = (get_val("distance", "sträcka", "distans") or "0").replace(",", ".").replace(" ", "")
             try:
                 dist_val = float(dist_str)
             except ValueError:
@@ -355,23 +371,23 @@ class StravaHandler:
             else:
                 dist_m = dist_val * 1000.0
 
-            dur_str = row.get("Elapsed Time") or row.get("Moving Time") or "0"
+            dur_str = get_val("elapsed time", "moving time", "förfluten tid", "rörlig tid", "tid") or "0"
             dur_sec = self._parse_duration_seconds(dur_str)
 
-            cal_str = row.get("Calories", "0").replace(",", ".").strip()
+            cal_str = (get_val("calories", "kalorier", "energi") or "0").replace(",", ".").replace(" ", "")
             try:
                 calories = int(float(cal_str))
             except ValueError:
                 calories = 0
 
-            avg_hr_str = row.get("Average Heart Rate") or row.get("Average HR") or "0"
-            max_hr_str = row.get("Max Heart Rate") or row.get("Max HR") or "0"
+            avg_hr_str = (get_val("average heart rate", "average hr", "medelpuls", "genomsnittlig puls") or "0").replace(",", ".").replace(" ", "")
+            max_hr_str = (get_val("max heart rate", "max hr", "maxpuls", "maximal puls") or "0").replace(",", ".").replace(" ", "")
             try:
-                avg_hr = int(float(avg_hr_str.replace(",", ".")))
+                avg_hr = int(float(avg_hr_str))
             except ValueError:
                 avg_hr = 0
             try:
-                max_hr = int(float(max_hr_str.replace(",", ".")))
+                max_hr = int(float(max_hr_str))
             except ValueError:
                 max_hr = 0
 
@@ -417,13 +433,44 @@ class StravaHandler:
         if not date_str:
             return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         date_str = str(date_str).strip()
+
+        # If already ISO YYYY-MM-DD...
+        if len(date_str) >= 10 and date_str[:4].isdigit() and date_str[4] in ('-', '/') and date_str[7] in ('-', '/'):
+            clean_iso = date_str[:10].replace('/', '-')
+            rest = date_str[10:].replace('Z', '').strip()
+            return f"{clean_iso}T{rest}" if rest else f"{clean_iso}T00:00:00"
+
+        # Swedish month replacements
+        swe_months = {
+            "jan.": "Jan", "feb.": "Feb", "mar.": "Mar", "apr.": "Apr",
+            "maj": "May", "jun.": "Jun", "jul.": "Jul", "aug.": "Aug",
+            "sep.": "Sep", "okt.": "Oct", "nov.": "Nov", "dec.": "Dec",
+            "okt": "Oct", "maj.": "May", "jan": "Jan", "feb": "Feb",
+            "mar": "Mar", "apr": "Apr", "jun": "Jun", "jul": "Jul",
+            "aug": "Aug", "sep": "Sep", "nov": "Nov", "dec": "Dec"
+        }
+        import re
+        for swe, eng in swe_months.items():
+            if re.search(re.escape(swe), date_str, re.IGNORECASE):
+                date_str = re.sub(re.escape(swe), eng, date_str, flags=re.IGNORECASE)
+                break
+
         for fmt in (
             "%b %d, %Y, %I:%M:%S %p",
             "%b %d, %Y, %H:%M:%S",
+            "%b %d, %Y",
+            "%d %b %Y, %H:%M:%S",
+            "%d %b %Y %H:%M:%S",
+            "%d %b %Y",
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%SZ",
             "%Y-%m-%dT%H:%M:%S",
-            "%d %b %Y, %H:%M:%S",
+            "%Y-%m-%d",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y",
+            "%m/%d/%Y %H:%M:%S",
+            "%d.%m.%Y %H:%M:%S",
+            "%d.%m.%Y",
         ):
             try:
                 dt = datetime.strptime(date_str, fmt)
