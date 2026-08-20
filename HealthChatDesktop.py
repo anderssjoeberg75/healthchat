@@ -937,6 +937,8 @@ class StravaConnectDialog(tk.Toplevel):
         port = 8081
         dialog_ref = self
 
+        csecret = self.client_secret_var.get().strip()
+
         class StravaCallbackHandler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 parsed_path = urllib.parse.urlparse(self.path)
@@ -948,27 +950,49 @@ class StravaConnectDialog(tk.Toplevel):
                 self.end_headers()
 
                 if code:
-                    html = """
-                    <html>
-                    <body style="font-family: Segoe UI, sans-serif; text-align: center; padding-top: 50px; background: #F3F4F6;">
-                        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                            <h2 style="color: #FC4C02; margin-bottom: 10px;">✅ Strava Ansluten!</h2>
-                            <p style="color: #4B5563; font-size: 16px;">Ditt Strava-konto har anslutits framgångsrikt till HealthChat.</p>
-                            <p style="color: #6B7280; font-size: 14px;">Du kan nu stänga den här fliken i webbläsaren!</p>
-                        </div>
-                    </body>
-                    </html>
-                    """
-                    self.wfile.write(html.encode('utf-8'))
+                    token_err = None
+                    try:
+                        from strava_handler import StravaHandler
+                        from garmin_db import GarminDatabase
+                        sh = StravaHandler(GarminDatabase())
+                        sh.exchange_code_for_token(code, cid, csecret)
+                    except Exception as ex:
+                        token_err = str(ex)
 
-                    def _update_dialog():
-                        try:
-                            if dialog_ref.winfo_exists():
-                                dialog_ref.code_var.set(code)
-                                dialog_ref.save()
-                        except Exception:
-                            pass
-                    dialog_ref.after(100, _update_dialog)
+                    if not token_err:
+                        html = """
+                        <html>
+                        <body style="font-family: Segoe UI, sans-serif; text-align: center; padding-top: 50px; background: #F3F4F6;">
+                            <div style="background: white; max-width: 500px; margin: 0 auto; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <h2 style="color: #FC4C02; margin-bottom: 10px;">✅ Strava Ansluten!</h2>
+                                <p style="color: #4B5563; font-size: 16px;">Ditt Strava-konto har anslutits framgångsrikt till HealthChat.</p>
+                                <p style="color: #6B7280; font-size: 14px;">Du kan nu stänga den här fliken i webbläsaren!</p>
+                            </div>
+                        </body>
+                        </html>
+                        """
+                        self.wfile.write(html.encode('utf-8'))
+
+                        def _update_dialog():
+                            try:
+                                if dialog_ref.winfo_exists():
+                                    dialog_ref.code_var.set(code)
+                                    dialog_ref.save()
+                            except Exception:
+                                pass
+                        dialog_ref.after(100, _update_dialog)
+                    else:
+                        err_html = f"""
+                        <html>
+                        <body style="font-family: Segoe UI, sans-serif; text-align: center; padding-top: 50px; background: #F3F4F6;">
+                            <div style="background: white; max-width: 500px; margin: 0 auto; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <h2 style="color: #EF4444; margin-bottom: 10px;">❌ Kunde inte ansluta till Strava</h2>
+                                <p style="color: #4B5563; font-size: 14px;">{token_err}</p>
+                            </div>
+                        </body>
+                        </html>
+                        """
+                        self.wfile.write(err_html.encode('utf-8'))
                 else:
                     self.wfile.write("<html><body><h2>Ingen kod mottogs</h2></body></html>".encode('utf-8'))
 
@@ -2257,14 +2281,18 @@ class HealthChatApp:
                 messagebox.showwarning("Inkomplett", "Ange både Client ID och Client Secret för Strava.", parent=self.root)
                 return
 
-            clean_code = _clean_oauth_code(raw_code)
-            if clean_code:
-                try:
-                    self.strava_handler.exchange_code_for_token(clean_code, cid, csecret)
-                    messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
-                    self.perform_strava_checkin()
-                except Exception as err:
-                    messagebox.showerror("Strava Fel", f"Kunde inte ansluta till Strava:\n\n{err}", parent=self.root)
+            if self.strava_handler.is_authenticated():
+                messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
+                self.perform_strava_checkin()
+            else:
+                clean_code = _clean_oauth_code(raw_code)
+                if clean_code:
+                    try:
+                        self.strava_handler.exchange_code_for_token(clean_code, cid, csecret)
+                        messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
+                        self.perform_strava_checkin()
+                    except Exception as err:
+                        messagebox.showerror("Strava Fel", f"Kunde inte ansluta till Strava:\n\n{err}", parent=self.root)
 
     def perform_strava_checkin(self):
         """Fetch latest Strava data and insert into local SQLite DB."""
