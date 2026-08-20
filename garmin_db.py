@@ -220,18 +220,36 @@ class GarminDatabase:
             return
             
         act_name = activity.get('activityName', 'Unknown')
-        act_type = activity.get('activityType', {}).get('typeKey', 'Unknown')
+        act_type_raw = activity.get('activityType', 'Unknown')
+        if isinstance(act_type_raw, dict):
+            act_type = act_type_raw.get('typeKey', 'Unknown')
+        elif act_type_raw is not None:
+            act_type = str(act_type_raw)
+        else:
+            act_type = 'Unknown'
+            
         start_time = activity.get('startTimeLocal', '')
         date_str = start_time[:10] if start_time else datetime.now().strftime('%Y-%m-%d')
         
-        distance_km = (activity.get('distance', 0) or 0) / 1000.0
-        duration_min = (activity.get('duration', 0) or 0) / 60.0
+        if 'distance_km' in activity:
+            distance_km = float(activity.get('distance_km', 0) or 0)
+        else:
+            distance_km = (activity.get('distance', 0) or 0) / 1000.0
+            
+        if 'duration_min' in activity:
+            duration_min = float(activity.get('duration_min', 0) or 0)
+        else:
+            duration_min = (activity.get('duration', 0) or 0) / 60.0
+
         calories = int(activity.get('calories', 0) or 0)
         avg_hr = int(activity.get('averageHR', 0) or 0)
         max_hr = int(activity.get('maxHR', 0) or 0)
         
-        avg_speed_ms = activity.get('averageSpeed', 0) or 0
-        avg_pace_min_km = (1000 / (avg_speed_ms * 60)) if avg_speed_ms > 0 else 0
+        if 'avg_pace_min_km' in activity:
+            avg_pace_min_km = float(activity.get('avg_pace_min_km', 0) or 0)
+        else:
+            avg_speed_ms = activity.get('averageSpeed', 0) or 0
+            avg_pace_min_km = (1000 / (avg_speed_ms * 60)) if avg_speed_ms > 0 else 0
         
         with self.get_connection() as conn:
             conn.execute("""

@@ -16,6 +16,7 @@ from pathlib import Path
 from garmin_handler import GarminDataHandler
 from fitbit_handler import FitbitHandler
 from withings_handler import WithingsDataHandler
+from strava_handler import StravaHandler
 from ai_client import AIClient
 from charts_view import HealthChartsView
 from garmin_db import GarminDatabase
@@ -395,6 +396,28 @@ class SettingsDialog(tk.Toplevel):
         ttk.Entry(main_frame, textvariable=self.withings_refresh_token_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
         current_row += 1
 
+        # Strava API Credentials Section
+        strava_header = ttk.Label(main_frame,
+                                   text="Strava API Credentials",
+                                   style='Settings.Header.TLabel')
+        strava_header.grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 10))
+        current_row += 1
+        
+        ttk.Label(main_frame, text="Client ID:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.strava_client_id_var = tk.StringVar(value=self.current_config.get('strava_client_id', ''))
+        ttk.Entry(main_frame, textvariable=self.strava_client_id_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
+        ttk.Label(main_frame, text="Client Secret:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.strava_client_secret_var = tk.StringVar(value=self.current_config.get('strava_client_secret', ''))
+        ttk.Entry(main_frame, textvariable=self.strava_client_secret_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
+        ttk.Label(main_frame, text="Refresh Token:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.strava_refresh_token_var = tk.StringVar(value=self.current_config.get('strava_refresh_token', ''))
+        ttk.Entry(main_frame, textvariable=self.strava_refresh_token_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
         # Buttons
         button_frame = ttk.Frame(main_frame, style='Settings.TFrame')
         button_frame.grid(row=current_row, column=0, columnspan=2, pady=(30, 0))
@@ -590,7 +613,10 @@ class SettingsDialog(tk.Toplevel):
             'garmin_password': self.password_var.get(),
             'withings_client_id': getattr(self, 'withings_client_id_var', tk.StringVar()).get(),
             'withings_client_secret': getattr(self, 'withings_client_secret_var', tk.StringVar()).get(),
-            'withings_refresh_token': getattr(self, 'withings_refresh_token_var', tk.StringVar()).get()
+            'withings_refresh_token': getattr(self, 'withings_refresh_token_var', tk.StringVar()).get(),
+            'strava_client_id': getattr(self, 'strava_client_id_var', tk.StringVar()).get(),
+            'strava_client_secret': getattr(self, 'strava_client_secret_var', tk.StringVar()).get(),
+            'strava_refresh_token': getattr(self, 'strava_refresh_token_var', tk.StringVar()).get()
         }
         
         # Save ALL providers' keys (not just selected one)
@@ -807,6 +833,172 @@ def _clean_oauth_code(raw_input: str) -> str:
     if '?' in val:
         val = val.split('?', 1)[-1]
     return val.strip()
+
+
+class StravaConnectDialog(tk.Toplevel):
+    """Dedicated modal dialog to connect Strava API account with instructions and link."""
+
+    def __init__(self, parent, client_id="", client_secret="", colors=None):
+        super().__init__(parent)
+        self.title("Anslut till Strava API")
+        self.geometry("630x580")
+        self.resizable(False, False)
+        self.result = None
+        self.colors = colors or {'bg': '#F3F4F6', 'card_bg': '#FFFFFF', 'text': '#1F2937', 'accent': '#FC4C02'}
+
+        self.transient(parent)
+        self.grab_set()
+        self.configure(bg=self.colors.get('bg', '#F3F4F6'))
+
+        main_frame = ttk.Frame(self, padding="20", style='Card.TFrame')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        main_frame.columnconfigure(1, weight=1)
+
+        # Header
+        ttk.Label(
+            main_frame,
+            text="🏃 Anslut till Strava API",
+            font=('Segoe UI', 14, 'bold'),
+            foreground='#FC4C02'
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+
+        # Instructions
+        instruction_text = (
+            "Hur du hämtar dina Strava API-uppgifter:\n"
+            "1. Klicka på länkknappen nedan för att öppna strava.com/settings/api i webbläsaren.\n"
+            "2. Skapa eller visa din API Application.\n"
+            "3. Ange följande i formuläret om du skapar en ny app:\n"
+            "   • Application Name: HealthChat\n"
+            "   • Category: Visualizer / Analytics\n"
+            "   • Authorization Callback Domain: localhost\n"
+            "4. Klicka på 'Save'. Kopiera 'Client ID' och 'Client Secret' hit nedan.\n"
+            "5. Klicka på '▶ Öppna Inloggning i Webbläsare' för att ansluta automatiskt!"
+        )
+        ttk.Label(
+            main_frame,
+            text=instruction_text,
+            wraplength=560,
+            font=('Segoe UI', 9)
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+
+        # Clickable Link Label
+        def _open_strava_dev_url(event=None):
+            import webbrowser
+            webbrowser.open("https://www.strava.com/settings/api")
+
+        link_label = tk.Label(
+            main_frame,
+            text="🔗 Öppna Strava Developer Portal (strava.com/settings/api)",
+            font=('Segoe UI', 9, 'underline', 'bold'),
+            fg='#FC4C02',
+            bg=self.colors.get('card_bg', '#FFFFFF'),
+            cursor="hand2"
+        )
+        link_label.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(0, 12))
+        link_label.bind("<Button-1>", _open_strava_dev_url)
+
+        # Fields
+        ttk.Label(main_frame, text="Client ID:", font=('Segoe UI', 10, 'bold')).grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.client_id_var = tk.StringVar(value=client_id)
+        ttk.Entry(main_frame, textvariable=self.client_id_var, width=42).grid(row=3, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Client Secret:", font=('Segoe UI', 10, 'bold')).grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.client_secret_var = tk.StringVar(value=client_secret)
+        ttk.Entry(main_frame, textvariable=self.client_secret_var, width=42, show="*").grid(row=4, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Callback URL:", font=('Segoe UI', 10, 'bold')).grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.callback_url_var = tk.StringVar(value="http://localhost:8081/")
+        ttk.Entry(main_frame, textvariable=self.callback_url_var, width=42).grid(row=5, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Auth Code / Token:", font=('Segoe UI', 10, 'bold')).grid(row=6, column=0, sticky=tk.W, pady=5)
+        self.code_var = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=self.code_var, width=42).grid(row=6, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=7, column=0, columnspan=2, pady=(15, 0))
+
+        ttk.Button(btn_frame, text="▶ Öppna Inloggning i Webbläsare", command=self._open_browser_auth, style='Modern.TButton').pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="💾 Spara & Anslut", command=self.save, style='Accent.TButton').pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="❌ Avbryt", command=self.destroy, style='Modern.TButton').pack(side=tk.LEFT, padx=4)
+
+    def _open_browser_auth(self):
+        cid = self.client_id_var.get().strip()
+
+        if not cid:
+            messagebox.showwarning("Client ID Saknas", "Fyll i ditt Client ID först innan du klickar på inloggning.", parent=self)
+            return
+
+        import http.server
+        import urllib.parse
+        import threading
+        import webbrowser
+
+        port = 8081
+        dialog_ref = self
+
+        class StravaCallbackHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                parsed_path = urllib.parse.urlparse(self.path)
+                query_params = urllib.parse.parse_qs(parsed_path.query)
+                code = query_params.get('code', [None])[0]
+
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html; charset=utf-8')
+                self.end_headers()
+
+                if code:
+                    html = """
+                    <html>
+                    <body style="font-family: Segoe UI, sans-serif; text-align: center; padding-top: 50px; background: #F3F4F6;">
+                        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                            <h2 style="color: #FC4C02; margin-bottom: 10px;">✅ Strava Ansluten!</h2>
+                            <p style="color: #4B5563; font-size: 16px;">Ditt Strava-konto har anslutits framgångsrikt till HealthChat.</p>
+                            <p style="color: #6B7280; font-size: 14px;">Du kan nu stänga den här fliken i webbläsaren!</p>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    self.wfile.write(html.encode('utf-8'))
+
+                    def _update_dialog():
+                        try:
+                            if dialog_ref.winfo_exists():
+                                dialog_ref.code_var.set(code)
+                                dialog_ref.save()
+                        except Exception:
+                            pass
+                    dialog_ref.after(100, _update_dialog)
+                else:
+                    self.wfile.write("<html><body><h2>Ingen kod mottogs</h2></body></html>".encode('utf-8'))
+
+            def log_message(self, format, *args):
+                pass
+
+        try:
+            server = http.server.HTTPServer(('127.0.0.1', port), StravaCallbackHandler)
+            server.timeout = 120
+            threading.Thread(target=lambda: (server.handle_request(), server.server_close()), daemon=True).start()
+        except Exception as e:
+            logger.warning(f"Could not start local callback server on port {port}: {e}")
+
+        auth_url = f"https://www.strava.com/oauth/authorize?client_id={cid}&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A8081%2F&approval_prompt=auto&scope=read%2Cactivity%3Aread_all"
+        webbrowser.open(auth_url)
+        messagebox.showinfo(
+            "Strava Inloggning",
+            "Öppnar Strava-auktoriseringssidan i webbläsaren.\n\n"
+            "1. Logga in och godkänn behörigheterna.\n"
+            "2. Appen tar emot koden och genomför anslutningen helt automatiskt!",
+            parent=self
+        )
+
+    def save(self):
+        self.result = {
+            'client_id': self.client_id_var.get().strip(),
+            'client_secret': self.client_secret_var.get().strip(),
+            'code': self.code_var.get().strip()
+        }
+        self.destroy()
 
 
 class WithingsConnectDialog(tk.Toplevel):
@@ -1075,6 +1267,7 @@ class HealthChatApp:
         # Application state
         self.garmin_handler = None
         self.fitbit_handler = FitbitHandler(db=self.db, token_store_dir=self.config_dir)
+        self.strava_handler = StravaHandler(db=self.db, token_store_dir=self.config_dir)
         self.ai_client = None  # Changed from xai_client to ai_client
         self.authenticated = False
         self.mfa_required = False
@@ -1105,6 +1298,12 @@ class HealthChatApp:
         self.withings_client_secret = ''
         self.withings_refresh_token = ''
         self.withings_access_token = ''
+
+        # Strava settings
+        self.strava_client_id = ''
+        self.strava_client_secret = ''
+        self.strava_refresh_token = ''
+        self.strava_access_token = ''
 
         self.auto_login = True  # Default to auto-login enabled
         self.dark_mode = False  # Start in light mode
@@ -1200,6 +1399,12 @@ class HealthChatApp:
                     self.withings_refresh_token = config.get('withings_refresh_token', '')
                     self.withings_access_token = config.get('withings_access_token', '')
 
+                    # Strava settings
+                    self.strava_client_id = config.get('strava_client_id', '')
+                    self.strava_client_secret = config.get('strava_client_secret', '')
+                    self.strava_refresh_token = config.get('strava_refresh_token', '')
+                    self.strava_access_token = config.get('strava_access_token', '')
+
                     self.auto_login = config.get('auto_login', True)
                     self.dark_mode = config.get('dark_mode', False)
                     
@@ -1292,6 +1497,11 @@ class HealthChatApp:
                 'withings_client_secret': self.withings_client_secret or '',
                 'withings_refresh_token': self.withings_refresh_token or '',
                 'withings_access_token': self.withings_access_token or '',
+                # Strava settings
+                'strava_client_id': getattr(self, 'strava_client_id', '') or '',
+                'strava_client_secret': getattr(self, 'strava_client_secret', '') or '',
+                'strava_refresh_token': getattr(self, 'strava_refresh_token', '') or '',
+                'strava_access_token': getattr(self, 'strava_access_token', '') or '',
                 'auto_login': self.auto_login,
                 'dark_mode': self.dark_mode,
                 # Window state
@@ -1540,6 +1750,13 @@ class HealthChatApp:
         withings_menu.add_command(label="📁 Importera Withings Export-fil (CSV/JSON)...", command=self.import_withings_file)
         menubar.add_cascade(label="Withings", menu=withings_menu)
         
+        # 5. Strava Menu
+        strava_menu = tk.Menu(menubar, tearoff=0)
+        strava_menu.add_command(label="▶ Anslut till Strava...", command=self.connect_to_strava)
+        strava_menu.add_command(label="📥 Strava Check-in", command=self.perform_strava_checkin)
+        strava_menu.add_command(label="📁 Importera Strava Export-fil (CSV/ZIP/GPX/FIT)...", command=self.import_strava_file)
+        menubar.add_cascade(label="Strava", menu=strava_menu)
+        
         # 3. Verktyg (Tools) Menu
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="🔍 Sök i Chatthistorik", command=self.open_search)
@@ -1576,6 +1793,7 @@ class HealthChatApp:
         has_garmin = hasattr(self, 'garmin_handler') and self.garmin_handler and self.authenticated
         has_fitbit = hasattr(self, 'fitbit_handler') and self.fitbit_handler and self.fitbit_handler.is_authenticated()
         has_withings = bool(self.withings_client_id and self.withings_client_secret and self.withings_refresh_token)
+        has_strava = hasattr(self, 'strava_handler') and self.strava_handler and self.strava_handler.is_authenticated()
         
         if has_garmin:
             configured_sources.append("Garmin")
@@ -1583,6 +1801,8 @@ class HealthChatApp:
             configured_sources.append("Fitbit")
         if has_withings:
             configured_sources.append("Withings")
+        if has_strava:
+            configured_sources.append("Strava")
 
         if not configured_sources:
             messagebox.showwarning(
@@ -1672,12 +1892,28 @@ class HealthChatApp:
                     _on_source_finished("Withings")
             threading.Thread(target=_w_thread, daemon=True).start()
 
+        # 4. Strava sync if configured
+        if has_strava:
+            def _s_prog(curr, total, msg):
+                def _update():
+                    status_str_strava = f"⏳ Synkar Strava ({curr}/{total} pass)..."
+                    self.update_status(status_str_strava, False)
+                    if hasattr(self, 'charts_view') and self.charts_view:
+                        self.charts_view.set_sync_status(status_str_strava)
+                self.root.after(0, _update)
+            try:
+                self.strava_handler.sync_strava_history(days=30, on_progress=_s_prog, on_complete=lambda: _on_source_finished("Strava"))
+            except Exception as e:
+                logger.error(f"Strava check-in error: {e}")
+                _on_source_finished("Strava")
+
     def perform_full_historical_sync(self):
         """Perform complete historical data sync across all connected services (Garmin, Fitbit, Withings) for up to 365 days / lifetime history and update local database."""
         configured_sources = []
         has_garmin = hasattr(self, 'garmin_handler') and self.garmin_handler and self.authenticated
         has_fitbit = hasattr(self, 'fitbit_handler') and self.fitbit_handler and self.fitbit_handler.is_authenticated()
         has_withings = bool(self.withings_client_id and self.withings_client_secret and self.withings_refresh_token)
+        has_strava = hasattr(self, 'strava_handler') and self.strava_handler and self.strava_handler.is_authenticated()
 
         if has_garmin:
             configured_sources.append("Garmin (Full Historik)")
@@ -1685,6 +1921,8 @@ class HealthChatApp:
             configured_sources.append("Fitbit (Full Historik)")
         if has_withings:
             configured_sources.append("Withings (Full Historik)")
+        if has_strava:
+            configured_sources.append("Strava (Full Historik)")
 
         if not configured_sources:
             messagebox.showwarning(
@@ -2001,6 +2239,88 @@ class HealthChatApp:
             )
         except Exception as err:
             messagebox.showerror("Importfel", f"Kunde inte importera Fitbit-filen:\n\n{err}", parent=self.root)
+
+    def connect_to_strava(self):
+        """Open dedicated popup dialog to configure Strava API credentials."""
+        current_cid = self.strava_handler.client_id if (hasattr(self, 'strava_handler') and self.strava_handler) else ""
+        current_secret = self.strava_handler.client_secret if (hasattr(self, 'strava_handler') and self.strava_handler) else ""
+
+        dialog = StravaConnectDialog(self.root, client_id=current_cid, client_secret=current_secret, colors=self.colors)
+        self.root.wait_window(dialog)
+
+        if dialog.result:
+            cid = dialog.result.get('client_id', '')
+            csecret = dialog.result.get('client_secret', '')
+            raw_code = dialog.result.get('code', '')
+
+            if not cid or not csecret:
+                messagebox.showwarning("Inkomplett", "Ange både Client ID och Client Secret för Strava.", parent=self.root)
+                return
+
+            clean_code = _clean_oauth_code(raw_code)
+            if clean_code:
+                try:
+                    self.strava_handler.exchange_code_for_token(clean_code, cid, csecret)
+                    messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
+                    self.perform_strava_checkin()
+                except Exception as err:
+                    messagebox.showerror("Strava Fel", f"Kunde inte ansluta till Strava:\n\n{err}", parent=self.root)
+
+    def perform_strava_checkin(self):
+        """Fetch latest Strava data and insert into local SQLite DB."""
+        if not hasattr(self, 'strava_handler') or not self.strava_handler:
+            messagebox.showwarning("Inte Ansluten", "Strava-modulen är inte initierad.", parent=self.root)
+            return
+
+        self.update_status("📥 Kör Strava Check-in...", False)
+        if hasattr(self, 'charts_view') and self.charts_view:
+            self.charts_view.set_sync_status("⏳ Synkroniserar Strava-data...")
+
+        def _on_prog(curr, total, msg):
+            def _update():
+                self.update_status(f"⏳ Synkar Strava ({curr}/{total} pass)...", False)
+                if hasattr(self, 'charts_view') and self.charts_view:
+                    self.charts_view.set_sync_status(f"⏳ Synkar Strava ({curr}/{total} pass)...")
+            self.root.after(0, _update)
+
+        def _on_done():
+            def _update_ui():
+                self.update_status("✅ Strava Check-in klar! Graferna har uppdaterats.", False)
+                if hasattr(self, 'charts_view') and self.charts_view:
+                    self.charts_view.set_sync_status("✅ Strava synk klar!", is_done=True)
+                    self.charts_view.refresh_all_views()
+                messagebox.showinfo("Strava Check-in", "✅ Strava Check-in genomförd!\n\nSenaste Strava-pass har hämtats och sparats i din lokala databas.", parent=self.root)
+            self.root.after(0, _update_ui)
+
+        self.strava_handler.sync_strava_history(days=30, on_progress=_on_prog, on_complete=_on_done)
+
+    def import_strava_file(self):
+        """Import Strava export archive file (CSV/ZIP/JSON/GPX/FIT)."""
+        from tkinter import filedialog
+        filename = filedialog.askopenfilename(
+            title="Välj Strava Export-fil",
+            filetypes=[("Strava Export Files", "*.csv;*.zip;*.json;*.gpx;*.fit"), ("ZIP Archives", "*.zip"), ("CSV Files", "*.csv"), ("JSON Files", "*.json"), ("All Files", "*.*")],
+            parent=self.root
+        )
+        if not filename:
+            return
+
+        try:
+            results = self.strava_handler.import_strava_export_file(filename)
+            act_cnt = results.get("activities", 0)
+            
+            if hasattr(self, 'charts_view') and self.charts_view:
+                self.charts_view.refresh_all_views()
+
+            messagebox.showinfo(
+                "Strava Import Klar",
+                f"✅ Strava-data har importerats!\n\n"
+                f"• Importerade träningspass: {act_cnt}\n\n"
+                f"Graferna och träningsloggen har uppdaterats med den nya datan.",
+                parent=self.root
+            )
+        except Exception as err:
+            messagebox.showerror("Importfel", f"Kunde inte importera Strava-filen:\n\n{err}", parent=self.root)
 
     def import_withings_file(self):
         """Import Withings export file (CSV/JSON)."""

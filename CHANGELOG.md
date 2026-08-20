@@ -5,6 +5,16 @@ All notable changes to HealthChat Desktop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.5] - 2026-08-20
+
+### Added
+- **Strava Integration**: Complete support for Strava API and export file archives
+  - OAuth 2.0 Web API authentication with automatic token refresh
+  - Background API sync for workout activities (`/athlete/activities`)
+  - Offline import of Strava archive export files (CSV, ZIP, JSON, GPX, FIT)
+  - Integrated into top menu bar under dedicated "Strava" cascade
+  - Integrated into multi-source "Check-in (Alla Källor)" and "Full Synk" workflows
+
 ## [4.0.4] - 2026-03-12
 
 ### Added

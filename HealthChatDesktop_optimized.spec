@@ -39,6 +39,8 @@ a = Analysis(
     hiddenimports=extra_hidden + [
         'garmin_db',
         'fitbit_handler',
+        'withings_handler',
+        'strava_handler',
         'charts_view',
         'sqlite3',
         'garth',
