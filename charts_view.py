@@ -357,26 +357,27 @@ class HealthChartsView(ttk.Frame):
             bb_hist = self.db.get_body_battery_history(self.days_range)
             stress_hist = self.db.get_stress_history(self.days_range)
             hrv_hist = self.db.get_hrv_history(self.days_range)
-            act_hist = self.db.get_activities_history(max(365, self.days_range))
+            act_hist_dash = self.db.get_activities_history(self.days_range)
+            act_hist_full = self.db.get_activities_history(max(365, self.days_range))
             body_comp = self.db.get_latest_body_composition()
 
             try:
-                self.update_dashboard_cards(sleep_hist, bb_hist, stress_hist, act_hist, body_comp)
+                self.update_dashboard_cards(sleep_hist, bb_hist, stress_hist, act_hist_full, body_comp)
             except Exception as e:
                 logger.error(f"Error in update_dashboard_cards: {e}")
 
             try:
-                self.draw_dashboard_charts(sleep_hist, bb_hist, stress_hist, act_hist)
+                self.draw_dashboard_charts(sleep_hist, bb_hist, stress_hist, act_hist_dash)
             except Exception as e:
                 logger.error(f"Error in draw_dashboard_charts: {e}")
 
             try:
-                self.draw_evolab_charts(sleep_hist, bb_hist, stress_hist, hrv_hist, act_hist, body_comp, daily_summary_hist)
+                self.draw_evolab_charts(sleep_hist, bb_hist, stress_hist, hrv_hist, act_hist_full, body_comp, daily_summary_hist)
             except Exception as e:
                 logger.error(f"Error in draw_evolab_charts: {e}")
 
             try:
-                self.populate_activities_table(act_hist)
+                self.populate_activities_table(act_hist_dash)
             except Exception as e:
                 logger.error(f"Error in populate_activities_table: {e}")
 
@@ -431,6 +432,23 @@ class HealthChartsView(ttk.Frame):
             ttk.Label(self.card_weight['body'], text=f"Källa: {src_name} ({body_comp.get('date')})", font=('Segoe UI', 8, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W, pady=(4, 0))
         else:
             ttk.Label(self.card_weight['body'], text="Ingen vikt registrerad", font=('Segoe UI', 10, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W)
+
+    @staticmethod
+    def _format_axis_dates(ax, dates: List[str]):
+        """Helper to cleanly format X-axis date labels without overlapping text."""
+        if not dates:
+            return
+        n = len(dates)
+        if n > 10:
+            step = max(1, n // 8)
+            indices = list(range(0, n, step))
+            if indices[-1] != n - 1:
+                indices.append(n - 1)
+            ax.set_xticks(indices)
+            ax.set_xticklabels([dates[i] for i in indices], rotation=35, ha='right', fontsize=8)
+        else:
+            ax.set_xticks(range(n))
+            ax.set_xticklabels(dates, rotation=35, ha='right', fontsize=8)
 
     @staticmethod
     def _prepare_chart_series(data_list: Optional[List[Dict[str, Any]]], value_key: str, default_val: float = 0.0):
