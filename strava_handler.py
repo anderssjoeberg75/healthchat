@@ -192,9 +192,9 @@ class StravaHandler:
 
     def sync_strava_history(
         self, 
-        days: int = 30, 
+        days: int = 3650, 
         on_progress: Optional[Callable[[int, int, str], None]] = None,
-        on_complete: Optional[Callable[[], None]] = None
+        on_complete: Optional[Callable[..., None]] = None
     ):
         """Fetch Strava activities for past days and insert into local SQLite database."""
         def _sync_worker():
@@ -251,10 +251,17 @@ class StravaHandler:
                         "raw_json": act
                     })
 
-                logger.info("Strava DB sync completed successfully!")
+                logger.info(f"Strava DB sync completed successfully ({total} activities)!")
                 if on_complete:
                     try:
-                        on_complete()
+                        import inspect
+                        sig = inspect.signature(on_complete)
+                        if len(sig.parameters) >= 2:
+                            on_complete(total, None)
+                        elif len(sig.parameters) == 1:
+                            on_complete(total)
+                        else:
+                            on_complete()
                     except Exception as cb_err:
                         logger.error(f"Error in Strava on_complete callback: {cb_err}")
             except Exception as sync_err:
@@ -262,7 +269,14 @@ class StravaHandler:
                 self.last_error = str(sync_err)
                 if on_complete:
                     try:
-                        on_complete()
+                        import inspect
+                        sig = inspect.signature(on_complete)
+                        if len(sig.parameters) >= 2:
+                            on_complete(0, str(sync_err))
+                        elif len(sig.parameters) == 1:
+                            on_complete(0)
+                        else:
+                            on_complete()
                     except Exception:
                         pass
 

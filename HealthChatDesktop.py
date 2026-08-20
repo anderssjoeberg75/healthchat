@@ -2272,6 +2272,17 @@ class HealthChatApp:
             messagebox.showwarning("Inte Ansluten", "Strava-modulen är inte initierad.", parent=self.root)
             return
 
+        if not self.strava_handler.is_authenticated():
+            res = messagebox.askyesno(
+                "Inte Ansluten till Strava API",
+                "Ditt Strava-konto är inte anslutet via API än.\n\n"
+                "Vill du öppna Strava API-anslutningen nu?",
+                parent=self.root
+            )
+            if res:
+                self.connect_to_strava()
+            return
+
         self.update_status("📥 Kör Strava Check-in...", False)
         if hasattr(self, 'charts_view') and self.charts_view:
             self.charts_view.set_sync_status("⏳ Synkroniserar Strava-data...")
@@ -2283,16 +2294,35 @@ class HealthChatApp:
                     self.charts_view.set_sync_status(f"⏳ Synkar Strava ({curr}/{total} pass)...")
             self.root.after(0, _update)
 
-        def _on_done():
+        def _on_done(count: int = 0, err: Optional[str] = None):
             def _update_ui():
-                self.update_status("✅ Strava Check-in klar! Graferna har uppdaterats.", False)
-                if hasattr(self, 'charts_view') and self.charts_view:
-                    self.charts_view.set_sync_status("✅ Strava synk klar!", is_done=True)
-                    self.charts_view.refresh_all_views()
-                messagebox.showinfo("Strava Check-in", "✅ Strava Check-in genomförd!\n\nSenaste Strava-pass har hämtats och sparats i din lokala databas.", parent=self.root)
+                if err:
+                    self.update_status(f"❌ Strava-fel: {err}", False)
+                    if hasattr(self, 'charts_view') and self.charts_view:
+                        self.charts_view.set_sync_status(f"❌ Strava-fel: {err}", is_done=True)
+                    messagebox.showerror("Strava Synk-fel", f"Kunde inte synka från Strava API:\n\n{err}", parent=self.root)
+                elif count == 0:
+                    self.update_status("⚠️ Strava Check-in klar (0 nya pass hittades)", False)
+                    if hasattr(self, 'charts_view') and self.charts_view:
+                        self.charts_view.set_sync_status("⚠️ Inga Strava-pass hittades via API.", is_done=True)
+                        self.charts_view.refresh_all_views()
+                    messagebox.showwarning(
+                        "Strava Check-in",
+                        "⚠️ 0 träningspass hittades på ditt Strava-konto via API.\n\n"
+                        "Möjliga orsaker & lösningar:\n"
+                        "1. Alla tillstånd godkändes inte vid inloggningen. Klicka på 'Strava -> Anslut till Strava...' och godkänn alla behörigheter.\n"
+                        "2. Du kan alltid importera dina Strava-pass direkt via 'Strava -> Importera Strava Export-fil...'",
+                        parent=self.root
+                    )
+                else:
+                    self.update_status(f"✅ Strava Check-in klar ({count} pass synkade)!", False)
+                    if hasattr(self, 'charts_view') and self.charts_view:
+                        self.charts_view.set_sync_status(f"✅ Strava synk klar ({count} pass)!", is_done=True)
+                        self.charts_view.refresh_all_views()
+                    messagebox.showinfo("Strava Check-in", f"✅ Strava Check-in genomförd!\n\n{count} st Strava-pass har hämtats och sparats i din lokala databas.", parent=self.root)
             self.root.after(0, _update_ui)
 
-        self.strava_handler.sync_strava_history(days=30, on_progress=_on_prog, on_complete=_on_done)
+        self.strava_handler.sync_strava_history(days=3650, on_progress=_on_prog, on_complete=_on_done)
 
     def import_strava_file(self):
         """Import Strava export archive file (CSV/ZIP/JSON/GPX/FIT)."""
