@@ -415,21 +415,30 @@ class HealthChartsView(ttk.Frame):
         else:
             ttk.Label(self.card_weight['body'], text="Ingen vikt registrerad", font=('Segoe UI', 10, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W)
 
-    def _format_axis_dates(self, ax, dates: List[str]):
-        """Helper to cleanly format X-axis date labels without overlapping text."""
-        if not dates:
-            return
-        n = len(dates)
-        if n > 10:
-            step = max(1, n // 8)
-            indices = list(range(0, n, step))
-            if indices[-1] != n - 1:
-                indices.append(n - 1)
-            ax.set_xticks(indices)
-            ax.set_xticklabels([dates[i] for i in indices], rotation=35, ha='right', fontsize=8)
-        else:
-            ax.set_xticks(range(n))
-            ax.set_xticklabels(dates, rotation=35, ha='right', fontsize=8)
+    @staticmethod
+    def _prepare_chart_series(data_list: Optional[List[Dict[str, Any]]], value_key: str, default_val: float = 0.0):
+        if not data_list:
+            return [], []
+        valid_items = [d for d in data_list if (d.get('date') or d.get('start_time'))]
+        sorted_list = sorted(valid_items, key=lambda x: str(x.get('date') or x.get('start_time') or ''))
+
+        if not sorted_list:
+            return [], []
+
+        years = set(str(x.get('date') or x.get('start_time') or '')[:4] for x in sorted_list if len(str(x.get('date') or '')) >= 4)
+        use_year = len(years) > 1
+
+        dates = []
+        vals = []
+        for d in sorted_list:
+            dt_raw = str(d.get('date') or d.get('start_time') or '')[:10]
+            if len(dt_raw) < 10:
+                continue
+            date_fmt = dt_raw[2:] if use_year else dt_raw[5:]
+            dates.append(date_fmt)
+            vals.append(float(d.get(value_key) or default_val))
+
+        return dates, vals
 
     def draw_dashboard_charts(self, sleep_hist, bb_hist, stress_hist, act_hist):
         """Draw Light Theme Matplotlib charts on Dashboard."""
@@ -442,9 +451,8 @@ class HealthChartsView(ttk.Frame):
                 spine.set_color('#E5E7EB')
 
         # 1. Weekly Activity Dist
-        if act_hist:
-            dates = [d['date'][5:] for d in act_hist]
-            dist = [d['distance_km'] for d in act_hist]
+        dates, dist = self._prepare_chart_series(act_hist, 'distance_km')
+        if dates:
             self.ax_weekly.bar(dates, dist, color='#0078D4', alpha=0.85, width=0.45)
             self.ax_weekly.set_title("Träningsdistans per dag (km)", fontsize=9, fontweight='bold', color='#1F2937', pad=4)
             self._format_axis_dates(self.ax_weekly, dates)
@@ -452,9 +460,8 @@ class HealthChartsView(ttk.Frame):
             self.ax_weekly.text(0.5, 0.5, "Inga aktiviteter registrerade", ha='center', va='center', color='#9CA3AF')
 
         # 2. Body Battery
-        if bb_hist:
-            dates = [d['date'][5:] for d in bb_hist]
-            charged = [d.get('charged', 0) or 0 for d in bb_hist]
+        dates, charged = self._prepare_chart_series(bb_hist, 'charged')
+        if dates:
             self.ax_bb.plot(dates, charged, color='#10B981', marker='o', linewidth=2.0, markersize=3)
             self.ax_bb.set_title("Body Battery Uppladdat (+)", fontsize=9, fontweight='bold', color='#1F2937', pad=4)
             self._format_axis_dates(self.ax_bb, dates)
@@ -462,9 +469,8 @@ class HealthChartsView(ttk.Frame):
             self.ax_bb.text(0.5, 0.5, "Ingen Body Battery data", ha='center', va='center', color='#9CA3AF')
 
         # 3. Sleep
-        if sleep_hist:
-            dates = [d['date'][5:] for d in sleep_hist]
-            tot = [d.get('total_sleep_hours', 0) for d in sleep_hist]
+        dates, tot = self._prepare_chart_series(sleep_hist, 'total_sleep_hours')
+        if dates:
             self.ax_sleep.bar(dates, tot, color='#8B5CF6', alpha=0.75, width=0.45)
             self.ax_sleep.set_title("Totalt sömn (timmar)", fontsize=9, fontweight='bold', color='#1F2937', pad=4)
             self._format_axis_dates(self.ax_sleep, dates)
@@ -472,9 +478,8 @@ class HealthChartsView(ttk.Frame):
             self.ax_sleep.text(0.5, 0.5, "Ingen sömndata", ha='center', va='center', color='#9CA3AF')
 
         # 4. Stress
-        if stress_hist:
-            dates = [d['date'][5:] for d in stress_hist]
-            avg_s = [d.get('average', 0) for d in stress_hist]
+        dates, avg_s = self._prepare_chart_series(stress_hist, 'average')
+        if dates:
             self.ax_stress.plot(dates, avg_s, color='#FF5722', marker='s', linewidth=1.8, markersize=3)
             self.ax_stress.set_title("Genomsnittlig Stress", fontsize=9, fontweight='bold', color='#1F2937', pad=4)
             self._format_axis_dates(self.ax_stress, dates)
@@ -495,9 +500,8 @@ class HealthChartsView(ttk.Frame):
                 spine.set_color('#E5E7EB')
 
         # 1. Training Load (Top Left)
-        if act_hist:
-            dates = [d['date'][5:] for d in act_hist]
-            dist = [d.get('distance_km', 0) for d in act_hist]
+        dates, dist = self._prepare_chart_series(act_hist, 'distance_km')
+        if dates:
             self.ax_evo_load.plot(dates, dist, color='#0078D4', marker='o', linewidth=2.0)
             self.ax_evo_load.set_title("Träningsbelastning & Distans Trend (km)", fontsize=9, fontweight='bold', color='#1F2937')
             self._format_axis_dates(self.ax_evo_load, dates)
@@ -507,14 +511,12 @@ class HealthChartsView(ttk.Frame):
 
         # 2. Resting Heart Rate / Vilopuls (Top Right)
         rhr_map = {}
-        # A. From daily_summary_hist
         for d in (daily_summary_hist or []):
             dt = d.get('date')
             rhr = d.get('resting_hr', 0)
             if dt and rhr and rhr > 0:
                 rhr_map[dt] = rhr
 
-        # B. From sleep_hist (including raw_json parsing)
         for s in (sleep_hist or []):
             dt = s.get('date')
             if dt:
@@ -530,7 +532,9 @@ class HealthChartsView(ttk.Frame):
 
         if rhr_map:
             sorted_dates = sorted(rhr_map.keys())
-            rhr_dates = [dt[5:] for dt in sorted_dates]
+            years = set(dt[:4] for dt in sorted_dates if len(dt) >= 4)
+            use_yr = len(years) > 1
+            rhr_dates = [dt[2:] if use_yr else dt[5:] for dt in sorted_dates]
             rhr_vals = [rhr_map[dt] for dt in sorted_dates]
             self.ax_evo_rhr.plot(rhr_dates, rhr_vals, color='#EC4899', marker='o', linewidth=2.0, markersize=3)
             self.ax_evo_rhr.set_title("Vilo-Hjärtfrekvens / Vilopuls (bpm)", fontsize=9, fontweight='bold', color='#1F2937')
@@ -540,9 +544,8 @@ class HealthChartsView(ttk.Frame):
             self.ax_evo_rhr.set_title("Vilo-Hjärtfrekvens / Vilopuls Trend", fontsize=9, fontweight='bold', color='#1F2937')
 
         # 3. HRV Trend (Middle Left)
-        if hrv_hist:
-            dates = [d['date'][5:] for d in hrv_hist]
-            hrv_val = [d.get('last_night_avg', 0) for d in hrv_hist]
+        dates, hrv_val = self._prepare_chart_series(hrv_hist, 'last_night_avg')
+        if dates:
             self.ax_evo_hrv.plot(dates, hrv_val, color='#10B981', marker='^', linewidth=2.0)
             self.ax_evo_hrv.set_title("Nattlig HRV Trend (ms)", fontsize=9, fontweight='bold', color='#1F2937')
             self._format_axis_dates(self.ax_evo_hrv, dates)
@@ -553,11 +556,10 @@ class HealthChartsView(ttk.Frame):
         # 4. Weight & Body Fat Trend (Middle Right)
         body_hist = self.db.get_body_composition_history(days=self.days_range) if hasattr(self, 'db') and self.db else []
         if body_hist:
-            w_dates = [d['date'][5:] for d in body_hist]
-            w_vals = [d.get('weight_kg', 0) for d in body_hist]
-            valid_w = [(dt, wv) for dt, wv in zip(w_dates, w_vals) if wv > 0]
-            if valid_w:
-                vd, vw = zip(*valid_w)
+            dates, w_vals = self._prepare_chart_series(body_hist, 'weight_kg')
+            valid_pairs = [(d, w) for d, w in zip(dates, w_vals) if w > 0]
+            if valid_pairs:
+                vd, vw = zip(*valid_pairs)
                 self.ax_evo_weight.plot(vd, vw, color='#3B82F6', marker='s', linewidth=2.0, markersize=4)
                 self.ax_evo_weight.set_title("Withings & Fitbit Vikt-trend (kg)", fontsize=9, fontweight='bold', color='#1F2937')
                 self._format_axis_dates(self.ax_evo_weight, list(vd))
@@ -576,18 +578,16 @@ class HealthChartsView(ttk.Frame):
         self.ax_evo_zones.set_title("Pulszondistribution Träning", fontsize=9, fontweight='bold', color='#1F2937')
 
         # 6. Training Volume & Energy (Bottom Right)
-        if act_hist:
-            dates = [d['date'][5:] for d in act_hist]
-            cals = [d.get('calories', 0) for d in act_hist]
-            if any(c > 0 for c in cals):
-                self.ax_evo_dist.bar(dates, cals, color='#F59E0B', alpha=0.85, width=0.45)
-                self.ax_evo_dist.set_title("Kaloriförbrukning per Pass (kcal)", fontsize=9, fontweight='bold', color='#1F2937')
-                self._format_axis_dates(self.ax_evo_dist, dates)
-            else:
-                durations = [float(d.get('duration_min') or 0) for d in act_hist]
-                self.ax_evo_dist.bar(dates, durations, color='#10B981', alpha=0.85, width=0.45)
-                self.ax_evo_dist.set_title("Träningstid per Pass (min)", fontsize=9, fontweight='bold', color='#1F2937')
-                self._format_axis_dates(self.ax_evo_dist, dates)
+        dates, cals = self._prepare_chart_series(act_hist, 'calories')
+        if dates and any(c > 0 for c in cals):
+            self.ax_evo_dist.bar(dates, cals, color='#F59E0B', alpha=0.85, width=0.45)
+            self.ax_evo_dist.set_title("Kaloriförbrukning per Pass (kcal)", fontsize=9, fontweight='bold', color='#1F2937')
+            self._format_axis_dates(self.ax_evo_dist, dates)
+        elif dates:
+            dates, durations = self._prepare_chart_series(act_hist, 'duration_min')
+            self.ax_evo_dist.bar(dates, durations, color='#10B981', alpha=0.85, width=0.45)
+            self.ax_evo_dist.set_title("Träningstid per Pass (min)", fontsize=9, fontweight='bold', color='#1F2937')
+            self._format_axis_dates(self.ax_evo_dist, dates)
         else:
             self.ax_evo_dist.text(0.5, 0.5, "Träningsvolym: Inga aktiviteter sparade", ha='center', va='center', color='#9CA3AF')
             self.ax_evo_dist.set_title("Träningsvolym & Kalorier", fontsize=9, fontweight='bold', color='#1F2937')
