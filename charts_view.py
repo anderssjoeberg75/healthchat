@@ -360,10 +360,26 @@ class HealthChartsView(ttk.Frame):
             act_hist = self.db.get_activities_history(max(365, self.days_range))
             body_comp = self.db.get_latest_body_composition()
 
-            self.update_dashboard_cards(sleep_hist, bb_hist, stress_hist, act_hist, body_comp)
-            self.draw_dashboard_charts(sleep_hist, bb_hist, stress_hist, act_hist)
-            self.draw_evolab_charts(sleep_hist, bb_hist, stress_hist, hrv_hist, act_hist, body_comp, daily_summary_hist)
-            self.populate_activities_table(act_hist)
+            try:
+                self.update_dashboard_cards(sleep_hist, bb_hist, stress_hist, act_hist, body_comp)
+            except Exception as e:
+                logger.error(f"Error in update_dashboard_cards: {e}")
+
+            try:
+                self.draw_dashboard_charts(sleep_hist, bb_hist, stress_hist, act_hist)
+            except Exception as e:
+                logger.error(f"Error in draw_dashboard_charts: {e}")
+
+            try:
+                self.draw_evolab_charts(sleep_hist, bb_hist, stress_hist, hrv_hist, act_hist, body_comp, daily_summary_hist)
+            except Exception as e:
+                logger.error(f"Error in draw_evolab_charts: {e}")
+
+            try:
+                self.populate_activities_table(act_hist)
+            except Exception as e:
+                logger.error(f"Error in populate_activities_table: {e}")
+
         except Exception as e:
             logger.error(f"Error refreshing all views: {e}")
 
@@ -409,9 +425,10 @@ class HealthChartsView(ttk.Frame):
             w_kg = body_comp.get('weight_kg')
             fat_pct = body_comp.get('fat_ratio_pct', 0.0)
             m_kg = body_comp.get('muscle_mass_kg', 0.0)
+            src_name = str(body_comp.get('source') or 'Withings').title()
             ttk.Label(self.card_weight['body'], text=f"{w_kg:.1f} kg", font=('Segoe UI', 22, 'bold'), foreground='#1F2937').pack(anchor=tk.W)
             ttk.Label(self.card_weight['body'], text=f"Fett: {fat_pct:.1f}% | Muskelmassa: {m_kg:.1f} kg", font=('Segoe UI', 9), foreground='#6B7280').pack(anchor=tk.W)
-            ttk.Label(self.card_weight['body'], text=f"Källa: {body_comp.get('source', 'Withings').title()} ({body_comp.get('date')})", font=('Segoe UI', 8, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W, pady=(4, 0))
+            ttk.Label(self.card_weight['body'], text=f"Källa: {src_name} ({body_comp.get('date')})", font=('Segoe UI', 8, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W, pady=(4, 0))
         else:
             ttk.Label(self.card_weight['body'], text="Ingen vikt registrerad", font=('Segoe UI', 10, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W)
 
