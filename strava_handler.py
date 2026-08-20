@@ -83,6 +83,8 @@ class StravaHandler:
             self.last_error = str(e)
 
     def is_authenticated(self) -> bool:
+        if not self._authenticated:
+            self.load_stored_tokens()
         return self._authenticated
 
     def get_auth_url(self, client_id: str, redirect_uri: str = "http://localhost:8081/") -> str:

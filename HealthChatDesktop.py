@@ -838,8 +838,9 @@ def _clean_oauth_code(raw_input: str) -> str:
 class StravaConnectDialog(tk.Toplevel):
     """Dedicated modal dialog to connect Strava API account with instructions and link."""
 
-    def __init__(self, parent, client_id="", client_secret="", colors=None):
+    def __init__(self, parent, strava_handler=None, client_id="", client_secret="", colors=None):
         super().__init__(parent)
+        self.strava_handler = strava_handler
         self.title("Anslut till Strava API")
         self.geometry("630x580")
         self.resizable(False, False)
@@ -952,10 +953,13 @@ class StravaConnectDialog(tk.Toplevel):
                 if code:
                     token_err = None
                     try:
-                        from strava_handler import StravaHandler
-                        from garmin_db import GarminDatabase
-                        sh = StravaHandler(GarminDatabase())
-                        sh.exchange_code_for_token(code, cid, csecret)
+                        if dialog_ref.strava_handler:
+                            dialog_ref.strava_handler.exchange_code_for_token(code, cid, csecret)
+                        else:
+                            from strava_handler import StravaHandler
+                            from garmin_db import GarminDatabase
+                            sh = StravaHandler(GarminDatabase())
+                            sh.exchange_code_for_token(code, cid, csecret)
                     except Exception as ex:
                         token_err = str(ex)
 
@@ -2269,10 +2273,16 @@ class HealthChatApp:
         current_cid = self.strava_handler.client_id if (hasattr(self, 'strava_handler') and self.strava_handler) else ""
         current_secret = self.strava_handler.client_secret if (hasattr(self, 'strava_handler') and self.strava_handler) else ""
 
-        dialog = StravaConnectDialog(self.root, client_id=current_cid, client_secret=current_secret, colors=self.colors)
+        dialog = StravaConnectDialog(self.root, strava_handler=self.strava_handler, client_id=current_cid, client_secret=current_secret, colors=self.colors)
         self.root.wait_window(dialog)
 
-        if dialog.result:
+        if hasattr(self, 'strava_handler') and self.strava_handler:
+            self.strava_handler.load_stored_tokens()
+
+        if self.strava_handler and self.strava_handler.is_authenticated():
+            messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
+            self.perform_strava_checkin()
+        elif dialog.result:
             cid = dialog.result.get('client_id', '')
             csecret = dialog.result.get('client_secret', '')
             raw_code = dialog.result.get('code', '')
@@ -2281,18 +2291,14 @@ class HealthChatApp:
                 messagebox.showwarning("Inkomplett", "Ange både Client ID och Client Secret för Strava.", parent=self.root)
                 return
 
-            if self.strava_handler.is_authenticated():
-                messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
-                self.perform_strava_checkin()
-            else:
-                clean_code = _clean_oauth_code(raw_code)
-                if clean_code:
-                    try:
-                        self.strava_handler.exchange_code_for_token(clean_code, cid, csecret)
-                        messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
-                        self.perform_strava_checkin()
-                    except Exception as err:
-                        messagebox.showerror("Strava Fel", f"Kunde inte ansluta till Strava:\n\n{err}", parent=self.root)
+            clean_code = _clean_oauth_code(raw_code)
+            if clean_code:
+                try:
+                    self.strava_handler.exchange_code_for_token(clean_code, cid, csecret)
+                    messagebox.showinfo("Strava Ansluten", "✅ Framgångsrikt ansluten till Strava!", parent=self.root)
+                    self.perform_strava_checkin()
+                except Exception as err:
+                    messagebox.showerror("Strava Fel", f"Kunde inte ansluta till Strava:\n\n{err}", parent=self.root)
 
     def perform_strava_checkin(self):
         """Fetch latest Strava data and insert into local SQLite DB."""
