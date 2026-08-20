@@ -22,7 +22,7 @@ from garmin_db import GarminDatabase
 logger = logging.getLogger("strava_handler")
 
 STRAVA_AUTH_URL = "https://www.strava.com/oauth/authorize"
-STRAVA_TOKEN_URL = "https://api.strava.com/oauth/token"
+STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_API_BASE = "https://www.strava.com/api/v3"
 
 class StravaHandler:
