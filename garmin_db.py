@@ -346,7 +346,45 @@ class GarminDatabase:
             """, (start_date,))
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_activities_history(self, days: int = 365) -> List[Dict]:
+    @staticmethod
+    def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge duplicate activities recorded on the same date with matching distance/duration 
+        across different platforms (e.g. Garmin and Strava).
+        """
+        if not activities:
+            return []
+
+        unique_activities: List[Dict[str, Any]] = []
+
+        for act in activities:
+            act_date = str(act.get("date") or act.get("start_time") or "")[:10]
+            act_dist = float(act.get("distance_km") or 0.0)
+            act_dur = float(act.get("duration_min") or 0.0)
+            act_src = str(act.get("source") or "Garmin").strip()
+
+            is_dup = False
+            for existing in unique_activities:
+                ex_date = str(existing.get("date") or existing.get("start_time") or "")[:10]
+                ex_dist = float(existing.get("distance_km") or 0.0)
+                ex_dur = float(existing.get("duration_min") or 0.0)
+
+                if act_date and act_date == ex_date:
+                    dist_diff = abs(act_dist - ex_dist)
+                    dur_diff = abs(act_dur - ex_dur)
+                    if (dist_diff < 0.3 and dur_diff < 3.0) or (act_dist == 0 and ex_dist == 0 and dur_diff < 3.0):
+                        is_dup = True
+                        ex_src = str(existing.get("source") or "Garmin").strip()
+                        if act_src.lower() not in ex_src.lower():
+                            existing["source"] = f"{ex_src} / {act_src}"
+                        break
+
+            if not is_dup:
+                unique_activities.append(dict(act))
+
+        return unique_activities
+
+    def get_activities_history(self, days: int = 365, deduplicate: bool = True) -> List[Dict]:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             if days <= 0 or days >= 3650:
@@ -356,7 +394,10 @@ class GarminDatabase:
                 cursor.execute("""
                 SELECT * FROM activities WHERE date >= ? ORDER BY date DESC
                 """, (start_date,))
-            return [dict(row) for row in cursor.fetchall()]
+            rows = [dict(row) for row in cursor.fetchall()]
+            if deduplicate:
+                return self.deduplicate_activities(rows)
+            return rows
 
     def upsert_body_composition(
         self,

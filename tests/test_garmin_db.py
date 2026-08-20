@@ -213,3 +213,30 @@ def test_upsert_activity_handles_missing_optional_fields(db):
 ])
 def test_history_queries_empty_by_default(db, query):
     assert getattr(db, query)(days=30) == []
+
+
+def test_deduplicate_activities_merges_duplicates(db):
+    db.upsert_activity({
+        "activityId": 101,
+        "activityName": "Morgonlöpning",
+        "startTimeLocal": "2026-08-19 08:00:00",
+        "distance": 10000,
+        "duration": 3000,
+        "source": "Garmin"
+    })
+    db.upsert_activity({
+        "activityId": 202,
+        "activityName": "Morning Run",
+        "startTimeLocal": "2026-08-19 08:00:00",
+        "distance": 10050,
+        "duration": 3010,
+        "source": "Strava"
+    })
+    
+    act_all = db.get_activities_history(days=30, deduplicate=False)
+    assert len(act_all) == 2
+
+    act_dedup = db.get_activities_history(days=30, deduplicate=True)
+    assert len(act_dedup) == 1
+    assert "Garmin" in act_dedup[0]["source"]
+    assert "Strava" in act_dedup[0]["source"]
