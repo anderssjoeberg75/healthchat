@@ -349,7 +349,7 @@ class GarminDatabase:
     @staticmethod
     def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Merge duplicate activities recorded on the same date with matching distance/duration 
+        Merge duplicate activities recorded on the same date with matching distance/duration/HR 
         across different platforms (e.g. Garmin and Strava).
         """
         if not activities:
@@ -361,6 +361,7 @@ class GarminDatabase:
             act_date = str(act.get("date") or act.get("start_time") or "")[:10]
             act_dist = float(act.get("distance_km") or 0.0)
             act_dur = float(act.get("duration_min") or 0.0)
+            act_hr = float(act.get("avg_hr") or 0.0)
             act_src = str(act.get("source") or "Garmin").strip()
 
             is_dup = False
@@ -368,15 +369,27 @@ class GarminDatabase:
                 ex_date = str(existing.get("date") or existing.get("start_time") or "")[:10]
                 ex_dist = float(existing.get("distance_km") or 0.0)
                 ex_dur = float(existing.get("duration_min") or 0.0)
+                ex_hr = float(existing.get("avg_hr") or 0.0)
 
                 if act_date and act_date == ex_date:
                     dist_diff = abs(act_dist - ex_dist)
                     dur_diff = abs(act_dur - ex_dur)
-                    if (dist_diff < 0.3 and dur_diff < 3.0) or (act_dist == 0 and ex_dist == 0 and dur_diff < 3.0):
+                    hr_diff = abs(act_hr - ex_hr) if (act_hr > 0 and ex_hr > 0) else 999.0
+
+                    is_dist_match = (dist_diff <= max(0.15, ex_dist * 0.05)) if (act_dist > 0 or ex_dist > 0) else True
+                    is_hr_match = (hr_diff <= 4.0)
+                    is_dur_match = (dur_diff <= max(10.0, ex_dur * 0.25))
+
+                    if is_dist_match and (is_hr_match or is_dur_match or dist_diff <= 0.1):
                         is_dup = True
                         ex_src = str(existing.get("source") or "Garmin").strip()
                         if act_src.lower() not in ex_src.lower():
                             existing["source"] = f"{ex_src} / {act_src}"
+
+                        if ex_dur > 300 and 0 < act_dur < 300:
+                            existing["duration_min"] = act_dur
+                        if (existing.get("calories") or 0) == 0 and (act.get("calories") or 0) > 0:
+                            existing["calories"] = act.get("calories")
                         break
 
             if not is_dup:
