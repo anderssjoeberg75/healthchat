@@ -117,6 +117,20 @@ class WithingsDataHandler:
                 body = data["body"]
                 self.access_token = body.get("access_token", self.access_token)
                 self.refresh_token = body.get("refresh_token", self.refresh_token)
+                
+                # Persist updated tokens to disk config.json if possible
+                try:
+                    cfg_path = Path.home() / ".healthchat" / "config.json"
+                    if cfg_path.exists():
+                        with open(cfg_path, "r", encoding="utf-8") as f:
+                            cfg_data = json.load(f)
+                        cfg_data["withings_access_token"] = self.access_token
+                        cfg_data["withings_refresh_token"] = self.refresh_token
+                        with open(cfg_path, "w", encoding="utf-8") as f:
+                            json.dump(cfg_data, f, indent=2)
+                except Exception as save_err:
+                    logger.debug(f"Could not persist refreshed Withings tokens: {save_err}")
+
                 return {
                     "success": True,
                     "access_token": self.access_token,
@@ -142,6 +156,7 @@ class WithingsDataHandler:
                 logger.warning(f"Could not refresh Withings token: {res.get('error')}")
 
         if not self.access_token:
+            self.last_error = "Withings tillgångstoken saknas (inte ansluten)."
             return []
 
         if days >= 3650:
@@ -162,13 +177,17 @@ class WithingsDataHandler:
             resp = requests.post(self.MEASURE_ENDPOINT, data=payload, headers=headers, timeout=15)
             data = resp.json()
 
-            # If token expired, attempt refresh once
-            if data.get("status") in [401, 5011, 40101, 2555]:
+            # If token expired or unauthorized status, attempt refresh once
+            if data.get("status") in [401, 5011, 40101, 2555] or resp.status_code in [401, 403]:
                 refresh_res = self.refresh_access_token()
                 if refresh_res.get("success"):
                     headers["Authorization"] = f"Bearer {self.access_token}"
                     resp = requests.post(self.MEASURE_ENDPOINT, data=payload, headers=headers, timeout=15)
                     data = resp.json()
+                else:
+                    ref_err = refresh_res.get("error", "token_expired")
+                    self.last_error = f"Withings anslutning utgången ({ref_err}). Återanslut Withings i menyn Källor."
+                    return []
 
             if data.get("status") == 0 and "body" in data:
                 measuregrps = data["body"].get("measuregrps", [])
@@ -176,7 +195,8 @@ class WithingsDataHandler:
                 return self.parse_measurements(measuregrps)
             else:
                 logger.warning(f"Withings getmeas status {data.get('status')}: {data}")
-                self.last_error = f"Withings API status {data.get('status')}"
+                err_detail = data.get("error") or f"status {data.get('status')}"
+                self.last_error = f"Withings API-fel: {err_detail}"
                 return []
         except Exception as e:
             logger.error(f"Error fetching Withings measurements: {e}")

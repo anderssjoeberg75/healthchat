@@ -2130,15 +2130,24 @@ class HealthChatApp:
                     )
                 else:
                     err_msg = res.get("message") or res.get("error") if isinstance(res, dict) else "Inga mätvärden hittades."
-                    self.update_status("⚠️ Withings: Inga mätvärden hittades.", False)
+                    self.update_status(f"⚠️ Withings: {err_msg}", False)
                     if hasattr(self, 'charts_view') and self.charts_view:
-                        self.charts_view.set_sync_status("⚠️ Withings: Inga mätvärden hittades.", is_done=True)
+                        self.charts_view.set_sync_status(f"⚠️ Withings: {err_msg}", is_done=True)
                         self.charts_view.refresh_all_views()
-                    messagebox.showwarning(
-                        "Withings Check-in",
-                        f"⚠️ Inga mätvärden hämtades från Withings API.\n\nDetaljer: {err_msg}\n\nTips: Se till att ditt Withings-konto har sparade mätningar under senaste året, eller importera din export-fil via 'Withings -> Importera Export-fil'.",
-                        parent=self.root
-                    )
+
+                    if "401" in str(err_msg) or "token" in str(err_msg).lower() or "utgången" in str(err_msg).lower():
+                        if messagebox.askyesno(
+                            "Withings Anslutning Utgången",
+                            f"Ditt Withings-token har gått ut eller behöver förnyas:\n\n{err_msg}\n\nVill du öppna Withings-anslutningsdialogen nu för att förnya anslutningen?",
+                            parent=self.root
+                        ):
+                            self.connect_to_withings()
+                    else:
+                        messagebox.showwarning(
+                            "Withings Check-in",
+                            f"⚠️ Inga mätvärden hämtades från Withings API.\n\nDetaljer: {err_msg}\n\nTips: Klicka på 'Källor -> Withings -> Anslut / Konfigurera' för att förnya din token.",
+                            parent=self.root
+                        )
             self.root.after(0, _update)
 
         threading.Thread(target=_thread_target, daemon=True).start()
