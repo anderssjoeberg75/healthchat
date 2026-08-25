@@ -2173,7 +2173,7 @@ class HealthChatApp:
                 self.update_status("✅ Check-in genomförd! Graferna har uppdaterats.", False)
                 if hasattr(self, 'charts_view') and self.charts_view:
                     self.charts_view.set_sync_status("✅ Synkning klar!", is_done=True)
-                    self.charts_view.refresh_charts()
+                    self.charts_view.refresh_all_views()
                 messagebox.showinfo("Garmin Check-in", "✅ Check-in genomförd!\n\nSenaste hälsodata och träningspass har hämtats från Garmin och graferna har uppdaterats automatiskt.", parent=self.root)
             self.root.after(0, _update_ui)
             
@@ -2232,7 +2232,7 @@ class HealthChatApp:
                 self.update_status("✅ Fitbit Check-in klar! Graferna har uppdaterats.", False)
                 if hasattr(self, 'charts_view') and self.charts_view:
                     self.charts_view.set_sync_status("✅ Fitbit synk klar!", is_done=True)
-                    self.charts_view.refresh_charts()
+                    self.charts_view.refresh_all_views()
                 messagebox.showinfo("Fitbit Check-in", "✅ Fitbit Check-in genomförd!\n\nSenaste Fitbit-data har hämtats och sparats i din lokala databas.", parent=self.root)
             self.root.after(0, _update_ui)
 
@@ -2255,7 +2255,7 @@ class HealthChatApp:
             act_cnt = results.get("activities", 0)
             
             if hasattr(self, 'charts_view') and self.charts_view:
-                self.charts_view.refresh_charts()
+                self.charts_view.refresh_all_views()
 
             messagebox.showinfo(
                 "Fitbit Import Klar",
@@ -3228,7 +3228,7 @@ class HealthChatApp:
         
         # Refresh charts directly from local SQLite database (no automatic background sync on startup)
         if hasattr(self, 'charts_view') and self.charts_view:
-            self.charts_view.refresh_charts()
+            self.charts_view.refresh_all_views()
         
     def _on_auth_failure(self, error_msg: str):
         """Handle failed authentication"""

@@ -206,20 +206,33 @@ class StravaHandler:
     def sync_strava_history(
         self, 
         days: int = 3650, 
+        force_full: bool = False,
         on_progress: Optional[Callable[[int, int, str], None]] = None,
         on_complete: Optional[Callable[..., None]] = None
     ):
         """Fetch Strava activities for past days and insert into local SQLite database."""
         def _sync_worker():
             try:
-                logger.info(f"Starting Strava DB sync for past {days} days...")
+                sync_days = days
+                if not force_full and hasattr(self, 'db') and self.db:
+                    last_sync = self.db.get_metadata("last_strava_sync")
+                    if last_sync:
+                        try:
+                            last_date = datetime.strptime(last_sync, "%Y-%m-%d").date()
+                            diff_days = (datetime.now().date() - last_date).days + 2
+                            if diff_days > 0:
+                                sync_days = min(days, diff_days)
+                        except Exception as e:
+                            logger.debug(f"Error parsing last Strava sync date '{last_sync}': {e}")
+
+                logger.info(f"Starting Strava DB sync for past {sync_days} days (force_full={force_full})...")
                 if on_progress:
                     try:
                         on_progress(0, 1, "Hämtar Strava-pass...")
                     except Exception:
                         pass
 
-                activities = self.fetch_activities(days=days)
+                activities = self.fetch_activities(days=sync_days)
                 total = len(activities)
                 
                 logger.info(f"Fetched {total} Strava activities.")
@@ -263,6 +276,10 @@ class StravaHandler:
                         "source": "Strava",
                         "raw_json": act
                     })
+
+                if hasattr(self, 'db') and self.db:
+                    self.db.set_metadata("last_strava_sync", datetime.now().strftime("%Y-%m-%d"))
+                    self.db.set_metadata("last_strava_sync_timestamp", datetime.now().isoformat())
 
                 logger.info(f"Strava DB sync completed successfully ({total} activities)!")
                 if on_complete:

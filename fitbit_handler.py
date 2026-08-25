@@ -121,24 +121,37 @@ class FitbitHandler:
     def sync_fitbit_history(
         self, 
         days: int = 30, 
+        force_full: bool = False,
         on_progress: Optional[Callable[[int, int, str], None]] = None,
         on_complete: Optional[Callable[[], None]] = None
     ):
         """Fetch Fitbit metrics for past days and insert into local SQLite database."""
         def _sync_worker():
             try:
-                logger.info(f"Starting Fitbit DB sync for past {days} days...")
+                sync_days = days
+                if not force_full and hasattr(self, 'db') and self.db:
+                    last_sync = self.db.get_metadata("last_fitbit_sync")
+                    if last_sync:
+                        try:
+                            last_date = datetime.strptime(last_sync, "%Y-%m-%d").date()
+                            diff_days = (datetime.now().date() - last_date).days + 2
+                            if diff_days > 0:
+                                sync_days = min(days, diff_days)
+                        except Exception as e:
+                            logger.debug(f"Error parsing last Fitbit sync date '{last_sync}': {e}")
+
+                logger.info(f"Starting Fitbit DB sync for past {sync_days} days (force_full={force_full})...")
                 if on_progress:
                     try:
-                        on_progress(0, days, "Hämtar Fitbit-data...")
+                        on_progress(0, sync_days, "Hämtar Fitbit-data...")
                     except Exception:
                         pass
 
-                for i in range(days):
+                for i in range(sync_days):
                     d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
                     if on_progress:
                         try:
-                            on_progress(i + 1, days, f"Synkar Fitbit {d}...")
+                            on_progress(i + 1, sync_days, f"Synkar Fitbit {d}...")
                         except Exception:
                             pass
 
@@ -165,6 +178,10 @@ class FitbitHandler:
                                     )
                         except Exception as e:
                             logger.debug(f"Fitbit sleep fetch failed for {d}: {e}")
+
+                if hasattr(self, 'db') and self.db:
+                    self.db.set_metadata("last_fitbit_sync", datetime.now().strftime("%Y-%m-%d"))
+                    self.db.set_metadata("last_fitbit_sync_timestamp", datetime.now().isoformat())
 
                 logger.info("Fitbit DB sync completed successfully!")
                 if on_complete:
