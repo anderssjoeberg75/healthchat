@@ -62,7 +62,7 @@ class WithingsDataHandler:
         client_secret: str,
         redirect_uri: str = "http://localhost:8000"
     ) -> Dict[str, Any]:
-        """Exchange authorization code for refresh_token and access_token."""
+        """Exchange authorization code or refresh token for valid access & refresh tokens."""
         self.client_id = client_id.strip()
         self.client_secret = client_secret.strip()
         clean_code = code.strip()
@@ -77,23 +77,34 @@ class WithingsDataHandler:
             "redirect_uri": clean_uri
         }
 
-        resp = requests.post(self.OAUTH_ENDPOINT, data=payload, timeout=15)
-        data = resp.json()
-        logger.info(f"Withings exchange_code_for_token response: {data}")
+        data = {}
+        try:
+            resp = requests.post(self.OAUTH_ENDPOINT, data=payload, timeout=15)
+            data = resp.json()
 
-        if data.get("status") == 0 and "body" in data:
-            body = data["body"]
-            self.access_token = body.get("access_token", "")
-            self.refresh_token = body.get("refresh_token", "")
-            return {
-                "success": True,
-                "access_token": self.access_token,
-                "refresh_token": self.refresh_token,
-                "userid": body.get("userid")
-            }
-        else:
-            error_msg = data.get("error", f"Withings API status: {data.get('status')}")
-            raise ValueError(f"{error_msg} (Status: {data.get('status')})")
+            if data.get("status") == 0 and "body" in data:
+                body = data["body"]
+                self.access_token = body.get("access_token", "")
+                self.refresh_token = body.get("refresh_token", "")
+                return {
+                    "success": True,
+                    "access_token": self.access_token,
+                    "refresh_token": self.refresh_token,
+                    "userid": body.get("userid")
+                }
+        except Exception as e:
+            logger.debug(f"Authorization code exchange failed: {e}")
+
+        # Fallback: try treating clean_code directly as a refresh_token
+        self.refresh_token = clean_code
+        ref_res = self.refresh_access_token()
+        if ref_res.get("success"):
+            return ref_res
+
+        err_detail = data.get("error") if isinstance(data, dict) else None
+        status_code = data.get("status") if isinstance(data, dict) else None
+        err_msg = err_detail or f"Withings API-status {status_code}" if status_code else "Ogiltig kod"
+        raise ValueError(f"{err_msg}. Koden kan vara utgången (gäller enstaka sekunder/minuter) eller redan förverkad. Klicka på '▶ Öppna Inloggning i Webbläsare' i dialogen för automatisk anslutning.")
 
     def refresh_access_token(self) -> Dict[str, Any]:
         """
