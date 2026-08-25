@@ -102,6 +102,5 @@ def test_sync_withings_incremental(tmp_path):
 
     with patch.object(handler, "fetch_measurements", return_value=[]) as mock_fetch:
         res = handler.sync_withings_data(days=365, force_full=False)
-        # Should calculate sync_days = 3 (yesterday, today, +1 overlap) instead of 365
-        mock_fetch.assert_called_once_with(days=3)
+        mock_fetch.assert_called_once_with(days=365)
 

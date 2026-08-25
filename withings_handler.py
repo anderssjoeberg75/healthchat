@@ -151,6 +151,7 @@ class WithingsDataHandler:
 
         payload = {
             "action": "getmeas",
+            "category": 1,
             "lastupdate": lastupdate
         }
         headers = {
@@ -233,20 +234,9 @@ class WithingsDataHandler:
     def sync_withings_data(self, days: int = 365, force_full: bool = False) -> Dict[str, Any]:
         """
         Fetch and save Withings body composition records to local SQLite DB.
-        If force_full is False, calculates incremental days since last sync if metadata exists.
+        Single fast API request fetches measurements for the requested range.
         """
-        sync_days = days
-        if not force_full and hasattr(self, 'db') and self.db:
-            last_sync = self.db.get_metadata("last_withings_sync")
-            if last_sync:
-                try:
-                    last_date = datetime.strptime(last_sync, "%Y-%m-%d").date()
-                    diff_days = (datetime.now().date() - last_date).days + 2
-                    if diff_days > 0:
-                        sync_days = min(days, diff_days)
-                except Exception as e:
-                    logger.debug(f"Error parsing last Withings sync date '{last_sync}': {e}")
-
+        sync_days = 3650 if force_full else max(30, days)
         logger.info(f"Starting Withings DB sync for last {sync_days} days (force_full={force_full})...")
         records = self.fetch_measurements(days=sync_days)
         if not records:
@@ -255,7 +245,7 @@ class WithingsDataHandler:
                 "count": 0,
                 "access_token": self.access_token,
                 "refresh_token": self.refresh_token,
-                "message": "No measurements fetched from Withings"
+                "message": self.last_error or "No measurements fetched from Withings"
             }
 
         saved_count = 0
