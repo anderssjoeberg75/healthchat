@@ -230,11 +230,25 @@ class WithingsDataHandler:
         valid_records = [r for r in daily_records.values() if r.get("weight_kg", 0) > 0 or r.get("fat_ratio_pct", 0) > 0]
         return valid_records
 
-    def sync_withings_data(self, days: int = 365) -> Dict[str, Any]:
+    def sync_withings_data(self, days: int = 365, force_full: bool = False) -> Dict[str, Any]:
         """
         Fetch and save Withings body composition records to local SQLite DB.
+        If force_full is False, calculates incremental days since last sync if metadata exists.
         """
-        records = self.fetch_measurements(days=days)
+        sync_days = days
+        if not force_full and hasattr(self, 'db') and self.db:
+            last_sync = self.db.get_metadata("last_withings_sync")
+            if last_sync:
+                try:
+                    last_date = datetime.strptime(last_sync, "%Y-%m-%d").date()
+                    diff_days = (datetime.now().date() - last_date).days + 2
+                    if diff_days > 0:
+                        sync_days = min(days, diff_days)
+                except Exception as e:
+                    logger.debug(f"Error parsing last Withings sync date '{last_sync}': {e}")
+
+        logger.info(f"Starting Withings DB sync for last {sync_days} days (force_full={force_full})...")
+        records = self.fetch_measurements(days=sync_days)
         if not records:
             return {
                 "success": False,
@@ -258,6 +272,10 @@ class WithingsDataHandler:
                 raw_data=rec.get("raw_json")
             )
             saved_count += 1
+
+        if hasattr(self, 'db') and self.db:
+            self.db.set_metadata("last_withings_sync", datetime.now().strftime("%Y-%m-%d"))
+            self.db.set_metadata("last_withings_sync_timestamp", datetime.now().isoformat())
 
         return {
             "success": True,

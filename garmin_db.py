@@ -137,6 +137,14 @@ class GarminDatabase:
             )
             """)
 
+            # Sync Metadata Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """)
+
             # Create Indices
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(activity_type)")
@@ -461,3 +469,19 @@ class GarminDatabase:
             SELECT * FROM body_composition WHERE date >= ? ORDER BY date ASC
             """, (start_date,))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_metadata(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM sync_metadata WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else default
+
+    def set_metadata(self, key: str, value: str):
+        with self.get_connection() as conn:
+            conn.execute("""
+            INSERT INTO sync_metadata (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (key, value))
+

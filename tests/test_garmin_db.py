@@ -240,3 +240,15 @@ def test_deduplicate_activities_merges_duplicates(db):
     assert len(act_dedup) == 1
     assert "Garmin" in act_dedup[0]["source"]
     assert "Strava" in act_dedup[0]["source"]
+
+
+def test_sync_metadata_get_and_set(db):
+    assert db.get_metadata("last_garmin_sync") is None
+    assert db.get_metadata("last_garmin_sync", default="fallback") == "fallback"
+
+    db.set_metadata("last_garmin_sync", "2026-08-25")
+    assert db.get_metadata("last_garmin_sync") == "2026-08-25"
+
+    db.set_metadata("last_garmin_sync", "2026-08-26")
+    assert db.get_metadata("last_garmin_sync") == "2026-08-26"
+

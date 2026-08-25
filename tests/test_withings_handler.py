@@ -84,3 +84,24 @@ def test_sync_withings_data_saves_to_db(tmp_path):
     latest = test_db.get_latest_body_composition()
     assert latest["weight_kg"] == 80.2
     assert latest["fat_ratio_pct"] == 18.0
+
+
+def test_sync_withings_incremental(tmp_path):
+    test_db = GarminDatabase(db_path=tmp_path / "withings_inc_test.db")
+    from datetime import datetime, timedelta
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    test_db.set_metadata("last_withings_sync", yesterday)
+
+    handler = WithingsDataHandler(
+        client_id="dummy_id",
+        client_secret="dummy_secret",
+        refresh_token="dummy_refresh",
+        access_token="dummy_access",
+        db=test_db
+    )
+
+    with patch.object(handler, "fetch_measurements", return_value=[]) as mock_fetch:
+        res = handler.sync_withings_data(days=365, force_full=False)
+        # Should calculate sync_days = 3 (yesterday, today, +1 overlap) instead of 365
+        mock_fetch.assert_called_once_with(days=3)
+

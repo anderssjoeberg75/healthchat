@@ -7,7 +7,7 @@ from garth.exc import GarthHTTPError
 from garminconnect import Garmin
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 import logging
 
 from garmin_db import GarminDatabase
@@ -48,6 +48,7 @@ class GarminDataHandler:
     def sync_garmin_history(
         self, 
         days: int = 30, 
+        force_full: bool = False,
         on_progress: Optional[Callable[[int, int, str], None]] = None,
         on_complete: Optional[Callable[[], None]] = None
     ):
@@ -57,26 +58,38 @@ class GarminDataHandler:
             
         def _sync_worker():
             try:
-                logger.info(f"Starting background Garmin DB sync for last {days} days...")
+                from datetime import datetime, timedelta
+                sync_days = days
+                if not force_full:
+                    last_sync = self.db.get_metadata("last_garmin_sync")
+                    if last_sync:
+                        try:
+                            last_date = datetime.strptime(last_sync, "%Y-%m-%d").date()
+                            diff_days = (datetime.now().date() - last_date).days + 2
+                            if diff_days > 0:
+                                sync_days = min(days, diff_days)
+                        except Exception as e:
+                            logger.debug(f"Error parsing last sync date '{last_sync}': {e}")
+
+                logger.info(f"Starting background Garmin DB sync for last {sync_days} days (force_full={force_full})...")
                 if on_progress:
                     try:
-                        on_progress(0, days, "Hämtar träningspass...")
+                        on_progress(0, sync_days, "Hämtar träningspass...")
                     except Exception:
                         pass
 
-                # 1. Sync activities (fetch up to 2000 workouts for full history)
-                act_limit = 2000 if days >= 365 else max(100, days * 2)
+                # 1. Sync activities
+                act_limit = 2000 if sync_days >= 365 else max(20, sync_days * 5)
                 activities = self.get_activities(limit=act_limit)
                 for act in activities:
                     self.db.upsert_activity(act)
                     
                 # 2. Sync daily metrics for each day
-                from datetime import datetime, timedelta
-                for i in range(days):
+                for i in range(sync_days):
                     d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
                     if on_progress:
                         try:
-                            on_progress(i + 1, days, f"Synkar {d}...")
+                            on_progress(i + 1, sync_days, f"Synkar {d}...")
                         except Exception:
                             pass
 
@@ -146,6 +159,30 @@ class GarminDataHandler:
                     except Exception as e:
                         logger.debug(f"Sync HRV failed for {d}: {e}")
                         
+                    try:
+                        # Body Composition / Weight
+                        bc = self.client.get_body_composition(d)
+                        if bc:
+                            bc_metrics = self.extract_body_composition(bc, d)
+                            if bc_metrics and bc_metrics.get("weight_kg", 0) > 0:
+                                self.db.upsert_body_composition(
+                                    date=d,
+                                    weight_kg=bc_metrics.get("weight_kg", 0.0),
+                                    fat_ratio_pct=bc_metrics.get("fat_ratio_pct", 0.0),
+                                    muscle_mass_kg=bc_metrics.get("muscle_mass_kg", 0.0),
+                                    bone_mass_kg=bc_metrics.get("bone_mass_kg", 0.0),
+                                    water_pct=bc_metrics.get("water_pct", 0.0),
+                                    bmi=bc_metrics.get("bmi", 0.0),
+                                    source="Garmin",
+                                    raw_data=bc
+                                )
+                    except Exception as e:
+                        logger.debug(f"Sync Body Composition failed for {d}: {e}")
+
+                # Save metadata for last sync
+                self.db.set_metadata("last_garmin_sync", datetime.now().strftime("%Y-%m-%d"))
+                self.db.set_metadata("last_garmin_sync_timestamp", datetime.now().isoformat())
+
                 logger.info("Garmin DB background sync completed successfully!")
                 if on_complete:
                     try:
@@ -978,6 +1015,46 @@ class GarminDataHandler:
             'highest': highest,
             'lowest': lowest,
             'current': current
+        }
+
+    @staticmethod
+    def extract_body_composition(data: Any, date_str: str) -> Dict:
+        """Robustly extract body composition metrics (weight, fat, muscle, etc.) from Garmin API response schemas."""
+        if not data:
+            return {}
+        
+        entry = data[0] if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) else {})
+        if not isinstance(entry, dict):
+            return {}
+
+        tot = entry.get("totalAverage") or {}
+        weight_list = entry.get("dateWeightList") or []
+        item = weight_list[-1] if (isinstance(weight_list, list) and len(weight_list) > 0 and isinstance(weight_list[-1], dict)) else (tot if isinstance(tot, dict) else entry)
+
+        raw_weight = item.get("weight") or tot.get("weight") or entry.get("weight") or 0
+        if not raw_weight:
+            return {}
+
+        weight_kg = raw_weight / 1000.0 if raw_weight > 300 else float(raw_weight)
+        
+        fat_ratio = item.get("bodyFat") or tot.get("bodyFat") or entry.get("bodyFat") or entry.get("fatRatio") or 0.0
+        muscle = item.get("muscleMass") or tot.get("muscleMass") or entry.get("muscleMass") or 0.0
+        if muscle > 300:
+            muscle = muscle / 1000.0
+        bone = item.get("boneMass") or tot.get("boneMass") or entry.get("boneMass") or 0.0
+        if bone > 300:
+            bone = bone / 1000.0
+        water = item.get("bodyWater") or tot.get("bodyWater") or entry.get("bodyWater") or 0.0
+        bmi = item.get("bmi") or tot.get("bmi") or entry.get("bmi") or 0.0
+
+        return {
+            "date": date_str,
+            "weight_kg": float(weight_kg),
+            "fat_ratio_pct": float(fat_ratio),
+            "muscle_mass_kg": float(muscle),
+            "bone_mass_kg": float(bone),
+            "water_pct": float(water),
+            "bmi": float(bmi)
         }
 
     def get_body_battery(self, date: Optional[str] = None) -> Dict:

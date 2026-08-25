@@ -2007,7 +2007,7 @@ class HealthChatApp:
                         self.charts_view.set_sync_status(status_str)
                 self.root.after(0, _update)
             try:
-                self.garmin_handler.sync_garmin_history(days=3650, on_progress=_g_prog, on_complete=lambda: _on_source_finished("Garmin"))
+                self.garmin_handler.sync_garmin_history(days=3650, force_full=True, on_progress=_g_prog, on_complete=lambda: _on_source_finished("Garmin"))
             except Exception as e:
                 logger.error(f"Garmin full sync error: {e}")
                 _on_source_finished("Garmin")
@@ -2036,7 +2036,7 @@ class HealthChatApp:
                         self.charts_view.set_sync_status(text)
                 self.root.after(0, lambda: _w_update("⏳ Synkar Withings full historik..."))
                 try:
-                    res = self.sync_withings(days=3650)
+                    res = self.sync_withings(days=3650, force_full=True)
                     cnt = res.get("count", 0) if isinstance(res, dict) else 0
                     self.root.after(0, lambda: _w_update(f"✅ Withings full synk klar ({cnt} mätvärden sparades)"))
                 except Exception as e:
@@ -3113,7 +3113,7 @@ class HealthChatApp:
         thread.daemon = True
         thread.start()
         
-    def sync_withings(self, days: int = 365) -> Dict[str, Any]:
+    def sync_withings(self, days: int = 365, force_full: bool = False) -> Dict[str, Any]:
         """Sync Withings weight and body composition data (runs safely in background)"""
         if self.withings_client_id and self.withings_client_secret and self.withings_refresh_token:
             try:
@@ -3124,7 +3124,7 @@ class HealthChatApp:
                     access_token=self.withings_access_token,
                     db=self.db
                 )
-                res = handler.sync_withings_data(days=days)
+                res = handler.sync_withings_data(days=days, force_full=force_full)
                 if res.get("access_token"):
                     self.withings_access_token = res["access_token"]
                 if res.get("refresh_token"):
