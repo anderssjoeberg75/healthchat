@@ -69,6 +69,7 @@ def test_extract_body_composition():
         "totalAverage": {"weight": 78500},
         "dateWeightList": [
             {
+                "calendarDate": "2026-08-25",
                 "weight": 77000,
                 "bmi": 23.8,
                 "bodyFat": 17.9,
@@ -109,8 +110,10 @@ def test_sync_garmin_history_incremental_and_body_composition(db):
     import time
     time.sleep(0.5)
 
-    # get_body_composition should have been called 3 times (incremental: yesterday, today, +1 overlap) instead of 30
-    assert handler.client.get_body_composition.call_count == 3
+    # get_sleep_data should have been called 3 times (incremental: yesterday, today, +1 overlap) instead of 30
+    assert handler.client.get_sleep_data.call_count == 3
+    # get_body_composition is called with a date range for recent weight records
+    assert handler.client.get_body_composition.call_count == 1
     latest = db.get_latest_body_composition()
     assert latest is not None
     assert latest["weight_kg"] == 80.0

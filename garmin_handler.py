@@ -159,25 +159,29 @@ class GarminDataHandler:
                     except Exception as e:
                         logger.debug(f"Sync HRV failed for {d}: {e}")
                         
-                    try:
-                        # Body Composition / Weight
-                        bc = self.client.get_body_composition(d)
-                        if bc:
-                            bc_metrics = self.extract_body_composition(bc, d)
-                            if bc_metrics and bc_metrics.get("weight_kg", 0) > 0:
+                # 3. Sync Body Composition / Weight across recent range (at least 30 days)
+                try:
+                    bc_days = max(30, sync_days)
+                    start_d = (datetime.now() - timedelta(days=bc_days)).strftime("%Y-%m-%d")
+                    end_d = datetime.now().strftime("%Y-%m-%d")
+                    bc = self.client.get_body_composition(start_d, end_d)
+                    if bc:
+                        bc_records = self.parse_body_composition_records(bc)
+                        for rec in bc_records:
+                            if rec.get("weight_kg", 0) > 0:
                                 self.db.upsert_body_composition(
-                                    date=d,
-                                    weight_kg=bc_metrics.get("weight_kg", 0.0),
-                                    fat_ratio_pct=bc_metrics.get("fat_ratio_pct", 0.0),
-                                    muscle_mass_kg=bc_metrics.get("muscle_mass_kg", 0.0),
-                                    bone_mass_kg=bc_metrics.get("bone_mass_kg", 0.0),
-                                    water_pct=bc_metrics.get("water_pct", 0.0),
-                                    bmi=bc_metrics.get("bmi", 0.0),
+                                    date=rec["date"],
+                                    weight_kg=rec.get("weight_kg", 0.0),
+                                    fat_ratio_pct=rec.get("fat_ratio_pct", 0.0),
+                                    muscle_mass_kg=rec.get("muscle_mass_kg", 0.0),
+                                    bone_mass_kg=rec.get("bone_mass_kg", 0.0),
+                                    water_pct=rec.get("water_pct", 0.0),
+                                    bmi=rec.get("bmi", 0.0),
                                     source="Garmin",
-                                    raw_data=bc
+                                    raw_data=rec.get("raw_json")
                                 )
-                    except Exception as e:
-                        logger.debug(f"Sync Body Composition failed for {d}: {e}")
+                except Exception as e:
+                    logger.debug(f"Sync Body Composition range failed: {e}")
 
                 # Save metadata for last sync
                 self.db.set_metadata("last_garmin_sync", datetime.now().strftime("%Y-%m-%d"))
@@ -1018,44 +1022,90 @@ class GarminDataHandler:
         }
 
     @staticmethod
+    def parse_body_composition_records(data: Any) -> List[Dict]:
+        """
+        Parse Garmin body composition response (e.g. from dateRange) into a list of daily metric dicts.
+        Handles dateWeightList arrays and totalAverage dicts.
+        """
+        if not data or not isinstance(data, dict):
+            return []
+
+        records = []
+        weight_list = data.get("dateWeightList") or []
+        if isinstance(weight_list, list) and len(weight_list) > 0:
+            for item in weight_list:
+                if not isinstance(item, dict):
+                    continue
+
+                cal_date = item.get("calendarDate") or item.get("date")
+                date_str = None
+                if isinstance(cal_date, (int, float)):
+                    dt = datetime.fromtimestamp(cal_date / 1000.0)
+                    date_str = dt.strftime("%Y-%m-%d")
+                elif isinstance(cal_date, str) and len(cal_date) >= 10:
+                    date_str = cal_date[:10]
+
+                if not date_str:
+                    continue
+
+                raw_weight = item.get("weight") or 0
+                if not raw_weight:
+                    continue
+
+                weight_kg = raw_weight / 1000.0 if raw_weight > 300 else float(raw_weight)
+                fat_ratio = item.get("bodyFat") or item.get("fatRatio") or 0.0
+                muscle = item.get("muscleMass") or 0.0
+                if muscle > 300:
+                    muscle = muscle / 1000.0
+                bone = item.get("boneMass") or 0.0
+                if bone > 300:
+                    bone = bone / 1000.0
+                water = item.get("bodyWater") or 0.0
+                bmi = item.get("bmi") or 0.0
+
+                records.append({
+                    "date": date_str,
+                    "weight_kg": float(weight_kg),
+                    "fat_ratio_pct": float(fat_ratio),
+                    "muscle_mass_kg": float(muscle),
+                    "bone_mass_kg": float(bone),
+                    "water_pct": float(water),
+                    "bmi": float(bmi),
+                    "raw_json": item
+                })
+
+        if not records:
+            tot = data.get("totalAverage") or {}
+            if isinstance(tot, dict) and tot.get("weight"):
+                date_str = data.get("date") or data.get("startDate") or datetime.now().strftime("%Y-%m-%d")
+                raw_weight = tot.get("weight", 0)
+                weight_kg = raw_weight / 1000.0 if raw_weight > 300 else float(raw_weight)
+                muscle = tot.get("muscleMass", 0.0)
+                if muscle > 300:
+                    muscle = muscle / 1000.0
+                bone = tot.get("boneMass", 0.0)
+                if bone > 300:
+                    bone = bone / 1000.0
+                records.append({
+                    "date": date_str,
+                    "weight_kg": float(weight_kg),
+                    "fat_ratio_pct": float(tot.get("bodyFat", 0.0)),
+                    "muscle_mass_kg": float(muscle),
+                    "bone_mass_kg": float(bone),
+                    "water_pct": float(tot.get("bodyWater", 0.0)),
+                    "bmi": float(tot.get("bmi", 0.0)),
+                    "raw_json": tot
+                })
+
+        return records
+
+    @staticmethod
     def extract_body_composition(data: Any, date_str: str) -> Dict:
         """Robustly extract body composition metrics (weight, fat, muscle, etc.) from Garmin API response schemas."""
-        if not data:
-            return {}
-        
-        entry = data[0] if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) else {})
-        if not isinstance(entry, dict):
-            return {}
-
-        tot = entry.get("totalAverage") or {}
-        weight_list = entry.get("dateWeightList") or []
-        item = weight_list[-1] if (isinstance(weight_list, list) and len(weight_list) > 0 and isinstance(weight_list[-1], dict)) else (tot if isinstance(tot, dict) else entry)
-
-        raw_weight = item.get("weight") or tot.get("weight") or entry.get("weight") or 0
-        if not raw_weight:
-            return {}
-
-        weight_kg = raw_weight / 1000.0 if raw_weight > 300 else float(raw_weight)
-        
-        fat_ratio = item.get("bodyFat") or tot.get("bodyFat") or entry.get("bodyFat") or entry.get("fatRatio") or 0.0
-        muscle = item.get("muscleMass") or tot.get("muscleMass") or entry.get("muscleMass") or 0.0
-        if muscle > 300:
-            muscle = muscle / 1000.0
-        bone = item.get("boneMass") or tot.get("boneMass") or entry.get("boneMass") or 0.0
-        if bone > 300:
-            bone = bone / 1000.0
-        water = item.get("bodyWater") or tot.get("bodyWater") or entry.get("bodyWater") or 0.0
-        bmi = item.get("bmi") or tot.get("bmi") or entry.get("bmi") or 0.0
-
-        return {
-            "date": date_str,
-            "weight_kg": float(weight_kg),
-            "fat_ratio_pct": float(fat_ratio),
-            "muscle_mass_kg": float(muscle),
-            "bone_mass_kg": float(bone),
-            "water_pct": float(water),
-            "bmi": float(bmi)
-        }
+        records = GarminDataHandler.parse_body_composition_records(data)
+        if records:
+            return records[-1]
+        return {}
 
     def get_body_battery(self, date: Optional[str] = None) -> Dict:
         """
