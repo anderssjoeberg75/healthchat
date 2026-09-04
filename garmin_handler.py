@@ -58,6 +58,7 @@ class GarminDataHandler:
             
         def _sync_worker():
             try:
+                self._ensure_display_name()
                 from datetime import datetime, timedelta
                 sync_days = days
                 if not force_full:
