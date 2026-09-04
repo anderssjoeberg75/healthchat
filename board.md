@@ -13,6 +13,8 @@ Projektet är en Tkinter-baserad Windows-desktopapp (~9 000 rader Python) som ko
 
 Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-opus-4-6` m.fl. är giltiga), DB-lagrets trådsäkerhet, och Withings token-rotation (persisteras korrekt i `sync_withings`).
 
+> **Uppföljande genomgång 2026-09-04:** Lade till **P1-5** (feldaterad body-composition), **P1-6** (HTTP utan timeout i Fitbit/Strava), **P1-7** (Fitbit saknar token-refresh), konkretiserade **P2-1** (nakna `except:`) och la till **P2-9** (versions-drift). Alla verifierade mot koden; P1-5 bekräftas dessutom av ett rött befintligt test.
+
 ---
 
 ## 🔴 P0 – Buggar & säkerhet
@@ -49,12 +51,34 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 - **Fil:** [withings_handler.py:31-43](withings_handler.py)
 - **Åtgärdad:** Initierade `self.last_error = None` i `__init__`.
 
+### [ ] P1-5: `extract_body_composition` ignorerar sitt `date_str`-argument → invägningar feldateras till idag
+- **Fil:** [garmin_handler.py:1118-1123](garmin_handler.py) (`extract_body_composition`), [garmin_handler.py:1092-1095](garmin_handler.py) (`parse_body_composition_records`, `totalAverage`-grenen)
+- **Problem:** `extract_body_composition(data, date_str)` tar emot ett `date_str` men skickar det aldrig vidare till `parse_body_composition_records`. När svaret bara har ett `totalAverage` (utan `date`/`startDate`) faller parsern tillbaka på `datetime.now()`, så mätningen får **dagens** datum i stället för det avsedda. En Withings/Garmin-invägning kan därmed hamna på fel dag i `body_composition`-tabellen och i vikt-trenden.
+- **Bevis:** Det befintliga testet [tests/test_garmin_handler.py](tests/test_garmin_handler.py) `test_extract_body_composition` misslyckas idag: `assert res["date"] == "2026-08-25"` men får dagens datum.
+- **Föreslagen lösning:** Ge `parse_body_composition_records(data, default_date=None)` en parameter och använd `default_date` i stället för `datetime.now()` i `totalAverage`-grenen; låt `extract_body_composition` skicka in `date_str`. Behåll `datetime.now()` endast som sista reserv om `default_date` saknas.
+- **Acceptanskriterier:** `test_extract_body_composition` grönt; `dateWeightList`-formatet (som har egna datum) påverkas inte; hela sviten `python -m pytest` grön.
+
+### [ ] P1-6: HTTP-anrop utan `timeout` i Fitbit/Strava → sync-tråden kan hänga för evigt
+- **Fil:** [fitbit_handler.py:108](fitbit_handler.py), [fitbit_handler.py:162](fitbit_handler.py); [strava_handler.py:119](strava_handler.py), [strava_handler.py:148](strava_handler.py), [strava_handler.py:184](strava_handler.py), [strava_handler.py:189](strava_handler.py)
+- **Problem:** Samtliga `requests.get/post` i Fitbit- och Strava-handlarna saknar `timeout`. Vid en stiltje i nätverket blockerar anropet tråden oändligt – Check-in/knappen fastnar på "Synkar…" och slutför aldrig. (Withings gör redan rätt: `requests.post(..., timeout=15)`.)
+- **Föreslagen lösning:** Lägg `timeout=(5, 30)` (connect, read) på varje `requests`-anrop i båda filerna. Fånga `requests.exceptions.Timeout`/`RequestException` och logga + sätt `last_error` i stället för att låta tråden hänga.
+- **Acceptanskriterier:** Inget `requests`-anrop i `fitbit_handler.py`/`strava_handler.py` saknar `timeout`; en simulerad timeout avbryter synken med ett loggat fel i stället för att hänga.
+
+### [ ] P1-7: Fitbit uppdaterar aldrig sin OAuth-token → integrationen slutar tyst spara data efter att token gått ut
+- **Fil:** [fitbit_handler.py:116-119](fitbit_handler.py) (`_get_headers`), synk-loopen [fitbit_handler.py:159-165](fitbit_handler.py); jämför [strava_handler.py:137-160](strava_handler.py) som gör rätt
+- **Problem:** `FitbitHandler` har ingen `refresh_access_token`. `_get_headers` använder bara den lagrade `access_token` och synk-loopen hoppar tyst över dagar som ger `401`. Fitbits access-token går ut (~8 h), varefter synken "lyckas" men sparar inget – användaren måste logga in manuellt igen. Strava löser detta (uppdaterar token + gör en retry på 401 och persisterar via `save_tokens`).
+- **Föreslagen lösning:** Implementera `refresh_access_token()` (grant_type=`refresh_token`, spara via `save_tokens`), anropa den i `_get_headers` när token är nära utgång (om `expires_at` finns), och gör en engångs-retry på `401` i synk-loopen – spegla Stravas mönster. Lägg `timeout` enligt P1-6.
+- **Acceptanskriterier:** Efter att access-token gått ut hämtar och sparar en ny Check-in data utan manuell ominloggning; refreshade tokens skrivs till `fitbit_tokens.json`.
+
 ---
 
 ## 🟡 P2 – Kodkvalitet & underhåll
 
-### [ ] P2-1: Nakna `except:` som sväljer fel
-- **Fil:** [ai_client.py](ai_client.py) och övriga filer.
+### [ ] P2-1: Nakna `except:` som sväljer fel (inkl. `KeyboardInterrupt`/`SystemExit`)
+- **Fil & platser:** [HealthChatDesktop.py](HealthChatDesktop.py) rad 4048, 4057, 4072, 4082, 4091, 4098, 5244, 5272, 5304, 5323, 5425; [ai_client.py](ai_client.py) rad 156, 361, 394.
+- **Problem:** Ett naket `except:` fångar även `KeyboardInterrupt` och `SystemExit`, vilket kan göra appen svår att avbryta och döljer verkliga fel.
+- **Föreslagen lösning:** Ersätt varje `except:` med `except Exception:` (eller en mer specifik typ) och logga på `debug`/`warning`-nivå där det är meningsfullt.
+- **Acceptanskriterier:** Inga nakna `except:` kvar i kodbasen (`grep -rn "except:" *.py` tomt).
 
 ### [x] P2-2: CJK-regex raderar tyst all kinesisk text ur AI-svar
 - **Fil:** [ai_client.py:498](ai_client.py)
@@ -83,6 +107,12 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 ### [x] P2-8: Regressionstester för de nya fyndens vägar
 - **Fil:** [tests/test_ai_client.py](tests/test_ai_client.py)
 - **Åtgärdad:** Skrev enhetstest som verifierar glidande fönster och att kontext inte dubbellagras.
+
+### [ ] P2-9: `requirements.txt` versions-header ligger efter (v4.0.4 vs släppt v4.0.5)
+- **Fil:** [requirements.txt:1](requirements.txt) (`# HealthChat Desktop v4.0.4 Dependencies`), jämför [CHANGELOG.md](CHANGELOG.md) (`## [4.0.5] - 2026-08-20`)
+- **Problem:** Kommentarshuvudet i `requirements.txt` säger fortfarande v4.0.4 trots att v4.0.5 är släppt – liten men förvirrande drift (samma sak som P2-7 avsåg).
+- **Föreslagen lösning:** Uppdatera versionskommentaren till aktuell version och överväg en enda källa för versionsnumret (t.ex. `__version__`).
+- **Acceptanskriterier:** Versionshuvudet matchar senaste släppta version i `CHANGELOG.md`.
 
 ---
 
@@ -131,5 +161,6 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 ## Förslag på ordning
 1. **P0-1** (snabb, tydlig krasch) → **P0-3** (trådsäkerhet) → **P0-2** (säkerhet, större).
 2. **P1-1** + **P1-2** + **P2-4** tillsammans (samma kontext-/minneskod).
-3. Övriga P1/P2 löpande.
-4. **F-1** (daglig kaloriförbränning) – fristående, kan tas när som helst.
+3. **Nya (2026-09-04):** **P1-5** (feldaterad vikt – liten & tydlig, un-breakar ett test) → **P1-6** (timeouts) → **P1-7** (Fitbit token-refresh, bygger på P1-6).
+4. Övriga P1/P2 löpande (**P2-1** nakna except, **P2-9** version).
+5. **F-1** (daglig kaloriförbränning) – fristående, kan tas när som helst.
