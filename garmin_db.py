@@ -137,6 +137,24 @@ class GarminDatabase:
             )
             """)
 
+            # Daily Calorie Burn Table (estimated resting + steps + workouts)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS calorie_burn (
+                date TEXT PRIMARY KEY,
+                total_burn INTEGER DEFAULT 0,
+                resting_burn INTEGER DEFAULT 0,
+                steps_burn INTEGER DEFAULT 0,
+                workout_burn INTEGER DEFAULT 0,
+                bmr_full INTEGER DEFAULT 0,
+                steps INTEGER DEFAULT 0,
+                weight_kg REAL DEFAULT 0,
+                day_fraction REAL DEFAULT 1.0,
+                bmr_source TEXT DEFAULT '',
+                updated_at TEXT,
+                raw_json TEXT
+            )
+            """)
+
             # Sync Metadata Table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS sync_metadata (
@@ -149,6 +167,7 @@ class GarminDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(activity_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_body_comp_date ON body_composition(date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_calorie_burn_date ON calorie_burn(date)")
             
             conn.commit()
             logger.info(f"Database initialized at {self.db_path}")
@@ -318,6 +337,15 @@ class GarminDatabase:
             """, (start_date,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_daily_summary(self, date: Optional[str] = None) -> Optional[Dict]:
+        """Return the daily summary row for a single date (defaults to today)."""
+        date = self._normalize_date(date)
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM daily_summary WHERE date = ?", (date,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def get_sleep_history(self, days: int = 30) -> List[Dict]:
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         with self.get_connection() as conn:
@@ -468,6 +496,69 @@ class GarminDatabase:
             cursor.execute("""
             SELECT * FROM body_composition WHERE date >= ? ORDER BY date ASC
             """, (start_date,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    # --- CALORIE BURN (estimated resting + steps + workouts) ---
+
+    def upsert_calorie_burn(
+        self,
+        date: str,
+        total_burn: int = 0,
+        resting_burn: int = 0,
+        steps_burn: int = 0,
+        workout_burn: int = 0,
+        bmr_full: int = 0,
+        steps: int = 0,
+        weight_kg: float = 0.0,
+        day_fraction: float = 1.0,
+        bmr_source: str = '',
+        raw_data: Optional[Dict] = None,
+    ):
+        """Store (or update) the estimated calorie burn for a given date.
+
+        The estimate for the current day grows as the day elapses, so re-running
+        it simply overwrites the row with the latest, more-complete value.
+        """
+        date = self._normalize_date(date)
+        with self.get_connection() as conn:
+            conn.execute("""
+            INSERT INTO calorie_burn (
+                date, total_burn, resting_burn, steps_burn, workout_burn,
+                bmr_full, steps, weight_kg, day_fraction, bmr_source, updated_at, raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET
+                total_burn=excluded.total_burn,
+                resting_burn=excluded.resting_burn,
+                steps_burn=excluded.steps_burn,
+                workout_burn=excluded.workout_burn,
+                bmr_full=excluded.bmr_full,
+                steps=excluded.steps,
+                weight_kg=excluded.weight_kg,
+                day_fraction=excluded.day_fraction,
+                bmr_source=excluded.bmr_source,
+                updated_at=excluded.updated_at,
+                raw_json=excluded.raw_json
+            """, (
+                date, int(total_burn), int(resting_burn), int(steps_burn), int(workout_burn),
+                int(bmr_full), int(steps), float(weight_kg or 0.0), float(day_fraction or 0.0),
+                str(bmr_source or ''), datetime.now().isoformat(),
+                json.dumps(raw_data) if raw_data else None,
+            ))
+            conn.commit()
+
+    def get_calorie_burn_history(self, days: int = 30) -> List[Dict]:
+        """Return estimated calorie-burn rows from the last `days` days (ascending)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if days <= 0 or days >= 3650:
+                cursor.execute("SELECT * FROM calorie_burn ORDER BY date ASC")
+            else:
+                start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+                cursor.execute(
+                    "SELECT * FROM calorie_burn WHERE date >= ? ORDER BY date ASC",
+                    (start_date,),
+                )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_metadata(self, key: str, default: Optional[str] = None) -> Optional[str]:

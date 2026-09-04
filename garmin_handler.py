@@ -158,7 +158,22 @@ class GarminDataHandler:
                             )
                     except Exception as e:
                         logger.debug(f"Sync HRV failed for {d}: {e}")
-                        
+
+                    try:
+                        # Daily Summary (steps, calories, BMR) - powers the calorie-burn card
+                        day_summary = self.client.get_user_summary(d)
+                        if day_summary and isinstance(day_summary, dict):
+                            self.db.upsert_daily_summary(
+                                date=d,
+                                steps=int(day_summary.get("totalSteps", 0) or 0),
+                                calories=int(day_summary.get("totalKilocalories", 0) or 0),
+                                active_calories=int(day_summary.get("activeKilocalories", 0) or 0),
+                                resting_hr=int(day_summary.get("restingHeartRate", 0) or 0),
+                                raw_data=day_summary,
+                            )
+                    except Exception as e:
+                        logger.debug(f"Sync daily summary failed for {d}: {e}")
+
                 # 3. Sync Body Composition / Weight across recent range (at least 30 days)
                 try:
                     bc_days = max(30, sync_days)

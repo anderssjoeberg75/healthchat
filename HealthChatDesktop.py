@@ -418,6 +418,41 @@ class SettingsDialog(tk.Toplevel):
         ttk.Entry(main_frame, textvariable=self.strava_refresh_token_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
         current_row += 1
 
+        # Personal Profile Section (for daily calorie-burn estimate / BMR)
+        profile_header = ttk.Label(main_frame,
+                                   text="Personlig profil (för kaloriberäkning)",
+                                   style='Settings.Header.TLabel')
+        profile_header.grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 4))
+        current_row += 1
+
+        ttk.Label(main_frame,
+                  text="Används för att uppskatta din vilo-förbränning (BMR). Vikt hämtas normalt från\n"
+                       "dina mätningar – fyll bara i vikt här om du saknar en ansluten våg.",
+                  style='Settings.Help.TLabel').grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+        current_row += 1
+
+        ttk.Label(main_frame, text="Kön (för BMR):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.user_sex_var = tk.StringVar(value=self.current_config.get('user_sex', 'male') or 'male')
+        sex_combo = ttk.Combobox(main_frame, textvariable=self.user_sex_var,
+                                 values=['male', 'female'], state='readonly', width=47)
+        sex_combo.grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
+        ttk.Label(main_frame, text="Längd (cm):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.user_height_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_height_cm', '')))
+        ttk.Entry(main_frame, textvariable=self.user_height_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
+        ttk.Label(main_frame, text="Ålder (år):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.user_age_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_age', '')))
+        ttk.Entry(main_frame, textvariable=self.user_age_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
+        ttk.Label(main_frame, text="Vikt (kg, valfritt):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        self.user_weight_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_weight_kg', '')))
+        ttk.Entry(main_frame, textvariable=self.user_weight_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+
         # Buttons
         button_frame = ttk.Frame(main_frame, style='Settings.TFrame')
         button_frame.grid(row=current_row, column=0, columnspan=2, pady=(30, 0))
@@ -603,10 +638,31 @@ class SettingsDialog(tk.Toplevel):
         """Called when provider selection changes"""
         self.create_api_key_fields()
     
+    @staticmethod
+    def _fmt_profile_number(value):
+        """Format a stored profile number for display (blank for 0/empty)."""
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return ''
+        if num <= 0:
+            return ''
+        # Show integers without a trailing ".0"
+        return str(int(num)) if float(num).is_integer() else str(num)
+
+    @staticmethod
+    def _parse_profile_number(value):
+        """Parse a profile entry into a non-negative float (0.0 when blank/invalid)."""
+        try:
+            num = float(str(value).replace(',', '.').strip())
+        except (TypeError, ValueError):
+            return 0.0
+        return num if num > 0 else 0.0
+
     def save_settings(self):
         """Save settings and close dialog"""
         selected_provider = self.provider_var.get()
-        
+
         self.result = {
             'ai_provider': selected_provider,
             'garmin_email': self.email_var.get(),
@@ -616,7 +672,12 @@ class SettingsDialog(tk.Toplevel):
             'withings_refresh_token': getattr(self, 'withings_refresh_token_var', tk.StringVar()).get(),
             'strava_client_id': getattr(self, 'strava_client_id_var', tk.StringVar()).get(),
             'strava_client_secret': getattr(self, 'strava_client_secret_var', tk.StringVar()).get(),
-            'strava_refresh_token': getattr(self, 'strava_refresh_token_var', tk.StringVar()).get()
+            'strava_refresh_token': getattr(self, 'strava_refresh_token_var', tk.StringVar()).get(),
+            # User profile (for calorie-burn estimate)
+            'user_sex': getattr(self, 'user_sex_var', tk.StringVar(value='male')).get() or 'male',
+            'user_height_cm': self._parse_profile_number(getattr(self, 'user_height_var', tk.StringVar()).get()),
+            'user_age': self._parse_profile_number(getattr(self, 'user_age_var', tk.StringVar()).get()),
+            'user_weight_kg': self._parse_profile_number(getattr(self, 'user_weight_var', tk.StringVar()).get()),
         }
         
         # Save ALL providers' keys (not just selected one)
@@ -1333,6 +1394,14 @@ class HealthChatApp:
         self.strava_refresh_token = ''
         self.strava_access_token = ''
 
+        # User profile (used for the daily calorie-burn estimate / BMR).
+        # Weight is normally taken from measurements; a manual value here is an
+        # optional fallback. Sex is used only for the BMR formula.
+        self.user_sex = 'male'
+        self.user_height_cm = 0.0
+        self.user_age = 0
+        self.user_weight_kg = 0.0
+
         self.auto_login = True  # Default to auto-login enabled
         self.dark_mode = False  # Start in light mode
         self.window_state_restored = False  # Track if window position was restored
@@ -1433,6 +1502,12 @@ class HealthChatApp:
                     self.strava_refresh_token = config.get('strava_refresh_token', '')
                     self.strava_access_token = config.get('strava_access_token', '')
 
+                    # User profile (for calorie-burn estimate)
+                    self.user_sex = config.get('user_sex', 'male') or 'male'
+                    self.user_height_cm = config.get('user_height_cm', 0.0) or 0.0
+                    self.user_age = config.get('user_age', 0) or 0
+                    self.user_weight_kg = config.get('user_weight_kg', 0.0) or 0.0
+
                     self.auto_login = config.get('auto_login', True)
                     self.dark_mode = config.get('dark_mode', False)
                     
@@ -1530,6 +1605,11 @@ class HealthChatApp:
                 'strava_client_secret': getattr(self, 'strava_client_secret', '') or '',
                 'strava_refresh_token': getattr(self, 'strava_refresh_token', '') or '',
                 'strava_access_token': getattr(self, 'strava_access_token', '') or '',
+                # User profile (for calorie-burn estimate)
+                'user_sex': getattr(self, 'user_sex', 'male') or 'male',
+                'user_height_cm': getattr(self, 'user_height_cm', 0.0) or 0.0,
+                'user_age': getattr(self, 'user_age', 0) or 0,
+                'user_weight_kg': getattr(self, 'user_weight_kg', 0.0) or 0.0,
                 'auto_login': self.auto_login,
                 'dark_mode': self.dark_mode,
                 # Window state
@@ -1540,7 +1620,16 @@ class HealthChatApp:
             logger.info("Configuration saved")
         except Exception as e:
             logger.error(f"Error saving config: {e}")
-    
+
+    def get_user_profile(self) -> dict:
+        """Return the user profile used for the daily calorie-burn estimate."""
+        return {
+            'sex': getattr(self, 'user_sex', 'male') or 'male',
+            'height_cm': getattr(self, 'user_height_cm', 0.0) or 0.0,
+            'age': getattr(self, 'user_age', 0) or 0,
+            'weight_kg': getattr(self, 'user_weight_kg', 0.0) or 0.0,
+        }
+
     def on_closing(self):
         """Handle window close event - save state and exit"""
         try:
@@ -2449,7 +2538,8 @@ class HealthChatApp:
             db=self.db,
             colors=self.colors,
             on_toggle_chat=self.toggle_chat_pane,
-            on_checkin=self.perform_unified_checkin
+            on_checkin=self.perform_unified_checkin,
+            profile=self.get_user_profile()
         )
         self.charts_view.pack(fill=tk.BOTH, expand=True)
         
@@ -2946,9 +3036,13 @@ class HealthChatApp:
             'garmin_password': self.garmin_password or '',
             'withings_client_id': self.withings_client_id or '',
             'withings_client_secret': self.withings_client_secret or '',
-            'withings_refresh_token': self.withings_refresh_token or ''
+            'withings_refresh_token': self.withings_refresh_token or '',
+            'user_sex': getattr(self, 'user_sex', 'male') or 'male',
+            'user_height_cm': getattr(self, 'user_height_cm', 0.0) or 0.0,
+            'user_age': getattr(self, 'user_age', 0) or 0,
+            'user_weight_kg': getattr(self, 'user_weight_kg', 0.0) or 0.0
         }
-        
+
         dialog = SettingsDialog(self.root, current_config, colors=self.colors)
         self.root.wait_window(dialog)
         
@@ -2979,8 +3073,21 @@ class HealthChatApp:
             self.withings_client_id = dialog.result.get('withings_client_id', '')
             self.withings_client_secret = dialog.result.get('withings_client_secret', '')
             self.withings_refresh_token = dialog.result.get('withings_refresh_token', '')
-            
+
+            # Update user profile (for calorie-burn estimate)
+            self.user_sex = dialog.result.get('user_sex', 'male') or 'male'
+            self.user_height_cm = dialog.result.get('user_height_cm', 0.0) or 0.0
+            self.user_age = dialog.result.get('user_age', 0) or 0
+            self.user_weight_kg = dialog.result.get('user_weight_kg', 0.0) or 0.0
+
             self.save_config()
+
+            # Push the refreshed profile into the dashboard so the calorie card updates.
+            try:
+                if hasattr(self, 'charts_view') and self.charts_view:
+                    self.charts_view.set_profile(self.get_user_profile())
+            except Exception as e:
+                logger.error(f"Could not update charts profile: {e}")
             
             # If already authenticated, reinitialize AI client
             if self.ai_client:

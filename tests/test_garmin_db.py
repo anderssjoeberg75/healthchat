@@ -27,6 +27,7 @@ def test_init_creates_all_tables(db):
         "stress_data",
         "hrv_data",
         "activities",
+        "calorie_burn",
     }:
         assert expected in tables
 
@@ -68,6 +69,60 @@ def test_upsert_daily_summary_updates_existing_row(db, today_str):
         ).fetchall()
     assert len(rows) == 1  # upsert, not a second insert
     assert rows[0]["total_steps"] == 999
+
+
+def test_get_daily_summary_single_date(db, today_str, days_ago):
+    db.upsert_daily_summary(today_str, steps=8500, raw_data={"bmrKilocalories": 1700})
+    db.upsert_daily_summary(days_ago(3), steps=4000)
+    row = db.get_daily_summary(today_str)
+    assert row is not None
+    assert row["total_steps"] == 8500
+    assert json.loads(row["raw_json"])["bmrKilocalories"] == 1700
+
+
+def test_get_daily_summary_missing_returns_none(db, days_ago):
+    assert db.get_daily_summary(days_ago(99)) is None
+
+
+# --- Calorie burn --------------------------------------------------------------
+
+def test_upsert_and_read_calorie_burn(db, today_str):
+    db.upsert_calorie_burn(
+        today_str, total_burn=1600, resting_burn=900, steps_burn=400,
+        workout_burn=300, bmr_full=1730, steps=9000, weight_kg=80.0,
+        day_fraction=0.52, bmr_source="device",
+    )
+    history = db.get_calorie_burn_history(days=7)
+    assert len(history) == 1
+    row = history[0]
+    assert row["date"] == today_str
+    assert row["total_burn"] == 1600
+    assert row["steps"] == 9000
+    assert row["weight_kg"] == pytest.approx(80.0)
+    assert row["bmr_source"] == "device"
+    assert row["updated_at"]  # timestamp is stamped automatically
+
+
+def test_upsert_calorie_burn_updates_existing_row(db, today_str):
+    db.upsert_calorie_burn(today_str, total_burn=800, day_fraction=0.3)
+    db.upsert_calorie_burn(today_str, total_burn=1500, day_fraction=0.6)
+    history = db.get_calorie_burn_history(days=7)
+    assert len(history) == 1  # upsert, today's row grows in place
+    assert history[0]["total_burn"] == 1500
+
+
+def test_calorie_burn_history_excludes_old_and_orders_ascending(db, days_ago):
+    db.upsert_calorie_burn(days_ago(1), total_burn=1000)
+    db.upsert_calorie_burn(days_ago(5), total_burn=2000)
+    db.upsert_calorie_burn(days_ago(60), total_burn=3000)
+    history = db.get_calorie_burn_history(days=30)
+    dates = [row["date"] for row in history]
+    assert days_ago(60) not in dates
+    assert dates == sorted(dates)
+
+
+def test_calorie_burn_history_empty_by_default(db):
+    assert db.get_calorie_burn_history(days=30) == []
 
 
 # --- Sleep ---------------------------------------------------------------------
