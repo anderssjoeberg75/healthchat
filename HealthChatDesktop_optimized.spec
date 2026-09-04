@@ -37,6 +37,8 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=extra_hidden + [
+        'ai_client',
+        'garmin_handler',
         'garmin_db',
         'fitbit_handler',
         'withings_handler',

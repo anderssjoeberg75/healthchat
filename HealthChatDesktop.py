@@ -3938,7 +3938,7 @@ class HealthChatApp:
                 fieldbackground=self.colors['card_bg'],
                 foreground=self.colors['text']
             )
-        except:
+        except Exception:
             pass
         
         # Update suggestions label
@@ -3947,7 +3947,7 @@ class HealthChatApp:
                 background=self.colors['card_bg'],
                 foreground=self.colors['text_secondary']
             )
-        except:
+        except Exception:
             pass
         
         # Update all frames and labels recursively
@@ -3962,7 +3962,7 @@ class HealthChatApp:
             if widget_type in ('TFrame', 'Frame'):
                 try:
                     widget.configure(background=self.colors['bg'])
-                except:
+                except Exception:
                     pass
             
             # Update Label colors
@@ -3972,7 +3972,7 @@ class HealthChatApp:
                         background=self.colors['bg'],
                         foreground=self.colors['text']
                     )
-                except:
+                except Exception:
                     pass
             
             # Update specific styled labels
@@ -3981,14 +3981,14 @@ class HealthChatApp:
                     # Check if it's a card background element
                     if 'Card' in str(widget.winfo_parent()):
                         widget.configure(background=self.colors['card_bg'])
-                except:
+                except Exception:
                     pass
             
             # Recursively update children
             for child in widget.winfo_children():
                 self._update_widget_colors(child)
         
-        except:
+        except Exception:
             pass
     
     def open_search(self):
@@ -5131,10 +5131,10 @@ class ChatHistoryViewer(tk.Toplevel):
                 
                 # Try to load custom name from JSON
                 try:
-                    with open(file, 'r') as f:
+                    with open(file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         custom_name = data.get('custom_name')
-                except:
+                except (json.JSONDecodeError, OSError):
                     custom_name = None
                 
                 # Format: chat_YYYYMMDD_HHMMSS.json or chat_YYYYMMDD_HHMMSS_CustomName.json
@@ -5162,7 +5162,7 @@ class ChatHistoryViewer(tk.Toplevel):
                             display = f"{date_str} {time_str}"
                     else:
                         display = file.name
-                except:
+                except Exception:
                     display = file.name
                 
                 self.chat_listbox.insert(tk.END, display)
@@ -5184,7 +5184,7 @@ class ChatHistoryViewer(tk.Toplevel):
         file = self.chat_files[index]
         
         try:
-            with open(file, 'r') as f:
+            with open(file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             # Update info
@@ -5194,7 +5194,7 @@ class ChatHistoryViewer(tk.Toplevel):
             try:
                 dt = datetime.fromisoformat(saved_at)
                 date_str = dt.strftime("%B %d, %Y at %I:%M %p")
-            except:
+            except (ValueError, TypeError):
                 date_str = saved_at
             
             self.info_label.config(text=f"Saved: {date_str} | {len(messages)} messages")
@@ -5213,7 +5213,7 @@ class ChatHistoryViewer(tk.Toplevel):
                 try:
                     ts = datetime.fromisoformat(timestamp)
                     ts_str = ts.strftime("%H:%M")
-                except:
+                except (ValueError, TypeError):
                     ts_str = timestamp[:5] if timestamp else ""
                 
                 self.chat_display.insert(tk.END, f"[{ts_str}] ", 'timestamp')
@@ -5312,10 +5312,10 @@ class ChatHistoryViewer(tk.Toplevel):
         
         # Load current name
         try:
-            with open(file, 'r') as f:
+            with open(file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 current_name = data.get('custom_name', '')
-        except:
+        except (json.JSONDecodeError, OSError):
             current_name = ''
         
         # Prompt for new name

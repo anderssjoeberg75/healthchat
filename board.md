@@ -53,8 +53,9 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ## 🟡 P2 – Kodkvalitet & underhåll
 
-### [ ] P2-1: Nakna `except:` som sväljer fel
-- **Fil:** [ai_client.py](ai_client.py) och övriga filer.
+### [x] P2-1: Nakna `except:` som sväljer fel
+- **Fil:** [ai_client.py](ai_client.py) och [HealthChatDesktop.py](HealthChatDesktop.py)
+- **Åtgärdad:** Ersatte samtliga nakna `except:` (14 st) i kodbasen med specifika undantagstyper (`(json.JSONDecodeError, OSError)`, `(ValueError, TypeError)`, `(IndexError, ValueError)` samt `Exception` där bredare fångst krävs), vilket förhindrar att `KeyboardInterrupt` och `SystemExit` sväljs oavsiktligt.
 
 ### [x] P2-2: CJK-regex raderar tyst all kinesisk text ur AI-svar
 - **Fil:** [ai_client.py:498](ai_client.py)

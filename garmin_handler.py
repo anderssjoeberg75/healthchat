@@ -1022,7 +1022,7 @@ class GarminDataHandler:
         }
 
     @staticmethod
-    def parse_body_composition_records(data: Any) -> List[Dict]:
+    def parse_body_composition_records(data: Any, default_date: Optional[str] = None) -> List[Dict]:
         """
         Parse Garmin body composition response (e.g. from dateRange) into a list of daily metric dicts.
         Handles dateWeightList arrays and totalAverage dicts.
@@ -1077,7 +1077,7 @@ class GarminDataHandler:
         if not records:
             tot = data.get("totalAverage") or {}
             if isinstance(tot, dict) and tot.get("weight"):
-                date_str = data.get("date") or data.get("startDate") or datetime.now().strftime("%Y-%m-%d")
+                date_str = data.get("date") or data.get("startDate") or default_date or datetime.now().strftime("%Y-%m-%d")
                 raw_weight = tot.get("weight", 0)
                 weight_kg = raw_weight / 1000.0 if raw_weight > 300 else float(raw_weight)
                 muscle = tot.get("muscleMass", 0.0)
@@ -1102,7 +1102,7 @@ class GarminDataHandler:
     @staticmethod
     def extract_body_composition(data: Any, date_str: str) -> Dict:
         """Robustly extract body composition metrics (weight, fat, muscle, etc.) from Garmin API response schemas."""
-        records = GarminDataHandler.parse_body_composition_records(data)
+        records = GarminDataHandler.parse_body_composition_records(data, default_date=date_str)
         if records:
             return records[-1]
         return {}
