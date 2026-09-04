@@ -448,9 +448,11 @@ class SettingsDialog(tk.Toplevel):
         ttk.Entry(main_frame, textvariable=self.user_age_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
         current_row += 1
 
-        ttk.Label(main_frame, text="Vikt (kg, valfritt):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
+        ttk.Label(main_frame, text="Vikt (kg):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
         self.user_weight_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_weight_kg', '')))
         ttk.Entry(main_frame, textvariable=self.user_weight_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
+        current_row += 1
+        ttk.Label(main_frame, text="(Uppdateras automatiskt vid synkning från Withings/Garmin)", font=('Segoe UI', 8, 'italic'), foreground=self.colors.get('text_secondary', '#6B7280')).grid(row=current_row, column=1, sticky=tk.W, pady=(0, 6))
         current_row += 1
 
         # Buttons
@@ -1408,6 +1410,7 @@ class HealthChatApp:
         
         # Load configuration
         self.load_config()
+        self._sync_profile_weight_from_db()
         
         # Configure style
         self.setup_styles()
@@ -1629,6 +1632,31 @@ class HealthChatApp:
             'age': getattr(self, 'user_age', 0) or 0,
             'weight_kg': getattr(self, 'user_weight_kg', 0.0) or 0.0,
         }
+
+    def update_weight_from_device(self, new_weight_kg: float):
+        """Update user_weight_kg in config if a device syncs a new weight measurement."""
+        try:
+            if new_weight_kg and float(new_weight_kg) > 0:
+                rounded_weight = round(float(new_weight_kg), 1)
+                old_weight = getattr(self, 'user_weight_kg', 0.0) or 0.0
+                if rounded_weight != old_weight:
+                    logger.info(f"Updating profile weight from synced device: {old_weight} kg -> {rounded_weight} kg")
+                    self.user_weight_kg = rounded_weight
+                    self.save_config()
+                    if hasattr(self, 'charts_view') and self.charts_view:
+                        self.charts_view.set_profile(self.get_user_profile())
+        except Exception as e:
+            logger.error(f"Error updating weight from device: {e}")
+
+    def _sync_profile_weight_from_db(self):
+        """Check if a scale device has recorded a weight in the database and update profile weight."""
+        try:
+            if hasattr(self, 'db') and self.db:
+                latest = self.db.get_latest_body_composition()
+                if latest and latest.get('weight_kg'):
+                    self.update_weight_from_device(latest['weight_kg'])
+        except Exception as e:
+            logger.debug(f"Could not sync profile weight from DB: {e}")
 
     def on_closing(self):
         """Handle window close event - save state and exit"""
@@ -1950,6 +1978,7 @@ class HealthChatApp:
                     if hasattr(self, 'charts_view') and hasattr(self.charts_view, 'dashboard_checkin_btn'):
                         self.charts_view.dashboard_checkin_btn.config(state=tk.NORMAL, text="📥 Check-in")
                     self.update_status(f"✅ Check-in genomförd för {source_str}! Graferna har uppdaterats.", False)
+                    self._sync_profile_weight_from_db()
                     if hasattr(self, 'charts_view') and self.charts_view:
                         self.charts_view.set_sync_status(f"✅ Synkning klar ({source_str})!", is_done=True)
                         self.charts_view.refresh_all_views()
@@ -2269,6 +2298,7 @@ class HealthChatApp:
             def _update_ui():
                 self.checkin_btn.config(state=tk.NORMAL, text="📥 Check-in")
                 self.update_status("✅ Check-in genomförd! Graferna har uppdaterats.", False)
+                self._sync_profile_weight_from_db()
                 if hasattr(self, 'charts_view') and self.charts_view:
                     self.charts_view.set_sync_status("✅ Synkning klar!", is_done=True)
                     self.charts_view.refresh_all_views()
@@ -2500,6 +2530,7 @@ class HealthChatApp:
             results = handler.import_withings_export_file(filename)
             count = results.get("count", 0)
 
+            self._sync_profile_weight_from_db()
             if hasattr(self, 'charts_view') and self.charts_view:
                 self.charts_view.refresh_all_views()
 
@@ -3017,6 +3048,7 @@ class HealthChatApp:
             
     def open_settings(self):
         """Open settings dialog"""
+        self._sync_profile_weight_from_db()
         current_config = {
             'ai_provider': self.ai_provider,
             'xai_api_key': self.xai_api_key or '',
@@ -3248,6 +3280,7 @@ class HealthChatApp:
                     self.save_config()
                 if res.get("success"):
                     logger.info(f"Successfully synced {res.get('count')} Withings measurements")
+                    self._sync_profile_weight_from_db()
                 return res
             except Exception as e:
                 logger.warning(f"Error syncing Withings data: {e}")
