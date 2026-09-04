@@ -493,7 +493,14 @@ class HealthChartsView(ttk.Frame):
         if raw:
             try:
                 rd = json.loads(raw)
-                bmr_override = float(rd.get('bmrKilocalories', 0) or 0)
+                device_bmr = float(rd.get('bmrKilocalories', 0) or 0)
+                # Garmin's bmrKilocalories for today is already pro-rated to the current elapsed time.
+                # Project it to a full-day BMR so that estimate_daily_burn's pro-rating yields the device value.
+                frac = calorie_calc.day_fraction_elapsed()
+                if device_bmr > 0 and frac > 0.05:
+                    bmr_override = device_bmr / frac
+                else:
+                    bmr_override = device_bmr
             except Exception:
                 bmr_override = 0.0
 

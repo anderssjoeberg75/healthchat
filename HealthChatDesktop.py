@@ -3254,6 +3254,25 @@ class HealthChatApp:
                 return {"success": False, "error": str(e), "count": 0}
         return {"success": False, "error": "Saknar Withings OAuth2 credentials", "count": 0}
 
+    def _sync_today_garmin_summary(self):
+        """Quickly fetch today's Garmin daily summary (steps, calories, BMR) and store in DB."""
+        if hasattr(self, 'garmin_handler') and self.garmin_handler and self.authenticated:
+            try:
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                day_summary = self.garmin_handler.get_user_summary()
+                if day_summary and isinstance(day_summary, dict):
+                    self.db.upsert_daily_summary(
+                        date=today_str,
+                        steps=int(day_summary.get("totalSteps", 0) or 0),
+                        calories=int(day_summary.get("totalKilocalories", 0) or 0),
+                        active_calories=int(day_summary.get("activeKilocalories", 0) or 0),
+                        resting_hr=int(day_summary.get("restingHeartRate", 0) or 0),
+                        raw_data=day_summary,
+                    )
+                    logger.info(f"Synced today's Garmin summary: {day_summary.get('totalSteps')} steps")
+            except Exception as e:
+                logger.debug(f"Error fetching today's Garmin summary: {e}")
+
     def _authenticate_garmin(self):
         """Authenticate with Garmin (runs in thread)"""
         try:
@@ -3270,6 +3289,7 @@ class HealthChatApp:
                 self.authenticated = True
                 self.mfa_required = False
                 self.sync_withings()
+                self._sync_today_garmin_summary()
                 self.root.after(0, lambda: self._on_auth_success())
             elif result.get('mfa_required'):
                 self.mfa_required = True
@@ -3312,6 +3332,8 @@ class HealthChatApp:
             if result.get('success'):
                 self.authenticated = True
                 self.mfa_required = False
+                self.sync_withings()
+                self._sync_today_garmin_summary()
                 self.root.after(0, lambda: self._on_auth_success())
                 self.root.after(0, lambda: self.mfa_frame.grid_remove())
             else:
