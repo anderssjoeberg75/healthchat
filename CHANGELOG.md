@@ -5,6 +5,24 @@ All notable changes to HealthChat Desktop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Daily Calorie Burn card**: A new dashboard card under the weight card shows
+  an approximate estimate of how many calories you have burned *so far today*.
+  - Combines three transparent components: resting burn (BMR, pro-rated to the
+    elapsed part of the day), calories from steps walked, and calories from
+    logged workouts.
+  - Resting burn prefers your real Garmin BMR when available, otherwise it is
+    computed from your profile (Mifflin-St Jeor), with a simple weight-based
+    fallback.
+  - New **Personlig profil** section in Settings (sex, height, age, optional
+    weight) feeds the BMR calculation.
+  - Each day's estimate is stored in a new `calorie_burn` table so the trend can
+    be charted over time.
+  - Garmin sync now also stores the daily summary (steps / calories / BMR),
+    which previously had a table but was never populated.
+
 ## [4.0.5] - 2026-08-20
 
 ### Added
