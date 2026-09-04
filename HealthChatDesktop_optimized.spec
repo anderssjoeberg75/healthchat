@@ -40,6 +40,7 @@ a = Analysis(
         'ai_client',
         'garmin_handler',
         'garmin_db',
+        'calorie_calc',
         'fitbit_handler',
         'withings_handler',
         'strava_handler',

@@ -89,7 +89,8 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ## 🟢 Funktioner (önskemål)
 
-### [ ] F-1: Daglig kaloriförbränning – ruta på dashboarden + spara för trend
+### [x] F-1: Daglig kaloriförbränning – ruta på dashboarden + spara för trend
+- **Status:** Åtgärdad och verifierad mot samtliga acceptanskriterier. `calorie_calc.py`, DB-persistens, UI-kort under viktkortet, inställningssektion, EvoLab-trendgraf och enhetstester är fullt integrerade.
 - **Mål:** Visa en **ungefärlig** uppskattning av hur många kalorier användaren bränt **hittills under dagen**, i en ruta **under viktkortet** på dashboarden. Kombinera tre transparenta delar: (1) vilo-förbränning (BMR) utan motion, (2) kalorier från antal steg, (3) kalorier från dagens träningspass. Spara varje dags värde i databasen så trenden kan följas i grafer senare. Värdena är medvetet grova ("riktmärke"), vilket ska framgå i UI:t.
 - **Referensimplementation finns redan på `main` (commit `e16c3c2`).** Om Antigravitys arbetskopia redan har den koden: kör `git pull origin main`, verifiera acceptanskriterierna och bygg om. Annars implementera enligt nedan.
 
