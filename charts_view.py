@@ -20,6 +20,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from garmin_db import GarminDatabase
+import calorie_calc
 
 logger = logging.getLogger("charts_view")
 
@@ -27,7 +28,7 @@ logger = logging.getLogger("charts_view")
 class HealthChartsView(ttk.Frame):
     """COROS-Inspired Graphical Dashboard & Analytics Manager."""
 
-    def __init__(self, parent, db: GarminDatabase, colors: Dict[str, str], on_toggle_chat=None, on_checkin=None):
+    def __init__(self, parent, db: GarminDatabase, colors: Dict[str, str], on_toggle_chat=None, on_checkin=None, profile: Optional[Dict[str, Any]] = None):
         super().__init__(parent, style='Main.TFrame')
         self.db = db
         self.colors = colors
@@ -35,6 +36,8 @@ class HealthChartsView(ttk.Frame):
         self.active_tab = "dashboard"
         self.on_toggle_chat_callback = on_toggle_chat
         self.on_checkin_callback = on_checkin
+        # User profile used for the calorie-burn estimate (sex/height/age/weight).
+        self.profile = profile or {}
 
         self.setup_ui()
         self.refresh_all_views()
@@ -44,6 +47,14 @@ class HealthChartsView(ttk.Frame):
         """Invoke on_checkin_callback if registered."""
         if callable(self.on_checkin_callback):
             self.on_checkin_callback()
+
+    def set_profile(self, profile: Optional[Dict[str, Any]]):
+        """Update the user profile (sex/height/age/weight) and refresh the calorie card."""
+        self.profile = profile or {}
+        try:
+            self.refresh_all_views()
+        except Exception as e:
+            logger.error(f"Error refreshing after profile update: {e}")
 
     def setup_ui(self):
         """Build main container with top navbar, tab controls, and scrollable content views."""
@@ -224,8 +235,9 @@ class HealthChartsView(ttk.Frame):
         self.card_chart_summary = self.create_card(grid_frame, "📊 Weekly Activity Summary", 1, 0, columnspan=2)
         self.card_weight = self.create_card(grid_frame, "⚖️ Weight & Body Comp (Withings)", 1, 2)
 
-        # Row 3 Cards (Dedicated Body Battery & Sleep/Stress Trends)
-        self.card_chart_bb = self.create_card(grid_frame, "⚡ Body Battery, Sleep & Stress Trends", 2, 0, columnspan=3)
+        # Row 3 Cards: Body Battery trends (left) + Calorie burn today (under weight)
+        self.card_chart_bb = self.create_card(grid_frame, "⚡ Body Battery, Sleep & Stress Trends", 2, 0, columnspan=2)
+        self.card_calories = self.create_card(grid_frame, "🔥 Kaloriförbränning idag", 2, 2)
 
         # Matplotlib Figures for Embedded Light Charts
         plt.style.use('default')
@@ -367,6 +379,11 @@ class HealthChartsView(ttk.Frame):
                 logger.error(f"Error in update_dashboard_cards: {e}")
 
             try:
+                self.update_calorie_card(body_comp, act_hist_full)
+            except Exception as e:
+                logger.error(f"Error in update_calorie_card: {e}")
+
+            try:
                 self.draw_dashboard_charts(sleep_hist, bb_hist, stress_hist, act_hist_dash)
             except Exception as e:
                 logger.error(f"Error in draw_dashboard_charts: {e}")
@@ -432,6 +449,144 @@ class HealthChartsView(ttk.Frame):
             ttk.Label(self.card_weight['body'], text=f"Källa: {src_name} ({body_comp.get('date')})", font=('Segoe UI', 8, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W, pady=(4, 0))
         else:
             ttk.Label(self.card_weight['body'], text="Ingen vikt registrerad", font=('Segoe UI', 10, 'italic'), foreground='#9CA3AF').pack(anchor=tk.W)
+
+    def update_calorie_card(self, body_comp, act_hist):
+        """Estimate & display today's approximate calorie burn, and persist it for trends.
+
+        The estimate combines resting burn (BMR, pro-rated to the elapsed part of
+        the day), calories from steps walked, and calories from logged workouts.
+        The daily result is written to the ``calorie_burn`` table so trends can be
+        charted over time.
+        """
+        if not hasattr(self, 'card_calories'):
+            return
+
+        for w in self.card_calories['body'].winfo_children():
+            w.destroy()
+
+        today = datetime.now().strftime('%Y-%m-%d')
+        profile = self.profile or {}
+
+        # Body weight: prefer an explicit profile weight, else the latest measurement.
+        weight_kg = 0.0
+        try:
+            weight_kg = float(profile.get('weight_kg') or 0)
+        except (TypeError, ValueError):
+            weight_kg = 0.0
+        if weight_kg <= 0 and body_comp and body_comp.get('weight_kg'):
+            try:
+                weight_kg = float(body_comp.get('weight_kg') or 0)
+            except (TypeError, ValueError):
+                weight_kg = 0.0
+
+        # Today's steps + device BMR (if Garmin has been synced).
+        day_summary = {}
+        try:
+            day_summary = self.db.get_daily_summary(today) or {}
+        except Exception as e:
+            logger.debug(f"Could not load daily summary for calorie card: {e}")
+
+        steps = int(day_summary.get('total_steps', 0) or 0)
+        bmr_override = 0.0
+        raw = day_summary.get('raw_json')
+        if raw:
+            try:
+                rd = json.loads(raw)
+                bmr_override = float(rd.get('bmrKilocalories', 0) or 0)
+            except Exception:
+                bmr_override = 0.0
+
+        # Today's workout calories (sum over activities dated today).
+        workout_cal = 0
+        for a in (act_hist or []):
+            if str(a.get('date') or a.get('start_time') or '')[:10] == today:
+                try:
+                    workout_cal += int(float(a.get('calories') or 0))
+                except (TypeError, ValueError):
+                    pass
+
+        def _num(key):
+            try:
+                return float(profile.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        result = calorie_calc.estimate_daily_burn(
+            weight_kg=weight_kg,
+            height_cm=_num('height_cm'),
+            age_years=_num('age'),
+            sex=profile.get('sex', 'male'),
+            steps=steps,
+            workout_calories=workout_cal,
+            bmr_override=bmr_override,
+            is_today=True,
+        )
+
+        # Persist for later trend graphs (upsert: today's row grows through the day).
+        try:
+            self.db.upsert_calorie_burn(
+                today,
+                total_burn=result['total_burn'],
+                resting_burn=result['resting_burn'],
+                steps_burn=result['steps_burn'],
+                workout_burn=result['workout_burn'],
+                bmr_full=result['bmr_full'],
+                steps=result['steps'],
+                weight_kg=weight_kg,
+                day_fraction=result['day_fraction'],
+                bmr_source=result['bmr_source'],
+            )
+        except Exception as e:
+            logger.error(f"Could not persist calorie burn: {e}")
+
+        body = self.card_calories['body']
+
+        if result['total_burn'] <= 0:
+            ttk.Label(body, text="Ingen data ännu", font=('Segoe UI', 13, 'bold'), foreground='#9CA3AF').pack(anchor=tk.W)
+            ttk.Label(
+                body,
+                text="Synka Garmin och ange din profil\n(längd, ålder, kön) i Inställningar\nför en uppskattning.",
+                font=('Segoe UI', 9), foreground='#9CA3AF', justify=tk.LEFT,
+            ).pack(anchor=tk.W, pady=(4, 0))
+            return
+
+        def _fmt(n):
+            return f"{int(n):,}".replace(",", " ")
+
+        # Headline number.
+        ttk.Label(
+            body, text=f"🔥 {_fmt(result['total_burn'])} kcal",
+            font=('Segoe UI', 22, 'bold'), foreground='#EA580C',
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            body, text="Förbränt hittills idag (ungefärligt)",
+            font=('Segoe UI', 9), foreground='#6B7280',
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        # Breakdown of the three components.
+        ttk.Label(
+            body, text=f"🛌 Vila (BMR): {_fmt(result['resting_burn'])} kcal",
+            font=('Segoe UI', 9), foreground='#4B5563',
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            body, text=f"👟 Steg: {_fmt(result['steps_burn'])} kcal ({_fmt(result['steps'])} steg)",
+            font=('Segoe UI', 9), foreground='#4B5563',
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            body, text=f"🏋️ Träning: {_fmt(result['workout_burn'])} kcal",
+            font=('Segoe UI', 9), foreground='#4B5563',
+        ).pack(anchor=tk.W)
+
+        bmr_note = {
+            'device': 'Vilo-BMR från Garmin',
+            'mifflin': 'Vilo-BMR beräknad från din profil',
+            'simple': 'Vilo-BMR grovt uppskattad (ange profil för bättre värde)',
+        }.get(result['bmr_source'], '')
+        if bmr_note:
+            ttk.Label(
+                body, text=bmr_note,
+                font=('Segoe UI', 8, 'italic'), foreground='#9CA3AF',
+            ).pack(anchor=tk.W, pady=(6, 0))
 
     @staticmethod
     def _format_axis_dates(ax, dates: List[str]):
