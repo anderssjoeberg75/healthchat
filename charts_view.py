@@ -282,15 +282,16 @@ class HealthChartsView(ttk.Frame):
         scrollbar.pack(side="right", fill="y")
 
         # Matplotlib Figure for EvoLab Analytics
-        self.fig_evo = Figure(figsize=(11, 10), dpi=95, facecolor='#FFFFFF')
-        self.fig_evo.subplots_adjust(hspace=0.5, wspace=0.28, left=0.08, right=0.95, top=0.95, bottom=0.1)
+        self.fig_evo = Figure(figsize=(11, 13), dpi=95, facecolor='#FFFFFF')
+        self.fig_evo.subplots_adjust(hspace=0.5, wspace=0.28, left=0.08, right=0.95, top=0.96, bottom=0.07)
 
-        self.ax_evo_load = self.fig_evo.add_subplot(3, 2, 1, facecolor='#FFFFFF')
-        self.ax_evo_rhr = self.fig_evo.add_subplot(3, 2, 2, facecolor='#FFFFFF')
-        self.ax_evo_hrv = self.fig_evo.add_subplot(3, 2, 3, facecolor='#FFFFFF')
-        self.ax_evo_weight = self.fig_evo.add_subplot(3, 2, 4, facecolor='#FFFFFF')
-        self.ax_evo_zones = self.fig_evo.add_subplot(3, 2, 5, facecolor='#FFFFFF')
-        self.ax_evo_dist = self.fig_evo.add_subplot(3, 2, 6, facecolor='#FFFFFF')
+        self.ax_evo_load = self.fig_evo.add_subplot(4, 2, 1, facecolor='#FFFFFF')
+        self.ax_evo_rhr = self.fig_evo.add_subplot(4, 2, 2, facecolor='#FFFFFF')
+        self.ax_evo_hrv = self.fig_evo.add_subplot(4, 2, 3, facecolor='#FFFFFF')
+        self.ax_evo_weight = self.fig_evo.add_subplot(4, 2, 4, facecolor='#FFFFFF')
+        self.ax_evo_zones = self.fig_evo.add_subplot(4, 2, 5, facecolor='#FFFFFF')
+        self.ax_evo_dist = self.fig_evo.add_subplot(4, 2, 6, facecolor='#FFFFFF')
+        self.ax_evo_calories = self.fig_evo.add_subplot(4, 2, 7, facecolor='#FFFFFF')
 
         canvas_evo = FigureCanvasTkAgg(self.fig_evo, master=scroll_content)
         canvas_evo.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
@@ -680,8 +681,11 @@ class HealthChartsView(ttk.Frame):
         self.canvas_bb_sleep.draw()
 
     def draw_evolab_charts(self, sleep_hist, bb_hist, stress_hist, hrv_hist, act_hist, body_comp, daily_summary_hist=None):
-        """Draw EvoLab 2-column trends across all 6 subplots."""
-        for ax in [self.ax_evo_load, self.ax_evo_rhr, self.ax_evo_hrv, self.ax_evo_weight, self.ax_evo_zones, self.ax_evo_dist]:
+        """Draw EvoLab 2-column trends across all subplots."""
+        evo_axes = [self.ax_evo_load, self.ax_evo_rhr, self.ax_evo_hrv, self.ax_evo_weight, self.ax_evo_zones, self.ax_evo_dist]
+        if hasattr(self, 'ax_evo_calories'):
+            evo_axes.append(self.ax_evo_calories)
+        for ax in evo_axes:
             ax.clear()
             ax.set_facecolor('#FFFFFF')
             ax.tick_params(colors='#374151', labelsize=8)
@@ -781,6 +785,26 @@ class HealthChartsView(ttk.Frame):
         else:
             self.ax_evo_dist.text(0.5, 0.5, "Träningsvolym: Inga aktiviteter sparade", ha='center', va='center', color='#9CA3AF')
             self.ax_evo_dist.set_title("Träningsvolym & Kalorier", fontsize=9, fontweight='bold', color='#1F2937')
+
+        # 7. Daily Calorie Burn Trend (stacked: resting + steps + workouts)
+        if hasattr(self, 'ax_evo_calories'):
+            cb_hist = self.db.get_calorie_burn_history(self.days_range) if hasattr(self, 'db') and self.db else []
+            cb_dates, resting_vals = self._prepare_chart_series(cb_hist, 'resting_burn')
+            _, steps_vals = self._prepare_chart_series(cb_hist, 'steps_burn')
+            _, workout_vals = self._prepare_chart_series(cb_hist, 'workout_burn')
+            has_burn = cb_dates and any((r + s + w) > 0 for r, s, w in zip(resting_vals, steps_vals, workout_vals))
+            if has_burn:
+                base_steps = list(resting_vals)
+                base_workout = [r + s for r, s in zip(resting_vals, steps_vals)]
+                self.ax_evo_calories.bar(cb_dates, resting_vals, color='#F59E0B', width=0.5, label='Vila (BMR)')
+                self.ax_evo_calories.bar(cb_dates, steps_vals, bottom=base_steps, color='#0078D4', width=0.5, label='Steg')
+                self.ax_evo_calories.bar(cb_dates, workout_vals, bottom=base_workout, color='#EF4444', width=0.5, label='Träning')
+                self.ax_evo_calories.set_title("Kaloriförbränning per dag (kcal)", fontsize=9, fontweight='bold', color='#1F2937')
+                self.ax_evo_calories.legend(fontsize=7, loc='upper left', framealpha=0.6)
+                self._format_axis_dates(self.ax_evo_calories, cb_dates)
+            else:
+                self.ax_evo_calories.text(0.5, 0.5, "Kaloriförbränning: byggs upp allt\neftersom du använder appen", ha='center', va='center', color='#9CA3AF')
+                self.ax_evo_calories.set_title("Kaloriförbränning per dag", fontsize=9, fontweight='bold', color='#1F2937')
 
         self.canvas_evo.draw()
 
