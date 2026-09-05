@@ -15,6 +15,8 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 > **Uppföljande genomgång 2026-09-04:** Lade till **P1-5** (feldaterad body-composition), **P1-6** (HTTP utan timeout i Fitbit/Strava), **P1-7** (Fitbit saknar token-refresh), konkretiserade **P2-1** (nakna `except:`) och la till **P2-9** (versions-drift). Alla verifierade mot koden; P1-5 bekräftas dessutom av ett rött befintligt test.
 
+> **Önskemål 2026-09-04 (K-spåret):** Byte till **MariaDB**, **inloggning/registrering**, **klientkryptering** av all hälsodata, **profilsida** (byt lösenord, ta bort konto) och upprensning av inställningsdialogen. Se avsnittet *Konto, MariaDB & kryptering*.
+
 ---
 
 ## 🔴 P0 – Buggar & säkerhet
@@ -158,9 +160,111 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ---
 
+## 🔐 Konto, MariaDB & kryptering (önskemål)
+
+> **Sammanhang:** Appen ska gå från lokal SQLite till **MariaDB på `192.168.101.106`**, få **inloggning + registrering**, och all hälsodata ska vara **personlig och krypterad** så att den som kommer åt databasen inte kan läsa den i klartext. Uppgifterna nedan hänger ihop och bör tas i ordningen K-1 → K-8.
+>
+> ⚠️ **Inga hemligheter i repot.** DB-lösenord, användarlösenord och API-nycklar får **aldrig** committas till `board.md`, koden eller `config.json` i git. Användarens lösenord matas in i appen vid första inloggning/migrering.
+
+### [ ] K-1: Byt databas-backend från SQLite till MariaDB (med connection pool)
+- **Fil:** [garmin_db.py](garmin_db.py) (hela lagret), anropas från [HealthChatDesktop.py](HealthChatDesktop.py), [charts_view.py](charts_view.py), [garmin_handler.py](garmin_handler.py), [fitbit_handler.py](fitbit_handler.py), [strava_handler.py](strava_handler.py), [withings_handler.py](withings_handler.py)
+- **Mål:** All lagring sker i MariaDB (`192.168.101.106`, port 3306, databas `healthchat`) i stället för `~/.healthchat/healthdata.db`.
+- **Att göra:**
+  - Lägg till driver `PyMySQL` (ren Python → enklast att paketera med PyInstaller) i `requirements.txt`.
+  - **Prestandakritiskt:** dagens `get_connection()` öppnar en **ny anslutning per operation**. Mot SQLite är det gratis, men mot en nätverksdatabas kostar varje anrop en TCP- + auth-rundtur och gör appen märkbart trög. Inför en **connection pool** (t.ex. `dbutils.PooledDB` eller en egen enkel pool) och återanvänd anslutningar.
+  - Översätt schemat: `INTEGER`→`INT`, `REAL`→`DOUBLE`, `TEXT`→`VARCHAR(n)`/`TEXT`, `ON CONFLICT(x) DO UPDATE`→`INSERT ... ON DUPLICATE KEY UPDATE`, `PRAGMA journal_mode=WAL` tas bort.
+  - Lägg kolumnen **`user_id`** på *alla* datatabeller (`daily_summary`, `sleep_data`, `body_battery`, `stress_data`, `hrv_data`, `activities`, `body_composition`, `calorie_burn`, `sync_metadata`) med **sammansatt primärnyckel** `(user_id, date)` (för `activities`: `(user_id, activity_id)`) och FK mot `users(id)` med `ON DELETE CASCADE`.
+  - **Varje** SELECT/INSERT/UPDATE/DELETE måste filtrera på `WHERE user_id = ?`. Ingen fråga får gå utan användarfilter.
+  - Index på `(user_id, date)` för alla historiktabeller.
+  - Anslutningen ska använda **TLS** mot MariaDB. DB-värd/port/databas/användare läses från `~/.healthchat/config.json`; **DB-lösenordet lagras i OS-nyckelringen** (`keyring`), inte i klartext i config.
+  - Skapa DB-användaren med **minsta möjliga rättigheter** (SELECT/INSERT/UPDATE/DELETE på `healthchat`, inget GRANT/DROP).
+- **Acceptanskriterier:** Appen startar och synkar mot MariaDB utan SQLite; inga kvarvarande `sqlite3`-anrop i drift­vägen (endast i migreringen, K-6); ingen fråga saknar `user_id`-filter; en Check-in på 30 dagar är inte långsammare än tidigare (tack vare poolen).
+
+### [ ] K-2: Användarkonton – registrering och inloggning
+- **Fil:** ny `auth.py`; startflödet i [HealthChatDesktop.py](HealthChatDesktop.py) (`main()` / `HealthChatApp.__init__`)
+- **Mål:** Appen kräver inloggning innan dashboarden visas, och nya användare kan registrera sig.
+- **Att göra:**
+  - Tabell `users`: `id` (PK), `email` (UNIQUE), `password_hash`, `kdf_salt` (BLOB), `wrapped_dek` (BLOB), `dek_nonce` (BLOB), `created_at`, `updated_at`.
+  - **Lösenordshash:** `argon2-cffi` (Argon2id). Lösenordet lagras **aldrig** i klartext eller reversibelt.
+  - Ny **inloggningsdialog** som visas före huvudfönstret: e-post, lösenord, kryssruta **"Spara inloggning"** (se K-4), knapp **"Registrera ny användare"**.
+  - Registrering: validera e-postformat, kräv lösenordslängd (min 10 tecken), bekräfta lösenord, skapa användare + DEK (se K-3).
+  - Fel vid inloggning ska ge ett generiskt meddelande ("Fel e-post eller lösenord") – avslöja inte om e-posten finns.
+  - Enkel bromsning (t.ex. ökande fördröjning efter 5 misslyckade försök) mot lösenordsgissning.
+- **Acceptanskriterier:** Går inte att nå dashboarden utan giltig inloggning; ny användare kan registreras och loggar in; `users`-tabellen innehåller ingen läsbar lösenordsinformation.
+
+### [ ] K-3: Kryptering av all hälsodata (envelope encryption, snabb)
+- **Fil:** ny `crypto.py`; används av [garmin_db.py](garmin_db.py)
+- **Mål:** Den som kommer åt MariaDB ska **inte** kunna läsa hälsodatan i klartext. Samtidigt ska appen inte bli långsam.
+- **Design (nyckelkuvert – detta är kärnan):**
+  1. Varje användare får en slumpad **DEK** (Data Encryption Key, 256 bit).
+  2. En **KEK** (Key Encryption Key) härleds från användarens lösenord med **Argon2id** + per-användare-salt.
+  3. I databasen sparas endast **`wrapped_dek = AES-256-GCM(KEK, DEK)`**. DEK finns aldrig i klartext i databasen.
+  4. Vid inloggning: härled KEK ur lösenordet → packa upp DEK → håll DEK **endast i minnet** under sessionen.
+  5. All hälsodata krypteras med DEK via **AES-256-GCM** (unik nonce per rad/fält, autentiserad kryptering).
+- **Varför det är snabbt:** Argon2id körs **en gång per inloggning** (sikta på ~200–500 ms), inte per fråga. AES-GCM använder hårdvaruacceleration (AES-NI) och ligger på GB/s – krypteringen är försumbar för den här datamängden. **Byte av lösenord kräver ingen omkryptering av data** – bara att DEK packas om med en ny KEK (K-5).
+- **Vad som krypteras vs. inte (medvetet avvägande – dokumentera i README):**
+  - **Krypterat:** alla mätvärden/nyttolast (steg, kalorier, puls, sömn, vikt, aktivitetsnamn, `raw_json` osv.). Lagra helst hela radens värden som **en krypterad blob** per rad i stället för kolumn-för-kolumn – färre nonces och snabbare.
+  - **Klartext (behövs som index för att frågor ska vara snabba):** `user_id`, `date` och `activity_id`.
+  - **Konsekvens:** en DB-administratör kan se *att* du har data ett visst datum, men inte *vad* den innehåller. Vill man dölja även datum kan de ersättas med ett **HMAC-blindat index** (valfri härdning, gör intervallfrågor svårare).
+- **Att göra:** använd `cryptography` (AESGCM) och `argon2-cffi`. Nyckelmaterial får aldrig loggas. Rensa DEK ur minnet vid utloggning/avslut.
+- **Acceptanskriterier:** `SELECT * FROM daily_summary` i en MariaDB-klient visar **oläsbar** data för alla mätvärden; appen visar dem korrekt efter inloggning; enhetstest för kryptera→dekryptera-rundgång och för wrap/unwrap av DEK; manipulerad ciphertext ger fel (GCM-autentisering).
+
+### [ ] K-4: "Spara inloggning" utan att lagra lösenordet
+- **Fil:** `auth.py`, inloggningsdialogen i [HealthChatDesktop.py](HealthChatDesktop.py)
+- **Problem att undvika:** Kryssrutan får **inte** lösas genom att spara lösenordet i klartext i `config.json` – det skulle rasera hela K-3.
+- **Föreslagen lösning:** Spara en **enhetsskyddad kopia av DEK** i OS-nyckelringen via `keyring` (på Windows = Credential Manager, skyddad av DPAPI och bunden till Windows-kontot), tillsammans med e-postadressen. Vid start: finns posten → packa upp DEK därifrån och hoppa över lösenordsprompten. Lösenordet i sig sparas aldrig.
+- **Att göra:** "Logga ut"-funktion som raderar nyckelringsposten och DEK ur minnet; posten raderas även vid kontoborttagning (K-5) och vid lösenordsbyte om användaren väljer det.
+- **Acceptanskriterier:** Med "Spara inloggning" ikryssad startar appen direkt utan lösenord; ingen fil i `~/.healthchat/` innehåller lösenordet eller DEK i klartext; "Logga ut" gör att lösenord krävs igen.
+
+### [ ] K-5: Profilsida – byt lösenord, ta bort konto, och personliga uppgifter
+- **Fil:** ny profilvy (t.ex. flik i [charts_view.py](charts_view.py) eller egen dialog), [HealthChatDesktop.py](HealthChatDesktop.py)
+- **Mål:** En samlad **Profil**-sida med kontoinformation och kontoåtgärder.
+- **Innehåll:**
+  1. **Kontoinfo:** inloggad e-post, konto skapat, senaste inloggning.
+  2. **Byt lösenord:** kräver *nuvarande* lösenord + nytt lösenord (två gånger). Implementation: verifiera nuvarande lösenord → packa upp DEK med gammal KEK → härled ny KEK ur nya lösenordet → spara ny `wrapped_dek` + nytt salt + ny `password_hash`. **Ingen data behöver krypteras om** → operationen tar bråkdelar av en sekund.
+  3. **Ta bort konto och all data:** raderar alla rader för användaren i samtliga tabeller (`ON DELETE CASCADE`) + `users`-raden + nyckelringsposten (K-4).
+     - **Måste ha en tydlig bekräftelsefråga innan borttagning:** en dialog som varnar att åtgärden är **permanent och inte går att ångra**, och som kräver aktiv bekräftelse – låt användaren skriva sin e-postadress (eller ordet `RADERA`) för att knappen ska aktiveras. Avbryt ska vara förvalt.
+  4. **Personliga uppgifter:** flytta hit sektionen **"Personlig profil (för kaloriberäkning)"** (kön, längd, ålder, vikt) från inställningsdialogen – se K-7.
+- **Acceptanskriterier:** Lösenordsbyte fungerar och all befintlig data går fortfarande att läsa efteråt; borttagning kräver aktiv bekräftelse och lämnar **noll** rader kvar för användaren i alla tabeller; appen loggar ut och återgår till inloggningsvyn efter borttagning.
+
+### [ ] K-6: Migrera befintlig SQLite-data till kontot i MariaDB
+- **Fil:** ny `migrate_sqlite_to_mariadb.py` (eller ett engångsflöde i appen)
+- **Mål:** All historik som redan finns i `~/.healthchat/healthdata.db` ska tillhöra ägarens konto med e-post **`anders@andrix.se`** och bli krypterad på vägen in.
+- **Att göra:**
+  - **Ta en backup** av `healthdata.db` innan något skrivs.
+  - Skapa (eller använd) kontot `anders@andrix.se`. **Lösenordet matas in interaktivt vid migreringen – det får inte stå i kod, config eller board.md.**
+  - Läs alla tabeller ur SQLite och skriv in dem i MariaDB med rätt `user_id`, krypterade enligt K-3. Använd **batch-insert** (`executemany`) – inte rad för rad.
+  - Migreringen ska vara **idempotent** (går att köra om utan dubbletter, tack vare upsert på `(user_id, date)`).
+  - Skriv ut en sammanfattning: antal rader per tabell före/efter.
+- **Acceptanskriterier:** Antal rader per tabell matchar källan; dashboarden och graferna visar samma historik som före bytet; SQLite-filen är orörd (backup finns) och används inte längre i drift.
+
+### [ ] K-7: Städa inställningsdialogen – flytta ut källor och personliga uppgifter
+- **Fil:** [HealthChatDesktop.py:312-434](HealthChatDesktop.py) (`SettingsDialog.create_widgets`), menyn [HealthChatDesktop.py:1834-1890](HealthChatDesktop.py)
+- **Problem:** Inställningar (Arkiv → ⚙️ Inställningar) innehåller idag sektionerna *AI Provider* → *Garmin Connect Credentials* → *Withings API* → *Strava API* → *Personlig profil*. Garmin/Withings/Strava dubblerar det som redan finns under respektive meny (`Garmin`, `Fitbit`, `Withings`, `Strava` har egna "▶ Anslut till …"-poster), och den personliga profilen hör hemma på profilsidan.
+- **Att göra:**
+  - **Ta bort** sektionerna *Garmin Connect Credentials*, *Withings Health Mate API Credentials* och *Strava API Credentials* ur inställningsdialogen.
+  - ⚠️ **Viktigt:** Garmins e-post/lösenord går idag **bara** att mata in via Inställningar (`prompt_for_credentials` öppnar inställningsdialogen). Skapa därför en **`GarminConnectDialog`** – i samma stil som `FitbitConnectDialog`/`StravaConnectDialog` – och koppla den till menyn `Garmin → ▶ Anslut till Garmin Connect`. Annars går det inte längre att logga in på Garmin.
+  - **Flytta** sektionen *Personlig profil (för kaloriberäkning)* till profilsidan (K-5).
+  - Kvar i Inställningar: **endast AI-leverantör och API-nycklar** (samt ev. tema/allmänt).
+- **Acceptanskriterier:** Inställningar innehåller inga källspecifika uppgifter; varje källa (Garmin/Fitbit/Withings/Strava) kan anslutas helt från sin egen meny; profilfälten finns på profilsidan och sparas fortfarande; ingen befintlig funktion tappas bort.
+
+### [ ] K-8: Säkerhet, tester och dokumentation för konto-/kryptolagret
+- **Fil:** `tests/test_crypto.py`, `tests/test_auth.py` (nya), [README.md](README.md)
+- **Att göra:**
+  - Enhetstester: kryptera→dekryptera-rundgång; DEK wrap/unwrap; fel lösenord ger fel; **lösenordsbyte bevarar läsbarheten** för redan sparad data; kontoborttagning lämnar noll rader; `user_id`-filter finns i alla frågor.
+  - Verifiera manuellt att en `SELECT` direkt mot MariaDB inte visar läsbara hälsovärden.
+  - Uppdatera README: hur MariaDB konfigureras, att data är klientkrypterad, vad som är krypterat vs. index i klartext, och att **glömt lösenord innebär att datan inte går att återskapa** (ingen nyckelåterställning finns – överväg en nedladdningsbar återställningsnyckel om det önskas).
+  - Inga hemligheter i repot; `keyring` används för DB-lösenord och sparad inloggning.
+- **Acceptanskriterier:** `python -m pytest` grönt; README beskriver säkerhetsmodellen korrekt; inga nycklar/lösenord i git-historiken.
+
+> **Valfri härdning (utanför grundomfånget):** Appen ansluter direkt till MariaDB med delade DB-uppgifter, vilket innebär att radisoleringen mellan användare upprätthålls av applikationen (`WHERE user_id = ?`) – inte av databasen. Vill man ha starkare isolering: ge varje användare ett eget DB-konto, eller lägg ett litet API-lager framför databasen. Krypteringen (K-3) skyddar ändå innehållet även om raderna skulle läsas.
+
+---
+
 ## Förslag på ordning
 1. **P0-1** (snabb, tydlig krasch) → **P0-3** (trådsäkerhet) → **P0-2** (säkerhet, större).
 2. **P1-1** + **P1-2** + **P2-4** tillsammans (samma kontext-/minneskod).
 3. **Nya (2026-09-04):** **P1-5** (feldaterad vikt – liten & tydlig, un-breakar ett test) → **P1-6** (timeouts) → **P1-7** (Fitbit token-refresh, bygger på P1-6).
 4. Övriga P1/P2 löpande (**P2-1** nakna except, **P2-9** version).
 5. **F-1** (daglig kaloriförbränning) – fristående, kan tas när som helst.
+6. **K-1 → K-8** (MariaDB, konto, kryptering, profilsida) – ett sammanhängande spår. Ta dem i ordning: **K-1** (databas) → **K-2** (konto) → **K-3** (kryptering) → **K-4** (spara inloggning) → **K-5** (profilsida) → **K-6** (migrera data) → **K-7** (städa inställningar) → **K-8** (tester/dokumentation).
