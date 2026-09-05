@@ -15,7 +15,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 > **Uppföljande genomgång 2026-09-04:** Lade till **P1-5** (feldaterad body-composition), **P1-6** (HTTP utan timeout i Fitbit/Strava), **P1-7** (Fitbit saknar token-refresh), konkretiserade **P2-1** (nakna `except:`) och la till **P2-9** (versions-drift). Alla verifierade mot koden; P1-5 bekräftas dessutom av ett rött befintligt test.
 
-> **Önskemål 2026-09-04 (K-spåret):** Byte till **MariaDB**, **inloggning/registrering**, **klientkryptering** av all hälsodata, **profilsida** (byt lösenord, ta bort konto) och upprensning av inställningsdialogen. Se avsnittet *Konto, MariaDB & kryptering*.
+> **Önskemål 2026-09-04 (K-spåret):** Byte till **MariaDB**, **inloggning/registrering**, **klientkryptering** av all hälsodata, **profilsida** (byt lösenord, ta bort konto), **återställningsnyckel** och upprensning av inställningsdialogen. Se avsnittet *Konto, MariaDB & kryptering*.
 
 ---
 
@@ -190,6 +190,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   - Registrering: validera e-postformat, kräv lösenordslängd (min 10 tecken), bekräfta lösenord, skapa användare + DEK (se K-3).
   - Fel vid inloggning ska ge ett generiskt meddelande ("Fel e-post eller lösenord") – avslöja inte om e-posten finns.
   - Enkel bromsning (t.ex. ökande fördröjning efter 5 misslyckade försök) mot lösenordsgissning.
+  - 🔗 **Registreringen är inte klar utan K-10:** informationsrutan om att datan inte kan räddas vid glömt lösenord, och genereringen av återställningsnyckeln, hör till registreringssteget.
 - **Acceptanskriterier:** Går inte att nå dashboarden utan giltig inloggning; ny användare kan registreras och loggar in; `users`-tabellen innehåller ingen läsbar lösenordsinformation.
 
 ### [ ] K-3: Kryptering av all hälsodata (envelope encryption, snabb)
@@ -243,7 +244,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 - **Problem:** Inställningar (Arkiv → ⚙️ Inställningar) innehåller idag sektionerna *AI Provider* → *Garmin Connect Credentials* → *Withings API* → *Strava API* → *Personlig profil*. Garmin/Withings/Strava dubblerar det som redan finns under respektive meny (`Garmin`, `Fitbit`, `Withings`, `Strava` har egna "▶ Anslut till …"-poster), och den personliga profilen hör hemma på profilsidan.
 - **Att göra:**
   - **Ta bort** sektionerna *Garmin Connect Credentials*, *Withings Health Mate API Credentials* och *Strava API Credentials* ur inställningsdialogen.
-  - ⚠️ **Viktigt:** Garmins e-post/lösenord går idag **bara** att mata in via Inställningar (`prompt_for_credentials` öppnar inställningsdialogen). Skapa därför en **`GarminConnectDialog`** – i samma stil som `FitbitConnectDialog`/`StravaConnectDialog` – och koppla den till menyn `Garmin → ▶ Anslut till Garmin Connect`. Annars går det inte längre att logga in på Garmin.
+  - ⚠️ **Beroende – gör K-9 först:** Garmins e-post/lösenord går idag **bara** att mata in via Inställningar. Tas sektionen bort innan **K-9** (Garmin-anslutningsdialog) är på plats går det inte längre att logga in på Garmin.
   - **Flytta** sektionen *Personlig profil (för kaloriberäkning)* till profilsidan (K-5).
   - Kvar i Inställningar: **endast AI-leverantör och API-nycklar** (samt ev. tema/allmänt).
 - **Acceptanskriterier:** Inställningar innehåller inga källspecifika uppgifter; varje källa (Garmin/Fitbit/Withings/Strava) kan anslutas helt från sin egen meny; profilfälten finns på profilsidan och sparas fortfarande; ingen befintlig funktion tappas bort.
@@ -257,6 +258,36 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   - Inga hemligheter i repot; `keyring` används för DB-lösenord och sparad inloggning.
 - **Acceptanskriterier:** `python -m pytest` grönt; README beskriver säkerhetsmodellen korrekt; inga nycklar/lösenord i git-historiken.
 
+### [ ] K-9: Garmin-anslutningsdialog under Garmin-menyn (förutsättning för K-7)
+- **Fil:** [HealthChatDesktop.py](HealthChatDesktop.py) – ny dialogklass i stil med [`FitbitConnectDialog`:715](HealthChatDesktop.py), [`StravaConnectDialog`:899](HealthChatDesktop.py), [`WithingsConnectDialog`:1093](HealthChatDesktop.py); menyn [`garmin_menu`:1850-1854](HealthChatDesktop.py); [`connect_to_garmin`:3184](HealthChatDesktop.py); [`prompt_for_credentials`:1644](HealthChatDesktop.py)
+- **Problem (fallgropen):** Garmins e-post och lösenord går **bara** att mata in via Arkiv → Inställningar. `prompt_for_credentials()` öppnar inställningsdialogen, och `connect_to_garmin()` visar felmeddelandet *"Please configure your Garmin credentials in Settings"*. Så fort K-7 tar bort Garmin-sektionen ur Inställningar finns **ingen väg alls** att mata in uppgifterna → Garmin-inloggningen slutar fungera. Garmin är dessutom den enda källan utan egen anslutningsdialog (Fitbit, Strava och Withings har redan var sin).
+- **Att göra:**
+  - Skapa **`GarminConnectDialog`** (en `tk.Toplevel` som speglar de tre befintliga dialogerna: samma tema/färger, `transient` + `grab_set`, `self.result`-mönster, Spara/Avbryt).
+  - Fält: **E-post** och **Lösenord** (maskerat), kort hjälptext om att uppgifterna sparas lokalt, samt en **"Anslut"-knapp** som sparar och direkt kör anslutningen.
+  - Koppla dialogen till menyn: `Garmin → ▶ Anslut till Garmin Connect` ska öppna den när uppgifter saknas, och lägg till en egen post **`⚙️ Garmin-inloggning…`** så att uppgifterna alltid går att ändra utan att först koppla ner.
+  - Uppdatera `connect_to_garmin()` så att felmeddelandet öppnar **den nya dialogen** i stället för att hänvisa till Inställningar; dela upp kontrollen så att *saknad AI-nyckel* och *saknade Garmin-uppgifter* ger olika, korrekta meddelanden (AI-nyckel → Inställningar, Garmin → Garmin-dialogen).
+  - Uppdatera `prompt_for_credentials()` (första start) så att den hänvisar till rätt ställen: AI-nyckel under Inställningar, Garmin under Garmin-menyn.
+  - ⚠️ **Rör inte MFA-flödet:** MFA-rutan (`mfa_frame`, `submit_mfa`) sitter i **huvudfönstret**, inte i en dialog. Dialogen ska stänga sig och låta det befintliga MFA-flödet ta vid – MFA-koden ska alltså fortsatt matas in i huvudfönstret.
+  - Efter K-2/K-3: spara Garmin-uppgifterna i den **krypterade** användarprofilen i stället för `config.json`.
+- **Acceptanskriterier:** Garmin går att ansluta **helt från Garmin-menyn** utan att öppna Inställningar; befintliga sparade uppgifter fungerar precis som förut; MFA-inloggning fungerar oförändrat; inget felmeddelande hänvisar längre till Garmin-uppgifter i Inställningar.
+
+### [ ] K-10: Återställningsnyckel + tydlig information vid registrering
+- **Fil:** `auth.py`, `crypto.py`, registrerings-/inloggningsdialogen och profilsidan i [HealthChatDesktop.py](HealthChatDesktop.py)
+- **Bakgrund:** Krypteringen i K-3 innebär att nyckeln härleds ur användarens lösenord och aldrig finns i databasen. Det är själva poängen – men konsekvensen är att **ett glömt lösenord betyder att all data är förlorad**. Användaren måste få veta det *innan* kontot skapas, och erbjudas en väg tillbaka.
+- **Att göra:**
+  1. **Informera vid registrering.** Visa en tydlig, svårmissad ruta i registreringssteget som förklarar:
+     - att all hälsodata krypteras med användarens lösenord,
+     - att **ingen annan – inte ens den som har åtkomst till databasen – kan läsa den**,
+     - att **lösenordet inte kan återställas**: glöms det bort går datan inte att rädda utan återställningsnyckeln.
+     Texten ska vara på svenska och läsas *före* att kontot skapas – inte gömd i en hjälpfil.
+  2. **Generera en återställningsnyckel** vid registrering: 256 bitar slumpdata, visad som lättläst **Base32 i grupper** (t.ex. `K7QF2-9MXTE-…`, 8 grupper om 5 tecken).
+  3. **Lagra en andra inpackad kopia av DEK:** `recovery_wrapped_dek = AES-256-GCM(KEK_recovery, DEK)`, där `KEK_recovery` härleds ur återställningsnyckeln med Argon2id + eget salt. Kolumner i `users`: `recovery_wrapped_dek`, `recovery_salt`, `recovery_nonce`. **Själva återställningsnyckeln lagras aldrig** – bara det den kan packa upp.
+  4. **Tvinga fram en bekräftelse:** nyckeln visas **en enda gång**, med knapparna **"Kopiera"** och **"Spara som fil…"**, och en kryssruta *"Jag har sparat min återställningsnyckel på ett säkert ställe"* som måste kryssas för att registreringen ska kunna slutföras.
+  5. **Återställningsflöde:** länken **"Glömt lösenord?"** i inloggningsdialogen → mata in e-post + återställningsnyckel → packa upp DEK → **tvinga fram ett nytt lösenord** → packa om DEK med den nya KEK:en → **generera en ny återställningsnyckel** (den gamla slutar gälla). Ingen data behöver krypteras om.
+  6. **På profilsidan (K-5):** knappen **"Generera ny återställningsnyckel"** (kräver nuvarande lösenord). Den ersätter `recovery_wrapped_dek` så att den gamla nyckeln omedelbart blir ogiltig.
+- **Säkerhetskrav:** Återställningsnyckeln är **lika kraftfull som lösenordet** – det ska stå i texten, och användaren ska uppmanas att förvara den offline (utskrift/lösenordshanterare). Nyckeln får **aldrig** loggas, sparas i `config.json`, skickas med e-post eller hamna i git. Samma bromsning mot gissning som för lösenord (K-2) ska gälla återställningsförsök.
+- **Acceptanskriterier:** Registrering går inte att slutföra utan att informationen visats och kryssrutan bockats; en användare som "glömt" sitt lösenord kan med enbart återställningsnyckeln sätta ett nytt lösenord och **läsa all sin gamla data**; efter att en ny nyckel genererats slutar den gamla att fungera; enhetstest som täcker återställnings-rundgången (registrera → packa upp med återställningsnyckel → nytt lösenord → data läsbar) och att fel nyckel avvisas.
+
 > **Valfri härdning (utanför grundomfånget):** Appen ansluter direkt till MariaDB med delade DB-uppgifter, vilket innebär att radisoleringen mellan användare upprätthålls av applikationen (`WHERE user_id = ?`) – inte av databasen. Vill man ha starkare isolering: ge varje användare ett eget DB-konto, eller lägg ett litet API-lager framför databasen. Krypteringen (K-3) skyddar ändå innehållet även om raderna skulle läsas.
 
 ---
@@ -267,4 +298,6 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 3. **Nya (2026-09-04):** **P1-5** (feldaterad vikt – liten & tydlig, un-breakar ett test) → **P1-6** (timeouts) → **P1-7** (Fitbit token-refresh, bygger på P1-6).
 4. Övriga P1/P2 löpande (**P2-1** nakna except, **P2-9** version).
 5. **F-1** (daglig kaloriförbränning) – fristående, kan tas när som helst.
-6. **K-1 → K-8** (MariaDB, konto, kryptering, profilsida) – ett sammanhängande spår. Ta dem i ordning: **K-1** (databas) → **K-2** (konto) → **K-3** (kryptering) → **K-4** (spara inloggning) → **K-5** (profilsida) → **K-6** (migrera data) → **K-7** (städa inställningar) → **K-8** (tester/dokumentation).
+6. **K-spåret** (MariaDB, konto, kryptering, profilsida) – ett sammanhängande spår. Ta dem i ordning: **K-1** (databas) → **K-2** (konto) → **K-3** (kryptering) → **K-10** (återställningsnyckel + info vid registrering) → **K-4** (spara inloggning) → **K-5** (profilsida) → **K-6** (migrera data) → **K-9** (Garmin-dialog) → **K-7** (städa inställningar) → **K-8** (tester/dokumentation).
+   - **K-9 måste vara klar före K-7**, annars går Garmin-inloggningen förlorad.
+   - **K-10 bygger på K-3** (samma nyckelkuvert – återställningsnyckeln packar upp samma DEK).
