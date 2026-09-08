@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HealthChat — Logga in</title>
+    <link rel="icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="login-wrap">
+        <div class="card login-card">
+            <img src="/static/logo.png" alt="HealthChat">
+            <h1>HealthChat</h1>
+            <p class="sub">AI-powered insights for your fitness data</p>
+
+            <div class="login-error" id="error"></div>
+
+            <form id="form">
+                <input type="email" id="email" placeholder="E-postadress" autocomplete="username" required>
+                <input type="password" id="password" placeholder="Lösenord" autocomplete="current-password" required>
+                <input type="text" id="display_name" placeholder="Namn (valfritt)" hidden>
+                <button class="btn accent" id="submit" type="submit">Logga in</button>
+            </form>
+
+            <div class="switch" id="switch"></div>
+        </div>
+    </div>
+
+    <script>
+        let mode = 'login';
+        let registrationOpen = true;
+
+        const $ = (id) => document.getElementById(id);
+
+        function render() {
+            const registering = mode === 'register';
+            $('submit').textContent = registering ? 'Skapa konto' : 'Logga in';
+            $('display_name').hidden = !registering;
+            $('password').autocomplete = registering ? 'new-password' : 'current-password';
+            $('switch').innerHTML = registering
+                ? 'Har du redan ett konto? <a id="toggle">Logga in</a>'
+                : (registrationOpen ? 'Ny här? <a id="toggle">Skapa ett konto</a>' : '');
+            const toggle = $('toggle');
+            if (toggle) {
+                toggle.addEventListener('click', () => {
+                    mode = registering ? 'login' : 'register';
+                    $('error').textContent = '';
+                    render();
+                });
+            }
+        }
+
+        async function submit(event) {
+            event.preventDefault();
+            $('error').textContent = '';
+            const payload = {
+                email: $('email').value.trim(),
+                password: $('password').value,
+                display_name: $('display_name').value.trim(),
+            };
+            try {
+                const response = await fetch(`/api/auth/${mode}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) throw new Error((await response.json()).detail || 'Inloggningen misslyckades');
+                window.location.href = '/';
+            } catch (error) {
+                $('error').textContent = error.message;
+            }
+        }
+
+        (async () => {
+            try {
+                const status = await (await fetch('/api/auth/status', { credentials: 'same-origin' })).json();
+                if (status.authenticated) {
+                    window.location.href = '/';
+                    return;
+                }
+                registrationOpen = status.registration_open;
+            } catch (error) { /* fall through to the login form */ }
+            render();
+            $('form').addEventListener('submit', submit);
+        })();
+    </script>
+</body>
+</html>

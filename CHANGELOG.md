@@ -1,9 +1,51 @@
 # Changelog
 
-All notable changes to HealthChat Desktop will be documented in this file.
+All notable changes to HealthChat will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [5.0.0] - 2026-09-08
+
+### Changed
+- **HealthChat is now a web application.** The Windows desktop build has been
+  rewritten as a server application reached through a URL instead of an `.exe`
+  on the desktop. The layout, charts, dialogs and features are unchanged — only
+  how you reach the app is different.
+  - The health database now lives on the server and never has to be reachable
+    from the internet.
+  - Users no longer install anything: an account and a browser is enough.
+  - Because the server runs continuously, the AI can work without the user's
+    computer being switched on (scheduled sync is tracked as W-17 in `board.md`).
+- Charts are rendered server-side with the same Matplotlib figures the desktop
+  app drew, so the dashboard looks identical rather than approximated.
+- OAuth for Fitbit, Strava and Withings now uses one fixed redirect URI per
+  service (`<BASE_URL>/oauth/<service>/callback`) instead of a temporary HTTP
+  server on `localhost` on each user's machine.
+- Export (PDF/DOCX/TXT) and export-file import are now downloads and uploads
+  instead of native file dialogs.
+
+### Added
+- **Accounts and sessions**: registration, login, password change and account
+  deletion. Passwords are hashed with PBKDF2-HMAC-SHA256 (240 000 rounds,
+  per-user salt); sessions are opaque tokens in an HTTP-only cookie.
+- **Multi-user isolation**: every account gets its own database, configuration,
+  API keys, OAuth tokens, saved prompts and chat history under the server's data
+  directory.
+- API keys and passwords are stored server-side and never returned to the
+  browser — the settings UI only sees whether a value is set.
+- Docker image, compose file and documented environment variables for
+  deployment (`webapp/Dockerfile`, `webapp/docker-compose.yml`,
+  `webapp/.env.example`).
+- 59 new tests covering the web API, the ported chart/metric code and the chat
+  context router.
+- `GarminDataHandler` accepts an optional `db` argument so each user's sync
+  writes to their own database (defaults to the previous behaviour).
+
+### Removed
+- The Tkinter UI, PyInstaller spec, Inno Setup installer and the `.bat`/`.ps1`
+  helper scripts. The complete desktop project is archived as
+  `HealthChatDesktop-v4.0.4-legacy.zip` in the repository root.
 
 ## [Unreleased]
 

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HealthChat</title>
+    <link rel="icon" href="/static/favicon.ico">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- Menu bar: the same drop-downs as the desktop Windows menu -->
+    <nav class="menubar" id="menubar">
+        <div class="menu" data-menu>
+            <button type="button">Arkiv</button>
+            <div class="menu-items">
+                <button data-action="checkin">📥 Kör Check-in (Alla Källor)</button>
+                <button data-action="full-sync">🔄 Synka Full Historik (Alla Källor)</button>
+                <hr>
+                <button data-action="save-chat">💾 Spara Chat...</button>
+                <button data-action="export">📄 Exportera Rapport...</button>
+                <hr>
+                <button data-action="settings">⚙️ Inställningar</button>
+                <hr>
+                <button data-action="logout">🚪 Logga ut</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Garmin</button>
+            <div class="menu-items">
+                <button data-action="connect-garmin">▶ Anslut till Garmin Connect</button>
+                <button data-action="checkin">📥 Kör Check-in (Garmin)</button>
+                <button data-action="full-sync">🔄 Full Synk (365 Dagar)</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Fitbit</button>
+            <div class="menu-items">
+                <button data-action="connect-fitbit">▶ Anslut till Fitbit...</button>
+                <button data-action="checkin">📥 Fitbit Check-in</button>
+                <button data-action="import-fitbit">📁 Importera Fitbit Export-fil (CSV/JSON)...</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Withings</button>
+            <div class="menu-items">
+                <button data-action="connect-withings">▶ Anslut till Withings...</button>
+                <button data-action="checkin">📥 Withings Check-in</button>
+                <button data-action="import-withings">📁 Importera Withings Export-fil (CSV/JSON)...</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Strava</button>
+            <div class="menu-items">
+                <button data-action="connect-strava">▶ Anslut till Strava...</button>
+                <button data-action="checkin">📥 Strava Check-in</button>
+                <button data-action="import-strava">📁 Importera Strava Export-fil (CSV/ZIP/GPX/FIT)...</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Verktyg</button>
+            <div class="menu-items">
+                <button data-action="search">🔍 Sök i Chatthistorik</button>
+                <button data-action="prompts">📝 Sparade Promptar</button>
+                <button data-action="history">📂 Chat-historik</button>
+                <button data-action="reset-chat">↺ Rensa Chat</button>
+                <hr>
+                <button data-action="toggle-theme">◐ Växla Mörkt/Ljust Tema</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Konto</button>
+            <div class="menu-items">
+                <button data-action="account">👤 Profil & lösenord</button>
+                <button data-action="logout">🚪 Logga ut</button>
+            </div>
+        </div>
+        <div class="menu" data-menu>
+            <button type="button">Hjälp</button>
+            <div class="menu-items">
+                <button data-action="about">❓ Om HealthChat</button>
+            </div>
+        </div>
+        <div class="spacer"></div>
+        <div class="account" id="account-label"></div>
+    </nav>
+
+    <div class="app">
+        <!-- LEFT PANE: dashboard hub -->
+        <div class="left-pane">
+            <div class="card hub-header">
+                <div>
+                    <div class="hub-title">📊 HealthChat Hub</div>
+                    <div class="sync-status" id="sync-status"></div>
+                </div>
+                <div class="range-controls">
+                    <span class="label">Tidsintervall:</span>
+                    <button class="btn" data-range="7">7 Dagar</button>
+                    <button class="btn accent" data-range="30">30 Dagar</button>
+                    <button class="btn" data-range="90">90 Dagar</button>
+                    <button class="btn" data-range="365">1 År</button>
+                    <button class="btn" data-range="3650">Alla</button>
+                    <button class="btn" data-action="refresh-views">🔄 Uppdatera</button>
+                </div>
+            </div>
+
+            <div class="card nav-bar">
+                <button class="btn accent" data-tab="dashboard">📋 Dashboard</button>
+                <button class="btn" data-tab="evolab">📈 EvoLab &amp; Analys</button>
+                <button class="btn" data-tab="activities">🏃 Senaste Pass &amp; Logg</button>
+                <button class="btn accent" id="hub-checkin" data-action="checkin">📥 Check-in</button>
+                <button class="btn accent right" id="chat-toggle" data-action="toggle-chat">💬 Fråga Coachen</button>
+            </div>
+
+            <!-- Tab 1: Dashboard -->
+            <div class="tab-content" id="tab-dashboard">
+                <div class="dashboard-grid">
+                    <div class="card dash-card">
+                        <h3>🏃 Running &amp; Fitness Index</h3>
+                        <div class="body" id="card-fitness"></div>
+                    </div>
+                    <div class="card dash-card">
+                        <h3>⚡ Training Status &amp; Load Impact</h3>
+                        <div class="body" id="card-training"></div>
+                    </div>
+                    <div class="card dash-card">
+                        <h3>🔋 Recovery Score &amp; Efficiency</h3>
+                        <div class="body" id="card-recovery"></div>
+                    </div>
+                    <div class="card dash-card span2">
+                        <h3>📊 Weekly Activity Summary</h3>
+                        <div class="body"><img id="chart-weekly" alt="Träningsdistans per dag"></div>
+                    </div>
+                    <div class="card dash-card">
+                        <h3>⚖️ Weight &amp; Body Comp (Withings)</h3>
+                        <div class="body" id="card-weight"></div>
+                    </div>
+                    <div class="card dash-card span2">
+                        <h3>⚡ Body Battery, Sleep &amp; Stress Trends</h3>
+                        <div class="body"><img id="chart-trends" alt="Body Battery, sömn och stress"></div>
+                    </div>
+                    <div class="card dash-card">
+                        <h3>🔥 Kaloriförbränning idag</h3>
+                        <div class="body" id="card-calories"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: EvoLab -->
+            <div class="tab-content" id="tab-evolab" hidden>
+                <div class="card dash-card" style="margin:15px 0;">
+                    <div class="body"><img id="chart-evolab" alt="EvoLab analys"></div>
+                </div>
+            </div>
+
+            <!-- Tab 3: Activities -->
+            <div class="tab-content" id="tab-activities" hidden>
+                <div class="card activities-card">
+                    <h3>🏃 Senaste Träningspass</h3>
+                    <div class="table-wrap">
+                        <table class="activities">
+                            <thead>
+                                <tr>
+                                    <th>Datum</th><th>Källa</th><th>Namn</th><th>Typ</th>
+                                    <th>Distans (km)</th><th>Tid (min)</th><th>Kalorier (kcal)</th><th>Snittpuls (bpm)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activities-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT PANE: chat & controls -->
+        <div class="right-pane" id="right-pane">
+            <div class="card chat-header">
+                <img class="logo" src="/static/logo.png" alt="HealthChat">
+                <div>
+                    <div class="title">HealthChat</div>
+                    <div class="subtitle">AI-powered insights for your fitness data</div>
+                </div>
+                <div class="actions">
+                    <div class="row">
+                        <button class="btn icon" data-action="search" title="Search chat history">🔍</button>
+                        <button class="btn icon" data-action="toggle-theme" title="Toggle dark mode">◐</button>
+                        <button class="btn" data-action="settings" title="Settings">Settings</button>
+                    </div>
+                    <div class="version" id="version-label"></div>
+                </div>
+            </div>
+
+            <div class="card control-card">
+                <div class="buttons">
+                    <button class="btn accent" id="btn-connect" data-action="connect-garmin">▶ Connect to Garmin</button>
+                    <button class="btn accent" data-action="checkin" title="Hämta och spara senaste data från alla anslutna källor">📥 Check-in</button>
+                    <button class="btn" id="btn-refresh" data-action="refresh" disabled title="Refresh Garmin data">Refresh</button>
+                    <button class="btn" id="btn-reset" data-action="reset-chat" disabled title="Clear chat history">↺ Reset</button>
+                    <button class="btn" data-action="prompts" title="Manage saved prompts">📝 Prompts</button>
+                    <button class="btn" id="btn-save-chat" data-action="save-chat" disabled title="Save this conversation with a custom name">💾 Save Chat</button>
+                    <button class="btn" data-action="history" title="View saved chats">📂 History</button>
+                    <button class="btn" id="btn-export" data-action="export" disabled title="Export conversation as PDF, DOCX, or TXT">📄 Export Report</button>
+                </div>
+                <div class="status-label" id="status-label">⚪  Not connected</div>
+            </div>
+
+            <div class="card mfa-card" id="mfa-card" hidden>
+                <h3>🔐 Multi-Factor Authentication</h3>
+                <div class="row">
+                    <label for="mfa-code">Enter 6-digit code:</label>
+                    <input type="text" id="mfa-code" maxlength="6" style="width:120px;font-size:16px;">
+                    <button class="btn accent" data-action="submit-mfa">Submit Code</button>
+                </div>
+            </div>
+
+            <div class="card chat-display" id="chat-display"></div>
+
+            <div class="card input-card">
+                <div class="row">
+                    <textarea id="message-input" rows="3" disabled></textarea>
+                    <button class="btn accent" id="btn-send" data-action="send" disabled>Send →</button>
+                </div>
+                <div class="helper">Ctrl+Enter to send  •  Enter for new line</div>
+            </div>
+
+            <div class="card">
+                <div class="quick-header">
+                    <h3>Quick Questions</h3>
+                    <button class="btn" data-action="customize-questions">⚙️ Customize</button>
+                </div>
+                <div class="quick-grid" id="quick-questions"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay" hidden>
+        <div class="dialog" id="dialog">
+            <header id="dialog-title"></header>
+            <div class="content" id="dialog-content"></div>
+            <footer id="dialog-footer"></footer>
+        </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <input type="file" id="file-input" hidden>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

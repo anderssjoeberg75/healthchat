@@ -19,7 +19,13 @@ logger = logging.getLogger(__name__)
 class GarminDataHandler:
     """Handles Garmin Connect authentication and data retrieval."""
     
-    def __init__(self, email: str, password: str, token_store_path: Optional[str] = None):
+    def __init__(
+        self,
+        email: str,
+        password: str,
+        token_store_path: Optional[str] = None,
+        db: Optional[GarminDatabase] = None,
+    ):
         """
         Initialize Garmin Connect handler.
         
@@ -27,6 +33,8 @@ class GarminDataHandler:
             email: Garmin Connect email
             password: Garmin Connect password
             token_store_path: Directory to store tokens (default: ~/.garmin_tokens)
+            db: Database to write synced data to. Multi-user deployments pass one
+                database per user; omit it for the single-user default location.
         """
         self.email = email
         self.password = password
@@ -34,7 +42,7 @@ class GarminDataHandler:
         self._authenticated = False
         
         # Initialize Local SQLite Database
-        self.db = GarminDatabase()
+        self.db = db if db is not None else GarminDatabase()
         
         # Token store directory - garth will create oauth1_token.json and oauth2_token.json files
         if token_store_path is None:

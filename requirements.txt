@@ -1,29 +1,18 @@
-# HealthChat Desktop v4.0.4 Dependencies
+# HealthChat — dependencies for the shared core modules in this directory
+# (ai_client, garmin_db, garmin_handler, fitbit/strava/withings handlers,
+# calorie_calc). The web server adds its own on top: see webapp/requirements.txt.
 
-# Core Application
+# Health data sources
 garth==0.4.46              # Garmin Connect API wrapper
-tk==0.1.0                  # Tkinter (usually included with Python)
+garminconnect>=0.2.0
+requests==2.32.3           # HTTP for Fitbit / Strava / Withings / Ollama
 
-# AI Providers
-openai==1.58.1             # OpenAI, xAI, Azure OpenAI, and Ollama (OpenAI-compatible)
+# AI providers
+openai==1.58.1             # OpenAI, xAI, Azure OpenAI and Ollama (OpenAI-compatible)
 anthropic==0.39.0          # Anthropic Claude API
 google-genai==0.3.0        # Google Gemini (new SDK)
-requests==2.32.3           # HTTP library for Ollama API calls
 
-# Document Generation
+# Report export
 python-docx==1.1.2         # Word document creation
 reportlab==4.2.5           # PDF generation
 Pillow==11.0.0             # Image processing
-
-# UI and Utilities
-ttkthemes==3.2.2           # Additional ttk themes (optional)
-
-# Build Tools (Development only)
-pyinstaller==6.11.1        # Create executable
-Pillow==11.0.0             # Required for PyInstaller to handle images
-
-# Optional: For future voice features (commented out for now)
-# azure-cognitiveservices-speech==1.40.0  # Voice input (future)
-
-# Note: Some packages like tkinter come with Python
-# Note: garth may need to be installed from git if not on PyPI

@@ -11,7 +11,7 @@ venv/
 env/
 ENV/
 
-# --- PyInstaller build artifacts ---
+# --- Build artifacts ---
 build/
 dist/
 *.manifest
@@ -36,6 +36,11 @@ oauth2_token.json
 config.json
 .healthchat/
 .garmin_chat/
+
+# --- Web server state (accounts, per-user databases, OAuth tokens, secret key) ---
+data/
+webapp/.env
+secret_key
 
 # --- IDE / OS ---
 .idea/

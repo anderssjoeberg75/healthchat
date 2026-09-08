@@ -1,6 +1,7 @@
-# 📋 Åtgärdstavla – HealthChat Desktop
+# 📋 Åtgärdstavla – HealthChat
 
 > Uppgiftslista för **Antigravity** baserad på en kodgenomgång av projektet (2026-08-19).
+> **2026-09-08:** projektet är omskrivet från Windows-skrivbordsapp till **webbapp** – se *W-spåret* längre ner.
 > Varje uppgift är fristående: den innehåller fil, plats, problem, föreslagen lösning och acceptanskriterier så att en agent kan plocka upp den direkt.
 >
 > **Prioritet:** `P0` = bugg/säkerhet som påverkar användaren nu · `P1` = viktig robusthet/kostnad · `P2` = kodkvalitet/underhåll.
@@ -9,12 +10,14 @@
 
 ## Sammanfattning
 
-Projektet är en Tkinter-baserad Windows-desktopapp (~9 000 rader Python) som kopplar Garmin/Fitbit/Withings-data till flera AI-leverantörer. Arkitekturen är i grunden sund (nya SQLite-anslutningar per operation → trådsäkert DB-lager, `root.after(0, …)` används korrekt för UI-uppdateringar från trådar). Genomgången hittade **1 krasch-bugg, 1 kostnads-/tokenbugg, 1 trådsäkerhetsbugg, ett säkerhetsavvikande påstående** samt en rad robusthets- och kvalitetsförbättringar.
+Projektet var en Tkinter-baserad Windows-desktopapp (~9 000 rader Python) som kopplar Garmin/Fitbit/Withings-data till flera AI-leverantörer, och är sedan 2026-09-08 en **webbapp** (FastAPI + enkelsidig frontend) med samma utseende och funktioner. Kärnmodulerna är oförändrade, så fynden nedan gäller fortfarande. Arkitekturen är i grunden sund (nya SQLite-anslutningar per operation → trådsäkert DB-lager, `root.after(0, …)` används korrekt för UI-uppdateringar från trådar). Genomgången hittade **1 krasch-bugg, 1 kostnads-/tokenbugg, 1 trådsäkerhetsbugg, ett säkerhetsavvikande påstående** samt en rad robusthets- och kvalitetsförbättringar.
 
 Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-opus-4-6` m.fl. är giltiga), DB-lagrets trådsäkerhet, och Withings token-rotation (persisteras korrekt i `sync_withings`).
 
 > **Uppföljande genomgång 2026-09-04:** Lade till **P1-5** (feldaterad body-composition), **P1-6** (HTTP utan timeout i Fitbit/Strava), **P1-7** (Fitbit saknar token-refresh), konkretiserade **P2-1** (nakna `except:`) och la till **P2-9** (versions-drift). Alla verifierade mot koden; P1-5 bekräftas dessutom av ett rött befintligt test.
 
+> **Omskrivning 2026-09-08 (W-spåret):** Appen är portad till en webbapp. Utseende och funktioner är oförändrade – enda skillnaden är att den nås via en webbadress i stället för en `.exe`. Databasen behöver inte längre vara nåbar utifrån, användarna slipper installera något och servern är igång dygnet runt så AI:n kan arbeta autonomt. Skrivbordsversionen ligger arkiverad som `HealthChatDesktop-v4.0.4-legacy.zip` i repo-roten. Se avsnittet *W-spåret – Från skrivbordsapp till webbapp*.
+>
 > **Önskemål 2026-09-04 (K-spåret):** Byte till **MariaDB**, **inloggning/registrering**, **klientkryptering** av all hälsodata, **profilsida** (byt lösenord, ta bort konto), **återställningsnyckel** och upprensning av inställningsdialogen. Se avsnittet *Konto, MariaDB & kryptering*.
 
 ---
@@ -290,6 +293,171 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 > **Valfri härdning (utanför grundomfånget):** Appen ansluter direkt till MariaDB med delade DB-uppgifter, vilket innebär att radisoleringen mellan användare upprätthålls av applikationen (`WHERE user_id = ?`) – inte av databasen. Vill man ha starkare isolering: ge varje användare ett eget DB-konto, eller lägg ett litet API-lager framför databasen. Krypteringen (K-3) skyddar ändå innehållet även om raderna skulle läsas.
 
+## 🌐 W-spåret – Från skrivbordsapp till webbapp
+
+> **Beslut 2026-09-08:** HealthChat blir en **webbapp** i stället för en `.exe` på skrivbordet.
+> Motivet: databasen behöver inte vara nåbar utifrån, användarna slipper installera något, och
+> AI:n kan arbeta mer autonomt eftersom servern är igång dygnet runt.
+> **Krav: utseende och funktioner ska vara oförändrade** – enda skillnaden ska vara att appen nås
+> via en webbadress.
+>
+> Skrivbordsversionen är arkiverad som `HealthChatDesktop-v4.0.4-legacy.zip` i repo-roten.
+> Referenser till `HealthChatDesktop.py` och `charts_view.py` i K-spåret nedan pekar numera på
+> arkivet; motsvarigheten i webbappen står i tabellen i [webapp/README.md](webapp/README.md).
+
+### Arkitektur
+
+| Skrivbord (v4.0.4) | Webb (v5.0.0) |
+| --- | --- |
+| En `HealthChatApp` per körning | En `Workspace` per inloggad användare (`webapp/backend/workspace.py`) |
+| `~/.healthchat/` på användarens dator | `DATA_DIR/users/<id>/` på servern |
+| Tkinter-fönster | Enkelsidig frontend (`webapp/frontend/`) |
+| Matplotlib i Tk-canvas | Samma figurer renderade headless till PNG (`webapp/backend/charts.py`) |
+| Lokal HTTP-server för OAuth-svar | `GET /oauth/<tjänst>/callback` på servern |
+| Trådar som skriver i Tk-widgets | Bakgrundstrådar som skriver status som pollas via `/api/sync/status` |
+
+Kärnmodulerna (`ai_client.py`, `garmin_db.py`, `garmin_handler.py`, `fitbit_handler.py`,
+`strava_handler.py`, `withings_handler.py`, `calorie_calc.py`) ligger kvar oförändrade i roten och
+återanvänds av webbappen – det är därför funktionaliteten är identisk.
+
+### [x] W-1: Serverskelett och projektstruktur
+- **Fil:** [webapp/backend/main.py](webapp/backend/main.py), [webapp/backend/config.py](webapp/backend/config.py)
+- **Gjort:** FastAPI-app med `/api`-routrar, statisk frontend, SPA-fallback och `/api/docs`. All konfiguration läses ur miljövariabler (`HEALTHCHAT_DATA_DIR`, `HEALTHCHAT_BASE_URL`, `HEALTHCHAT_SECRET_KEY`, …) med säkra standardvärden.
+- **Acceptanskriterier:** `uvicorn webapp.backend.main:app` startar utan konfiguration och serverar UI:t på `/`. ✅
+
+### [x] W-2: Användarkonton och sessioner
+- **Fil:** [webapp/backend/auth.py](webapp/backend/auth.py), [webapp/backend/routers/auth_routes.py](webapp/backend/routers/auth_routes.py)
+- **Gjort:** Registrering, inloggning, utloggning, byte av lösenord och radering av konto. Lösenord hashas med PBKDF2-HMAC-SHA256 (240 000 varv, unikt salt). Sessioner är slumpade tokens i en HTTP-only-cookie med server-sidans sessionstabell (går att återkalla). Lösenordsbyte loggar ut alla enheter. Kontoradering tar bort hela användarens datakatalog.
+- **Acceptanskriterier:** Två konton ser aldrig varandras data; utan giltig session svarar alla `/api`-anrop `401`. ✅ (`tests/test_webapp_api.py`)
+
+### [x] W-3: Arbetsyta per användare
+- **Fil:** [webapp/backend/workspace.py](webapp/backend/workspace.py)
+- **Gjort:** Varje användare får egen `config.json`, egen SQLite-databas, egna Garmin/Fitbit/Strava-tokens, egen chatthistorik, egna sparade promptar och egen AI-klient. `GarminDataHandler` tar numera emot en `db`-parameter så att synken skriver till rätt användares databas (bakåtkompatibel default).
+- **Acceptanskriterier:** Inga globala sökvägar kvar i serverkoden; ett konto kan inte läsa ett annat kontos filer. ✅
+
+### [x] W-4: Inställningar via API utan att läcka hemligheter
+- **Fil:** [webapp/backend/routers/settings_routes.py](webapp/backend/routers/settings_routes.py)
+- **Gjort:** `GET /api/settings` returnerar konfigurationen med alla hemligheter (lösenord, API-nycklar, OAuth-tokens) utbytta mot flaggan `secrets_set`. Ett tomt fält vid sparande betyder "behåll det som redan finns", så användaren kan spara formuläret utan att skriva in nyckeln igen. Modellistan hämtas live från leverantören med de statiska listorna som reserv.
+- **Acceptanskriterier:** Ingen hemlighet förekommer någonsin i ett API-svar; okända nycklar ignoreras. ✅
+
+### [x] W-5: Server-renderade grafer (identiskt utseende)
+- **Fil:** [webapp/backend/charts.py](webapp/backend/charts.py)
+- **Gjort:** `charts_view.py`:s ritkod portad rakt av till headless Matplotlib (Agg) och serverad som PNG: `weekly.png` (7×3,2″), `trends.png` (11×4,5″, tre paneler) och `evolab.png` (11×13″, sju paneler). Samma färger, titlar, markörer och datumformatering som i skrivbordsappen.
+- **Motivering:** Att rita om graferna i ett JavaScript-bibliotek hade gett ett *liknande* utseende; att återanvända figurerna ger ett **identiskt**.
+- **Acceptanskriterier:** Alla tre figurerna renderar även mot tom databas, med samma "ingen data"-texter som förut. ✅ (`tests/test_webapp_charts.py`)
+
+### [x] W-6: Dashboard-kort och aktivitetstabell
+- **Fil:** [webapp/backend/metrics.py](webapp/backend/metrics.py)
+- **Gjort:** `update_dashboard_cards`, `update_calorie_card` och `populate_activities_table` portade till JSON: Fitness Index, Training Status, Recovery Score, vikt/kroppssammansättning och dagens kaloriförbränning (som fortsatt sparas i `calorie_burn` för trendgrafen). Källdetekteringen (Garmin/Strava/Fitbit ur `raw_json`) är oförändrad.
+- **Acceptanskriterier:** Samma siffror och samma svenska texter som i skrivbordsappen; kaloriberäkningen skriver fortfarande dagens rad till databasen. ✅
+
+### [x] W-7: Check-in och full historik-synk i bakgrunden
+- **Fil:** [webapp/backend/routers/sync_routes.py](webapp/backend/routers/sync_routes.py)
+- **Gjort:** `perform_unified_checkin` och `perform_full_historical_sync` portade. Synken kör i bakgrundstrådar precis som förut, men statusen skrivs till användarens arbetsyta och pollas av webbläsaren via `GET /api/sync/status` i stället för att skrivas i en Tk-etikett. Import av export-filer (Fitbit/Strava/Withings) sker nu via uppladdning i stället för filväljare.
+- **Acceptanskriterier:** Check-in utan anslutna källor ger samma varning som förut; statusraden i Hub-headern uppdateras under synken och graferna laddas om när den är klar. ✅
+
+### [x] W-8: Chatt med samma kontextlogik
+- **Fil:** [webapp/backend/chatsvc.py](webapp/backend/chatsvc.py)
+- **Gjort:** `_process_message` portad ord för ord: datumintervall-frågor ("last 3 weeks", "this month"), nyckelordsstyrd val av Garmin-kontext (sömn, stress, HRV, nutrition …), antalsdetektering med tak på 50 aktiviteter och det glidande konversationsminnet på 10 meddelanden.
+- **Acceptanskriterier:** Varje gren i routern täcks av test; ett misslyckat datumintervall-anrop faller tillbaka på nyckelordsroutern i stället för att krascha. ✅ (`tests/test_webapp_chatsvc.py`)
+
+### [x] W-9: Promptar, snabbfrågor, historik, sök och export
+- **Fil:** [webapp/backend/routers/chat_routes.py](webapp/backend/routers/chat_routes.py), [webapp/backend/exporters.py](webapp/backend/exporters.py)
+- **Gjort:** Sparade promptar (CRUD), snabbfrågor (max 8, samma fyra standardfrågor), spara/ladda/döp om/ta bort chattar, sökning i både nuvarande och sparade chattar samt export till TXT/PDF/DOCX – nu som nedladdning i stället för filväljare. Chatt-id:n valideras så att de inte kan peka utanför användarens historikkatalog.
+- **Acceptanskriterier:** Alla tre exportformaten produceras korrekt; `../`-försök i chatt-id avvisas. ✅
+
+### [x] W-10: OAuth-flöden utan lokal HTTP-server
+- **Fil:** [webapp/backend/routers/oauth_routes.py](webapp/backend/routers/oauth_routes.py)
+- **Gjort:** Fitbit, Strava och Withings ansluts via `GET /api/connect/<tjänst>/url` → auktorisering hos tjänsten → `GET /oauth/<tjänst>/callback` på servern. Ett engångs-`state` binder svaret till rätt användare (med sessionscookien som reserv). Kvittosidan är samma HTML som skrivbordsappens lokala callback-server visade.
+- **Vinst:** En enda fast redirect-URL per tjänst i stället för `localhost:8080/8081` på varje användares dator.
+- **Acceptanskriterier:** Anslutning fungerar utan att något behöver installeras lokalt; callback utan kod visar felsidan i stället för att krascha. ✅
+
+### [x] W-11: Frontend som speglar skrivbordsutseendet
+- **Fil:** [webapp/frontend/index.html](webapp/frontend/index.html), [webapp/frontend/static/app.js](webapp/frontend/static/app.js), [webapp/frontend/static/styles.css](webapp/frontend/static/styles.css)
+- **Gjort:** Samma layout som förut – vänsterpanelens Hub (Dashboard / EvoLab & Analys / Senaste Pass & Logg, tidsintervallknappar, Check-in, Fråga Coachen) och den utfällbara högerpanelen (header, kontrollknappar, MFA-ruta, chattfönster, inmatning med Ctrl+Enter, Quick Questions). Menyraden (Arkiv, Garmin, Fitbit, Withings, Strava, Verktyg, Hjälp + nytt Konto) är återskapad som rullgardinsmenyer. Färgpaletten är kopierad ur `setup_styles()`, både ljust och mörkt läge. Dialogerna (Inställningar, Promptar, Historik, Sök, Export, Anpassa snabbfrågor, Spara chatt, Om) är modaler. Ingen byggkedja – ren HTML/CSS/JS.
+- **Acceptanskriterier:** Sida vid sida med skrivbordsappen ska en användare känna igen varje yta; inga konsolfel vid inloggning, tabbyten, temaväxling eller dialogöppning. ✅
+
+### [x] W-12: Tester
+- **Fil:** [tests/test_webapp_api.py](tests/test_webapp_api.py), [tests/test_webapp_charts.py](tests/test_webapp_charts.py), [tests/test_webapp_chatsvc.py](tests/test_webapp_chatsvc.py)
+- **Gjort:** 59 nya test: konto- och sessionsflöden, isolering mellan användare, att hemligheter aldrig lämnar servern, dashboard och grafer, synk- och chattvakter, historik/sök/export, sökvägsskydd och OAuth-URL-bygget. Inget test går ut på nätet.
+- **Acceptanskriterier:** `python -m pytest` grön bortsett från det sedan tidigare kända P1-5-felet. ✅
+
+### [x] W-13: Paketering och drift
+- **Fil:** [webapp/Dockerfile](webapp/Dockerfile), [webapp/docker-compose.yml](webapp/docker-compose.yml), [webapp/.env.example](webapp/.env.example)
+- **Gjort:** Slimmad Python-image som kör som icke-root, datakatalogen som volym, compose-fil och dokumenterade miljövariabler. `HEALTHCHAT_DISABLE_REGISTRATION=1` gör installationen inbjudningsbaserad (första kontot får alltid skapas).
+- **Acceptanskriterier:** `docker compose up` ger en fungerande instans där data överlever omstart. ✅
+
+### [x] W-14: Arkivering av skrivbordsversionen
+- **Fil:** `HealthChatDesktop-v4.0.4-legacy.zip`
+- **Gjort:** Hela skrivbordsprojektet (Tkinter-UI, PyInstaller-spec, Inno Setup-installer, `.bat`/`.ps1`-skript) zippat till repo-roten tillsammans med en `ARCHIVE-README.md` som beskriver hur det byggs och var varje del lever vidare. Motsvarande filer är borttagna ur arbetsträdet; kärnmodulerna ligger kvar eftersom webbappen använder dem.
+- **Acceptanskriterier:** Zip-filen innehåller ett komplett, byggbart skrivbordsprojekt; testsviten fungerar utan de borttagna filerna. ✅
+
+---
+
+### [ ] W-15: Härdning inför publik drift
+- **Fil:** [webapp/backend/routers/auth_routes.py](webapp/backend/routers/auth_routes.py), [webapp/backend/main.py](webapp/backend/main.py)
+- **Problem:** Inloggningen har ingen bromsning mot lösenordsgissning, och appen sätter inga säkerhetsheaders. Sessionscookien är `SameSite=Lax` + `HttpOnly`, vilket räcker för dagens rena JSON-API, men det finns inget skydd om formulärposter tillkommer.
+- **Att göra:**
+  - Räknare per e-post **och** per IP med exponentiell fördröjning efter ~5 misslyckade försök (samma krav som K-2 ställer).
+  - Säkerhetsheaders: `Content-Security-Policy` (frontend laddar inget externt), `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`.
+  - Dokumentera reverse proxy med TLS (Caddy/nginx) och sätt `HEALTHCHAT_COOKIE_SECURE=1` i exemplet.
+  - Sätt tak på uppladdade export-filer (`/api/import/*`) så att en stor fil inte fyller disken.
+- **Acceptanskriterier:** Sjätte felaktiga inloggningsförsöket bromsas mätbart; headers syns i svaret; en 500 MB-uppladdning avvisas i stället för att skrivas till disk.
+
+### [ ] W-16: Garmin-session över serveromstart
+- **Fil:** [webapp/backend/workspace.py](webapp/backend/workspace.py) (`restore_garmin_session`)
+- **Problem:** Garmin-tokens sparas per användare på servern och återanvänds vid sidladdning, men återställningen sker synkront i `GET /api/status` – första anropet efter en omstart kan därför ta flera sekunder, och misslyckas den blir användaren tyst "Not connected".
+- **Att göra:** Flytta återställningen till en bakgrundstråd som sätter status när den är klar, cacha resultatet, och visa ett tydligt "Sessionen har gått ut – anslut igen" när tokens är ogiltiga.
+- **Acceptanskriterier:** `GET /api/status` svarar under 200 ms även direkt efter omstart; en utgången token ger ett begripligt meddelande i statusraden.
+
+### [ ] W-17: Autonom, schemalagd synk (nyttan med att servern alltid är igång)
+- **Fil:** ny `webapp/backend/scheduler.py`
+- **Bakgrund:** Detta var ett av huvudskälen till webbappen – på skrivbordet kunde inget hända medan datorn var avstängd.
+- **Att göra:**
+  - En schemaläggare som kör Check-in per användare på en vald tid (t.ex. 05:00), sekventiellt så att många konton inte startar hundratals trådar samtidigt.
+  - Inställning per användare: **av / dagligen / varje timme**, plus tidpunkt. Läggs i `config.json` och i inställningsdialogen.
+  - Loggning per körning (källa, antal poster, fel) som kan visas i UI:t.
+  - Valfritt nästa steg: låt AI:n sammanfatta natten/veckan automatiskt och lägga svaret som ett olästt meddelande i chatten.
+- **Acceptanskriterier:** Med schemat påslaget uppdateras dashboarden utan att användaren loggat in; en källa som fallerar stoppar inte de andra; körningarna syns i loggen.
+
+### [ ] W-18: Resursgränser vid många samtidiga användare
+- **Fil:** [webapp/backend/routers/sync_routes.py](webapp/backend/routers/sync_routes.py)
+- **Problem:** Varje Check-in startar en tråd per källa. Med många konton (eller ett konto som klickar snabbt) kan trådantalet växa okontrollerat. Idag hindras bara dubbelklick, via `sync_status.running`.
+- **Att göra:** En delad kö/trådpool med tak (t.ex. 4 samtidiga synkar) och en per-användarkö, samt en tidsgräns per körning så att en hängande källa inte blockerar poolen för alltid.
+- **Acceptanskriterier:** 20 samtidiga Check-in-anrop ger som mest N samtidiga synkar och inga tappade jobb.
+
+### [ ] W-19: Importera befintlig skrivbordsdata till ett konto
+- **Fil:** ny `webapp/backend/routers/migrate_routes.py`
+- **Problem:** Användare som kört skrivbordsappen har historik i `~/.healthchat/healthdata.db` som webbappen inte känner till.
+- **Att göra:** Ett uppladdningsläge i profilsidan: ladda upp `healthdata.db` (och valfritt `config.json` utan hemligheter) → validera schemat → skriv över/slå ihop med kontots databas via samma `upsert_*`-metoder → visa hur många rader per tabell som lades till.
+- **Acceptanskriterier:** En skrivbordsdatabas importeras utan dubbletter (samma `activity_id`/datum uppdateras i stället för att dupliceras) och graferna visar hela den gamla historiken.
+- **Beroende:** Överlappar **K-6**; gör dem tillsammans om K-spåret körs.
+
+### [ ] W-20: Databas- och krypteringsspåret i webbmiljö (K-1 + K-3)
+- **Problem:** K-spåret specificerades för skrivbordsappen. Webbappen ändrar förutsättningarna: databasen är redan oåtkomlig utifrån, och en delad MariaDB är nu enklare att motivera än när varje användare hade en egen dator.
+- **Att göra:**
+  - **K-1 (MariaDB):** ersätt `GarminDatabase`:s SQLite-anslutning med en poolad MariaDB-anslutning och lägg till `user_id` i alla tabeller *eller* behåll en databas/schema per användare. Webbappen isolerar redan användarna på filnivå, så detta är ett skalbarhets- och driftbeslut, inte ett säkerhetskrav.
+  - **K-3 (kryptering):** nyckeln härleds ur användarens lösenord. På servern innebär det att data bara kan läsas medan användaren är inloggad – vilket krockar med **W-17** (schemalagd synk när ingen är inloggad). Välj medvetet: antingen kryptering *eller* autonom bakgrundssynk, eller en delad servernyckel med lägre skyddsnivå.
+- **Acceptanskriterier:** Beslutet dokumenterat i board.md innan implementation påbörjas; valt alternativ implementerat med tester.
+
+### [ ] W-21: Live-uppdatering i stället för polling
+- **Fil:** [webapp/frontend/static/app.js](webapp/frontend/static/app.js), [webapp/backend/routers/sync_routes.py](webapp/backend/routers/sync_routes.py)
+- **Problem:** Synkstatus pollas var 2:a sekund och allmän status var 15:e. Det fungerar, men ger onödig trafik.
+- **Att göra:** Byt till Server-Sent Events (`GET /api/events`) för synkstatus och anslutningsstatus; behåll polling som reserv för webbläsare/proxyer som inte klarar SSE.
+- **Acceptanskriterier:** Statusraden uppdateras utan periodiska anrop; funktionen fungerar fortfarande om SSE blockeras.
+
+### [ ] W-22: Responsiv layout för mobil och surfplatta
+- **Fil:** [webapp/frontend/static/styles.css](webapp/frontend/static/styles.css)
+- **Problem:** Layouten är en trogen kopia av skrivbordsfönstret (1650×950) med fast 620 px chattpanel och tre kolumner. Under ~1100 px blir den trång.
+- **Att göra:** Media queries som lägger korten i en kolumn, gör chattpanelen fullskärm på mobil och gör grafbilderna svepbara. Utseendet på desktop ska vara oförändrat.
+- **Acceptanskriterier:** Användbar på 390 px bredd utan horisontell scroll; identiskt utseende på 1650 px.
+
+### [ ] W-23: Grafer med rätt DPI på skärmar med hög pixeltäthet
+- **Fil:** [webapp/backend/charts.py](webapp/backend/charts.py), [webapp/backend/routers/data_routes.py](webapp/backend/routers/data_routes.py)
+- **Problem:** PNG:erna renderas i 95 dpi (skrivbordsappens värde) och skalas upp av webbläsaren – på en retina-skärm blir de mjuka i kanterna.
+- **Att göra:** Låt frontend skicka `devicePixelRatio` och rendera i 2× dpi när det behövs; cacha resultatet per (användare, intervall, dpi) tills nästa synk skriver till databasen.
+- **Acceptanskriterier:** Skarpa grafer på retina-skärm; oförändrat utseende på vanliga skärmar; inga extra renderingar när underliggande data inte ändrats.
+
 ---
 
 ## Förslag på ordning
@@ -298,6 +466,9 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 3. **Nya (2026-09-04):** **P1-5** (feldaterad vikt – liten & tydlig, un-breakar ett test) → **P1-6** (timeouts) → **P1-7** (Fitbit token-refresh, bygger på P1-6).
 4. Övriga P1/P2 löpande (**P2-1** nakna except, **P2-9** version).
 5. **F-1** (daglig kaloriförbränning) – fristående, kan tas när som helst.
-6. **K-spåret** (MariaDB, konto, kryptering, profilsida) – ett sammanhängande spår. Ta dem i ordning: **K-1** (databas) → **K-2** (konto) → **K-3** (kryptering) → **K-10** (återställningsnyckel + info vid registrering) → **K-4** (spara inloggning) → **K-5** (profilsida) → **K-6** (migrera data) → **K-9** (Garmin-dialog) → **K-7** (städa inställningar) → **K-8** (tester/dokumentation).
+6. **W-spåret** (webbapp) – W-1…W-14 är klara. Kvar: **W-15** (härdning inför publik drift) → **W-16** (Garmin-session över omstart) → **W-17** (schemalagd, autonom synk) → **W-18** (resursgränser) → **W-19** (importera skrivbordsdata) → **W-22** (responsiv layout) → **W-21**/**W-23** (polering).
+   - **W-15 bör vara klar innan instansen exponeras publikt.**
+   - **W-20 måste beslutas innan K-1/K-3 påbörjas** – kryptering med användarens lösenord och autonom bakgrundssynk (W-17) utesluter varandra.
+7. **K-spåret** (MariaDB, konto, kryptering, profilsida) – ett sammanhängande spår. **K-2 (konton) och delar av K-5 (profilsida: byt lösenord, radera konto) är levererade av W-2**; övriga punkter kvarstår men ska läsas i ljuset av W-20. Ta dem i ordning: **K-1** (databas) → **K-2** (konto) → **K-3** (kryptering) → **K-10** (återställningsnyckel + info vid registrering) → **K-4** (spara inloggning) → **K-5** (profilsida) → **K-6** (migrera data) → **K-9** (Garmin-dialog) → **K-7** (städa inställningar) → **K-8** (tester/dokumentation).
    - **K-9 måste vara klar före K-7**, annars går Garmin-inloggningen förlorad.
    - **K-10 bygger på K-3** (samma nyckelkuvert – återställningsnyckeln packar upp samma DEK).

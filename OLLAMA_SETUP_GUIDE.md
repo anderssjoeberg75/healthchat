@@ -1,10 +1,17 @@
-# Ollama Setup Guide for HealthChat Desktop
+# Ollama Setup Guide for HealthChat
 
-HealthChat Desktop now supports **Ollama**, a free, local AI solution that runs entirely on your computer. This means:
+HealthChat supports **Ollama**, a free AI solution that runs on hardware you control. This means:
 - ✅ **No API costs** - Unlimited usage with no subscription fees
-- ✅ **Complete privacy** - Your data never leaves your machine
+- ✅ **Complete privacy** - Your data never leaves your own network
 - ✅ **Works offline** - No internet connection needed after initial setup
 - ✅ **Multiple models** - Choose from Llama, Mistral, Phi, and more
+
+> **Web version (v5.0.0):** Ollama is called by the HealthChat **server**, not by
+> your browser. Install it on the machine that runs HealthChat (or anywhere that
+> machine can reach) and set **Ollama server-URL** in Settings to an address the
+> server can resolve — for example `http://localhost:11434/v1` when they share a
+> host, or `http://ollama:11434/v1` in Docker. The steps below describe
+> installing Ollama itself; run them on that machine.
 
 ## System Requirements
 
@@ -82,15 +89,17 @@ ollama list
 
 This should show your installed models. If you see models listed, you're ready!
 
-## Configuring HealthChat Desktop
+## Configuring HealthChat
 
-1. Open HealthChat Desktop
-2. Click **Settings** (gear icon)
-3. Under **AI Provider Selection**, choose **Ollama (Local)**
-4. The endpoint should auto-fill as `http://localhost:11434`
-5. Click **Test Connection** to verify Ollama is running
-6. Select your model from the dropdown (models will be auto-detected)
-7. Click **Save**
+1. Open HealthChat in your browser
+2. Click **Settings**
+3. Under **AI-leverantör**, choose **Ollama (Local)**
+4. Set **Ollama server-URL** to an address the HealthChat *server* can reach
+   (`http://localhost:11434/v1` when they share a host, `http://ollama:11434/v1`
+   in Docker)
+5. Pick your model in the **Modell** dropdown — the list is fetched live from
+   Ollama, so a populated dropdown also confirms the server can reach it
+6. Click **Spara**
 
 ## Troubleshooting
 
@@ -116,7 +125,7 @@ You need to pull at least one model:
 ollama pull llama2
 ```
 
-Then restart HealthChat Desktop.
+Then restart the HealthChat server.
 
 ### Slow Performance
 
@@ -166,7 +175,7 @@ ollama pull llama2          # Fast responses
 ollama pull llama3.1:70b    # Detailed analysis
 ```
 
-Switch models in HealthChat Desktop based on your needs!
+Switch models in HealthChat Settings based on your needs!
 
 ## Cost Comparison
 
@@ -189,13 +198,13 @@ Switch models in HealthChat Desktop based on your needs!
 
 ## Support
 
-If you encounter issues with Ollama integration in HealthChat Desktop:
+If you encounter issues with Ollama integration in HealthChat:
 
 1. Check this troubleshooting guide first
-2. Review the logs in HealthChat Desktop
+2. Review the HealthChat server logs
 3. Test Ollama directly with: `ollama run llama2 "Hello"`
 4. Report issues at: [Your GitHub Issues URL]
 
 ---
 
-**Note**: Ollama is a third-party tool maintained by Ollama Team. HealthChat Desktop integrates with Ollama but does not control its development or support.
+**Note**: Ollama is a third-party tool maintained by Ollama Team. HealthChat integrates with Ollama but does not control its development or support.

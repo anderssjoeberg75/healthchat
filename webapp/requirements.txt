@@ -1,0 +1,26 @@
+# HealthChat Web v5.0.0 — server dependencies
+# (installs on top of the shared core modules in the repository root)
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-multipart==0.0.20
+
+# Health data sources
+garth==0.4.46
+garminconnect>=0.2.0
+requests==2.32.3
+
+# AI providers
+openai==1.58.1
+anthropic==0.39.0
+google-genai==0.3.0
+
+# Charts rendered server-side (headless Agg backend)
+matplotlib==3.9.3
+
+# Report export
+python-docx==1.1.2
+reportlab==4.2.5
+Pillow==11.0.0
