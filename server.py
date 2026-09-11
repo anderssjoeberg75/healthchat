@@ -109,14 +109,143 @@ def get_db_conn(db: GarminDatabase):
     return db.get_connection()
 
 
+def init_sessions_table(conn):
+    """Ensure user_sessions table exists in DB."""
+    try:
+        is_mariadb = hasattr(conn, "ping")
+        sql = """
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            session_id VARCHAR(64) PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            email VARCHAR(255) NOT NULL,
+            dek VARBINARY(256) NOT NULL,
+            encrypted_profile TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """ if is_mariadb else """
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            email TEXT NOT NULL,
+            dek BLOB NOT NULL,
+            encrypted_profile TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        if hasattr(conn, "commit"):
+            try:
+                conn.commit()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Could not init user_sessions table: {e}")
+
+
+def save_session_to_db(conn, session_id: str, session: UserSession):
+    """Save session object to shared database table across Uvicorn workers."""
+    try:
+        init_sessions_table(conn)
+        is_mariadb = hasattr(conn, "ping")
+        placeholder = "%s" if is_mariadb else "?"
+        prof_json = json.dumps(session.encrypted_profile) if session.encrypted_profile else None
+        dek_bytes = bytes(session.dek)
+        
+        sql = (
+            f"REPLACE INTO user_sessions (session_id, user_id, email, dek, encrypted_profile) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})"
+            if is_mariadb else
+            f"INSERT OR REPLACE INTO user_sessions (session_id, user_id, email, dek, encrypted_profile) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})"
+        )
+        with conn.cursor() as cur:
+            cur.execute(sql, (session_id, session.user_id, session.email, dek_bytes, prof_json))
+        if hasattr(conn, "commit"):
+            try:
+                conn.commit()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Failed saving session {session_id} to DB: {e}")
+
+
+def load_session_from_db(conn, session_id: str) -> Optional[UserSession]:
+    """Retrieve session object from shared database table across Uvicorn workers."""
+    try:
+        init_sessions_table(conn)
+        is_mariadb = hasattr(conn, "ping")
+        placeholder = "%s" if is_mariadb else "?"
+        sql = f"SELECT user_id, email, dek, encrypted_profile FROM user_sessions WHERE session_id = {placeholder}"
+        with conn.cursor() as cur:
+            cur.execute(sql, (session_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            if isinstance(row, dict):
+                uid = row["user_id"]
+                email = row["email"]
+                dek_raw = row["dek"]
+                prof_raw = row["encrypted_profile"]
+            else:
+                uid = row[0]
+                email = row[1]
+                dek_raw = row[2]
+                prof_raw = row[3]
+            
+            dek_bytes = bytearray(dek_raw)
+            prof_dict = json.loads(prof_raw) if prof_raw else None
+            return UserSession(user_id=uid, email=email, dek=dek_bytes, encrypted_profile=prof_dict)
+    except Exception as e:
+        logger.warning(f"Failed loading session {session_id} from DB: {e}")
+        return None
+
+
+def delete_session_from_db(conn, session_id: str):
+    """Delete session from shared database table."""
+    try:
+        is_mariadb = hasattr(conn, "ping")
+        placeholder = "%s" if is_mariadb else "?"
+        sql = f"DELETE FROM user_sessions WHERE session_id = {placeholder}"
+        with conn.cursor() as cur:
+            cur.execute(sql, (session_id,))
+        if hasattr(conn, "commit"):
+            try:
+                conn.commit()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Failed deleting session {session_id} from DB: {e}")
+
+
 def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> UserSession:
     """Dependency retrieving active UserSession from session cookie."""
-    if not healthchat_session or healthchat_session not in _active_sessions:
+    if not healthchat_session:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Ej inloggad eller sessionen har löpt ut."
         )
-    return _active_sessions[healthchat_session]
+    if healthchat_session in _active_sessions:
+        return _active_sessions[healthchat_session]
+    
+    # Fallback to shared database session store across Uvicorn worker processes
+    db = get_db()
+    conn = None
+    try:
+        conn = get_db_conn(db)
+        session = load_session_from_db(conn, healthchat_session)
+        if session:
+            _active_sessions[healthchat_session] = session
+            return session
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Ej inloggad eller sessionen har löpt ut."
+    )
 
 
 def bind_user_db(session: UserSession) -> GarminDatabase:
@@ -144,6 +273,7 @@ def register(req: RegisterRequest, response: Response):
         )
         session_id = str(uuid.uuid4())
         _active_sessions[session_id] = session
+        save_session_to_db(conn, session_id, session)
         
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
@@ -181,6 +311,7 @@ def login(req: LoginRequest, response: Response):
         session = auth.authenticate_user(conn, req.email, req.password)
         session_id = str(uuid.uuid4())
         _active_sessions[session_id] = session
+        save_session_to_db(conn, session_id, session)
 
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
@@ -211,10 +342,22 @@ def login(req: LoginRequest, response: Response):
 
 @app.post("/api/auth/logout")
 def logout(response: Response, healthchat_session: Optional[str] = Cookie(None)):
-    if healthchat_session and healthchat_session in _active_sessions:
-        session = _active_sessions.pop(healthchat_session)
-        session.clear()
-        auth.clear_remembered_session(session.email)
+    if healthchat_session:
+        if healthchat_session in _active_sessions:
+            session = _active_sessions.pop(healthchat_session)
+            session.clear()
+            auth.clear_remembered_session(session.email)
+        db = get_db()
+        conn = None
+        try:
+            conn = get_db_conn(db)
+            delete_session_from_db(conn, healthchat_session)
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
     response.delete_cookie(SESSION_COOKIE_NAME)
     return {"status": "success", "message": "Utloggad!"}
 

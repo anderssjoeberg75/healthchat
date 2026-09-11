@@ -33,6 +33,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "body_composition",
     "calorie_burn",
     "users",
+    "user_sessions",
     "sync_metadata"
 })
 

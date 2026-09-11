@@ -19,6 +19,16 @@ CREATE TABLE IF NOT EXISTS users (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id VARCHAR(64) PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    dek VARBINARY(256) NOT NULL,
+    encrypted_profile TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 2. Encrypted Health Data Tables (Composite PK user_id + date / activity_id)
 CREATE TABLE IF NOT EXISTS daily_summary (
     user_id BIGINT NOT NULL,
