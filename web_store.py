@@ -81,6 +81,61 @@ def decode(session, raw: Optional[str], default: Any = None) -> Any:
         return raw
 
 
+_WIDENED: set = set()
+
+
+def ensure_capacity(db) -> None:
+    """Widen ``sync_metadata.value`` to LONGTEXT on an existing MariaDB.
+
+    The table was created with ``TEXT`` (64 KB). It now also holds this store's
+    encrypted payloads, and a long conversation passes that limit — MariaDB then
+    truncates or rejects the write, losing the chat. Widening is safe and
+    idempotent; the app may lack ALTER rights, in which case this logs the
+    statement to run by hand instead of failing the request.
+    """
+    if not getattr(db, "is_mariadb", False) or not getattr(db, "pool", None):
+        return  # SQLite has no such limit
+    key = id(db)
+    if key in _WIDENED:
+        return
+    _WIDENED.add(key)
+
+    try:
+        conn = db.get_mariadb_conn()
+    except Exception as exc:
+        logger.debug("Could not check sync_metadata capacity: %s", exc)
+        return
+
+    current = "TEXT"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sync_metadata' "
+                "AND COLUMN_NAME = 'value'"
+            )
+            row = cur.fetchone()
+            current = (row[0] if row else "").lower()
+            if not current or current == "longtext":
+                return
+
+            cur.execute("ALTER TABLE sync_metadata MODIFY `value` LONGTEXT")
+            logger.info("Widened sync_metadata.value from %s to LONGTEXT", current)
+    except Exception as exc:
+        logger.warning(
+            "sync_metadata.value is still %s and long chats will not fit. "
+            "Run this once as a user with ALTER rights: "
+            "ALTER TABLE sync_metadata MODIFY `value` LONGTEXT;  (%s)",
+            current,
+            exc,
+        )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def read(db, session, key: str, default: Any = None) -> Any:
     """Load one stored value for the session's user."""
     try:
@@ -92,4 +147,5 @@ def read(db, session, key: str, default: Any = None) -> Any:
 
 def write(db, session, key: str, value: Any) -> None:
     """Store one value for the session's user."""
+    ensure_capacity(db)
     db.set_metadata(key, encode(session, value))

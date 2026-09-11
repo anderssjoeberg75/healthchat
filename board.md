@@ -206,15 +206,27 @@ Tre vägval blockerar eller formar arbetet nedan. De är billiga att ta och dyra
 
 ### [ ] R-15: 🟠 Sessioner ligger bara i minnet och går aldrig ut
 - **Fil:** [server.py:66](server.py) (`_active_sessions`), [server.py:166-172](server.py) (`set_cookie`)
-- **Problem:** Tre saker hänger ihop:
+- **Problem:** Fyra saker hänger ihop:
+  - `_active_sessions` är en process-lokal dict, och `healthchat_web.service` startade `uvicorn --workers 4`. **En inloggning som hanteras av en worker är okänd för de tre andra**, så ungefär tre av fyra anrop svarar `401` och användaren kastas tillbaka till inloggningsrutan på måfå. Enheten är nu satt till `--workers 1` som tillfällig lösning; fler workers kräver delade sessioner.
   - `_active_sessions` är en process-lokal dict. **En omstart av servern loggar ut alla** — och eftersom cookien har `max_age=30 dagar` fortsätter webbläsaren skicka en token som servern inte känner igen, vilket ser ut som ett fel snarare än en utloggning.
   - Sessionen har ingen serversidig förfallotid. DEK:en ligger kvar i minnet så länge processen lever, oavsett hur länge användaren varit borta.
   - Cookien sätts utan `secure=True`, så den skickas i klartext om appen nås över HTTP.
 - **Att göra:**
   1. Ge sessionen en förfallotid (t.ex. 12 h inaktivitet, 30 dagar absolut) och rensa utgångna poster.
   2. Sätt `secure=True` när `HEALTHCHAT_BASE_URL` börjar med `https://` (eller via en `HEALTHCHAT_COOKIE_SECURE`-flagga).
-  3. Bestäm om sessioner ska överleva omstart. Att spara dem kräver att DEK:en lagras någonstans — vilket är samma avvägning som **D-1**. Gör inget förrän D-1 är beslutad; rensa i stället cookien snyggt när token är okänd, så att användaren får inloggningsrutan i stället för ett fel.
+  3. Flytta sessionerna till ett delat lager (databasen eller Redis) så att `--workers > 1` fungerar igen.
+  4. Bestäm om sessioner ska överleva omstart. Att spara dem kräver att DEK:en lagras någonstans — vilket är samma avvägning som **D-1**. Gör inget förrän D-1 är beslutad; rensa i stället cookien snyggt när token är okänd, så att användaren får inloggningsrutan i stället för ett fel.
 - **Acceptanskriterier:** en okänd session-cookie ger inloggningsrutan utan felmeddelande; en session som stått orörd över förfallotiden kräver nytt lösenord; cookien är `Secure` vid HTTPS-drift.
+
+### [ ] R-21: 🟠 Verifiera driftsättningen på servern efter uppdateringen
+- **Fil:** [healthchat_web.service](healthchat_web.service), `/opt/healthchat`
+- **Problem:** Enheten körde `--workers 4` (se R-15), hade MariaDB-lösenordet inskrivet i klartext, och satte aldrig `HEALTHCHAT_BASE_URL` — så OAuth-callbackerna pekade på `localhost:8000` och gick inte att slutföra. Filen i repot är rättad, men **den kopia som ligger i `/etc/systemd/system/` på servern är det inte** förrän du lägger dit den.
+- **Att göra:**
+  1. Kopiera den nya enhetsfilen, skapa `/etc/healthchat/db.env` (`chmod 600`, ägd av `healthchat`) med det roterade lösenordet från R-14.
+  2. Sätt `HEALTHCHAT_BASE_URL` till den adress du faktiskt når appen på, och registrera `<adressen>/oauth/<tjänst>/callback` hos Fitbit, Strava och Withings.
+  3. `systemctl daemon-reload && systemctl restart healthchat_web`, och kontrollera `journalctl -u healthchat_web` för varningen om `sync_metadata.value` (se nedan).
+  4. Kör `git pull` i `/opt/healthchat` så att koden faktiskt är den uppdaterade — kontrollera med `git log --oneline -1`.
+- **Acceptanskriterier:** inloggning håller över flera sidladdningar; `journalctl` visar ingen `Access denied` mot MariaDB; en OAuth-anslutning går att slutföra.
 
 ### [ ] R-16: 🟠 Bromsning mot lösenordsgissning saknas i webblagret
 - **Fil:** [server.py](server.py) (`/api/auth/login`), [auth.py](auth.py)

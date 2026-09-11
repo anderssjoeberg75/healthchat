@@ -7,12 +7,27 @@ Type=simple
 User=healthchat
 WorkingDirectory=/opt/healthchat
 Environment="PATH=/opt/healthchat/venv/bin"
-Environment="MARIADB_HOST=192.168.101.106"
-Environment="MARIADB_PORT=3306"
-Environment="MARIADB_USER=healthchat"
-Environment="MARIADB_PASSWORD=powerman"
-Environment="MARIADB_DB=healthchat"
-ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4
+
+# Public URL of this deployment. OAuth redirect URIs are built from it as
+# <HEALTHCHAT_BASE_URL>/oauth/<service>/callback, so it must match exactly what
+# you register with Fitbit, Strava and Withings. Left at the default the
+# callbacks point at localhost and connecting a source cannot work.
+Environment="HEALTHCHAT_BASE_URL=http://192.168.101.106:8000"
+
+# Database credentials live in this file, not in the unit and not in the repo.
+# Create it as the healthchat user with chmod 600:
+#   MARIADB_HOST=192.168.101.106
+#   MARIADB_PORT=3306
+#   MARIADB_USER=healthchat
+#   MARIADB_PASSWORD=<the rotated password>
+#   MARIADB_DB=healthchat
+EnvironmentFile=/etc/healthchat/db.env
+
+# --workers 4 runs four processes. Sessions are held in each process's memory,
+# so a login served by one worker is unknown to the other three and the user is
+# bounced back to the login screen at random. Keep this at one worker until
+# sessions are shared (see R-15 in board.md).
+ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 

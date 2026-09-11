@@ -97,7 +97,10 @@ CREATE TABLE IF NOT EXISTS calorie_burn (
 CREATE TABLE IF NOT EXISTS sync_metadata (
     user_id BIGINT NOT NULL,
     `key` VARCHAR(100) NOT NULL,
-    `value` TEXT,
+    -- LONGTEXT, not TEXT: this table also holds the encrypted per-user store
+    -- (settings, saved prompts, chat history). TEXT caps at 64 KB, which a
+    -- long conversation passes, and MariaDB would then truncate or reject it.
+    `value` LONGTEXT,
     PRIMARY KEY (user_id, `key`),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
