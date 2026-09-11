@@ -1787,15 +1787,20 @@ class ProfileDialog(tk.Toplevel):
     Allows managing personal metrics, password change (DEK re-wrap),
     recovery key rotation, and permanent account deletion.
     """
-    def __init__(self, parent, user_session: auth.UserSession, current_profile=None, on_profile_saved=None, on_logout=None, colors=None):
+    def __init__(self, parent, user_session: auth.UserSession, current_profile=None, on_profile_saved=None, on_logout=None, colors=None, db=None, garmin_handler=None, fitbit_handler=None, strava_handler=None, withings_handler=None):
         super().__init__(parent)
         self.title("👤 Min Profil & Konto")
-        self.geometry("580x680")
+        self.geometry("620x720")
         self.resizable(False, False)
         self.user_session = user_session
         self.on_profile_saved = on_profile_saved
         self.on_logout = on_logout
         self.colors = colors or {'bg': '#F3F4F6', 'card_bg': '#FFFFFF', 'text': '#1F2937', 'accent': '#0078D4'}
+        self.db = db
+        self.garmin_handler = garmin_handler
+        self.fitbit_handler = fitbit_handler
+        self.strava_handler = strava_handler
+        self.withings_handler = withings_handler
 
         if parent and parent.winfo_viewable():
             self.transient(parent)
@@ -1808,8 +1813,14 @@ class ProfileDialog(tk.Toplevel):
         scrollable_frame = ttk.Frame(canvas)
 
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Ensure scrollable frame resizes to canvas width
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        
+        # Bind MouseWheel for easy scrolling
+        self.bind_all("<MouseWheel>", lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
 
         main_frame = ttk.Frame(scrollable_frame, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -1854,42 +1865,68 @@ class ProfileDialog(tk.Toplevel):
         self.max_hr_var = tk.StringVar(value=str(prof.get('max_hr', '')) if prof.get('max_hr') else '')
         ttk.Entry(main_frame, textvariable=self.max_hr_var, width=35).grid(row=8, column=1, sticky=(tk.W, tk.E), pady=5)
 
-        self.prof_status_var = tk.StringVar(value="")
-        ttk.Label(main_frame, textvariable=self.prof_status_var, font=('Segoe UI', 8, 'italic'), foreground='#16A34A').grid(row=9, column=1, sticky=tk.W, pady=(2, 5))
+        ttk.Label(main_frame, text="Kroppsfett (%):", font=('Segoe UI', 9, 'bold')).grid(row=9, column=0, sticky=tk.W, pady=5)
+        self.fat_var = tk.StringVar(value=str(prof.get('fat_ratio_pct', '')) if prof.get('fat_ratio_pct') else '')
+        ttk.Entry(main_frame, textvariable=self.fat_var, width=35).grid(row=9, column=1, sticky=(tk.W, tk.E), pady=5)
 
-        ttk.Button(main_frame, text="💾 Spara personliga mått", command=self._save_profile).grid(row=10, column=1, sticky=tk.W, pady=(0, 15))
+        ttk.Label(main_frame, text="Muskelmassa (kg):", font=('Segoe UI', 9, 'bold')).grid(row=10, column=0, sticky=tk.W, pady=5)
+        self.muscle_var = tk.StringVar(value=str(prof.get('muscle_mass_kg', '')) if prof.get('muscle_mass_kg') else '')
+        ttk.Entry(main_frame, textvariable=self.muscle_var, width=35).grid(row=10, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Skelettmassa (kg):", font=('Segoe UI', 9, 'bold')).grid(row=11, column=0, sticky=tk.W, pady=5)
+        self.bone_var = tk.StringVar(value=str(prof.get('bone_mass_kg', '')) if prof.get('bone_mass_kg') else '')
+        ttk.Entry(main_frame, textvariable=self.bone_var, width=35).grid(row=11, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Kroppsvatten (%):", font=('Segoe UI', 9, 'bold')).grid(row=12, column=0, sticky=tk.W, pady=5)
+        self.water_var = tk.StringVar(value=str(prof.get('water_pct', '')) if prof.get('water_pct') else '')
+        ttk.Entry(main_frame, textvariable=self.water_var, width=35).grid(row=12, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="BMI:", font=('Segoe UI', 9, 'bold')).grid(row=13, column=0, sticky=tk.W, pady=5)
+        self.bmi_var = tk.StringVar(value=str(prof.get('bmi', '')) if prof.get('bmi') else '')
+        ttk.Entry(main_frame, textvariable=self.bmi_var, width=35).grid(row=13, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        self.prof_status_var = tk.StringVar(value="")
+        ttk.Label(main_frame, textvariable=self.prof_status_var, font=('Segoe UI', 8, 'italic'), foreground='#16A34A').grid(row=14, column=1, sticky=tk.W, pady=(2, 5))
+
+        btn_box = ttk.Frame(main_frame)
+        btn_box.grid(row=15, column=1, sticky=tk.W, pady=(0, 15))
+        ttk.Button(btn_box, text="💾 Spara personliga mått", command=self._save_profile).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(btn_box, text="🔄 Hämta från Garmin / Strava / Fitbit / Withings", command=self._fetch_external_profile).pack(side=tk.LEFT)
 
         # 2. Change Password Section
-        ttk.Separator(main_frame, orient='horizontal').grid(row=11, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
-        ttk.Label(main_frame, text="Byt Lösenord (Re-wrap DEK)", font=('Segoe UI', 11, 'bold')).grid(row=12, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
-        ttk.Label(main_frame, text="Krypteringsnyckeln (DEK) packas om med ditt nya lösenord. Hälsodata behöver ej krypteras om.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=13, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+        ttk.Separator(main_frame, orient='horizontal').grid(row=16, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        ttk.Label(main_frame, text="Byt Lösenord (Re-wrap DEK)", font=('Segoe UI', 11, 'bold')).grid(row=17, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
+        ttk.Label(main_frame, text="Krypteringsnyckeln (DEK) packas om med ditt nya lösenord. Hälsodata behöver ej krypteras om.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=18, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
 
-        ttk.Label(main_frame, text="Nuvarande lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=14, column=0, sticky=tk.W, pady=4)
+        ttk.Label(main_frame, text="Nuvarande lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=19, column=0, sticky=tk.W, pady=4)
         self.curr_pwd_var = tk.StringVar(value="")
-        ttk.Label(main_frame, text="Nytt lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=13, column=0, sticky=tk.W, pady=4)
-        self.new_pwd_var = tk.StringVar(value="")
-        ttk.Entry(main_frame, textvariable=self.new_pwd_var, width=35, show="*").grid(row=13, column=1, sticky=(tk.W, tk.E), pady=4)
+        ttk.Entry(main_frame, textvariable=self.curr_pwd_var, width=35, show="*").grid(row=19, column=1, sticky=(tk.W, tk.E), pady=4)
 
-        ttk.Label(main_frame, text="Bekräfta lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=14, column=0, sticky=tk.W, pady=4)
+        ttk.Label(main_frame, text="Nytt lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=20, column=0, sticky=tk.W, pady=4)
+        self.new_pwd_var = tk.StringVar(value="")
+        ttk.Entry(main_frame, textvariable=self.new_pwd_var, width=35, show="*").grid(row=20, column=1, sticky=(tk.W, tk.E), pady=4)
+
+        ttk.Label(main_frame, text="Bekräfta lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=21, column=0, sticky=tk.W, pady=4)
         self.new_pwd_conf_var = tk.StringVar(value="")
-        ttk.Entry(main_frame, textvariable=self.new_pwd_conf_var, width=35, show="*").grid(row=14, column=1, sticky=(tk.W, tk.E), pady=4)
+        ttk.Entry(main_frame, textvariable=self.new_pwd_conf_var, width=35, show="*").grid(row=21, column=1, sticky=(tk.W, tk.E), pady=4)
 
         self.pwd_status_var = tk.StringVar(value="")
-        ttk.Label(main_frame, textvariable=self.pwd_status_var, font=('Segoe UI', 8, 'italic'), foreground='#16A34A').grid(row=15, column=1, sticky=tk.W, pady=(2, 5))
+        ttk.Label(main_frame, textvariable=self.pwd_status_var, font=('Segoe UI', 8, 'italic'), foreground='#16A34A').grid(row=22, column=1, sticky=tk.W, pady=(2, 5))
 
-        ttk.Button(main_frame, text="🔑 Uppdatera lösenord", command=self._change_password).grid(row=16, column=1, sticky=tk.W, pady=(0, 15))
+        ttk.Button(main_frame, text="🔑 Uppdatera lösenord", command=self._change_password).grid(row=23, column=1, sticky=tk.W, pady=(0, 15))
 
         # 3. Rotate Recovery Key
-        ttk.Separator(main_frame, orient='horizontal').grid(row=17, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
-        ttk.Label(main_frame, text="Återställningsnyckel", font=('Segoe UI', 11, 'bold')).grid(row=18, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
-        ttk.Label(main_frame, text="Om du misstänker att din återställningsnyckel har komprometterats kan du generera en ny.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=19, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+        ttk.Separator(main_frame, orient='horizontal').grid(row=24, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        ttk.Label(main_frame, text="Återställningsnyckel", font=('Segoe UI', 11, 'bold')).grid(row=25, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
+        ttk.Label(main_frame, text="Om du misstänker att din återställningsnyckel har komprometterats kan du generera en ny.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=26, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
 
-        ttk.Button(main_frame, text="🔄 Skapa ny återställningsnyckel", command=self._rotate_recovery_key).grid(row=20, column=1, sticky=tk.W, pady=(0, 15))
+        ttk.Button(main_frame, text="🔄 Skapa ny återställningsnyckel", command=self._rotate_recovery_key).grid(row=27, column=1, sticky=tk.W, pady=(0, 15))
 
         # 4. Danger Zone - Delete Account
-        ttk.Separator(main_frame, orient='horizontal').grid(row=21, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        ttk.Separator(main_frame, orient='horizontal').grid(row=28, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
         danger_frame = tk.Frame(main_frame, bg='#FEF2F2', relief='solid', bd=1, padx=12, pady=12)
-        danger_frame.grid(row=22, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 10))
+        danger_frame.grid(row=29, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 10))
+
 
         ttk.Label(danger_frame, text="⚠️ Farlig zon: Radera konto", font=('Segoe UI', 10, 'bold'), foreground='#991B1B').pack(anchor=tk.W, pady=(0, 4))
         ttk.Label(
@@ -1922,6 +1959,11 @@ class ProfileDialog(tk.Toplevel):
             w = float(self.weight_var.get().replace(',', '.').strip()) if self.weight_var.get().strip() else 0.0
             r_hr = float(self.resting_hr_var.get().replace(',', '.').strip()) if self.resting_hr_var.get().strip() else 0.0
             m_hr = float(self.max_hr_var.get().replace(',', '.').strip()) if self.max_hr_var.get().strip() else 0.0
+            fat = float(self.fat_var.get().replace(',', '.').strip()) if self.fat_var.get().strip() else 0.0
+            muscle = float(self.muscle_var.get().replace(',', '.').strip()) if self.muscle_var.get().strip() else 0.0
+            bone = float(self.bone_var.get().replace(',', '.').strip()) if self.bone_var.get().strip() else 0.0
+            water = float(self.water_var.get().replace(',', '.').strip()) if self.water_var.get().strip() else 0.0
+            bmi_val = float(self.bmi_var.get().replace(',', '.').strip()) if self.bmi_var.get().strip() else 0.0
         except ValueError:
             self.prof_status_var.set("❌ Kontrollera sifferformat för mått.")
             return
@@ -1932,7 +1974,12 @@ class ProfileDialog(tk.Toplevel):
             'age': a,
             'weight_kg': w,
             'resting_hr': r_hr,
-            'max_hr': m_hr
+            'max_hr': m_hr,
+            'fat_ratio_pct': fat,
+            'muscle_mass_kg': muscle,
+            'bone_mass_kg': bone,
+            'water_pct': water,
+            'bmi': bmi_val
         }
 
         try:
@@ -1948,7 +1995,56 @@ class ProfileDialog(tk.Toplevel):
         except Exception as e:
             self.prof_status_var.set(f"❌ Fel vid sparande: {e}")
 
+    def _fetch_external_profile(self):
+        self.prof_status_var.set("⏳ Hämtar data från anslutna tjänster...")
+        self.update_idletasks()
+        try:
+            import profile_sync
+            res = profile_sync.fetch_external_profile_metrics(
+                db=self.db,
+                garmin_handler=self.garmin_handler,
+                fitbit_handler=self.fitbit_handler,
+                strava_handler=self.strava_handler,
+                withings_handler=self.withings_handler
+            )
+            metrics = res.get("metrics", {})
+            sources = res.get("sources", [])
+            
+            if not metrics:
+                self.prof_status_var.set("ℹ️ Inga externa profilmått hittades från Garmin, Strava, Fitbit eller Withings.")
+                return
+
+            if metrics.get("sex"):
+                self.sex_var.set(metrics.get("sex"))
+            if metrics.get("height_cm"):
+                self.height_var.set(str(metrics.get("height_cm")))
+            if metrics.get("age"):
+                self.age_var.set(str(metrics.get("age")))
+            if metrics.get("weight_kg"):
+                self.weight_var.set(str(metrics.get("weight_kg")))
+            if metrics.get("resting_hr"):
+                self.resting_hr_var.set(str(metrics.get("resting_hr")))
+            if metrics.get("max_hr"):
+                self.max_hr_var.set(str(metrics.get("max_hr")))
+            if metrics.get("fat_ratio_pct"):
+                self.fat_var.set(str(metrics.get("fat_ratio_pct")))
+            if metrics.get("muscle_mass_kg"):
+                self.muscle_var.set(str(metrics.get("muscle_mass_kg")))
+            if metrics.get("bone_mass_kg"):
+                self.bone_var.set(str(metrics.get("bone_mass_kg")))
+            if metrics.get("water_pct"):
+                self.water_var.set(str(metrics.get("water_pct")))
+            if metrics.get("bmi"):
+                self.bmi_var.set(str(metrics.get("bmi")))
+
+
+            src_str = ", ".join(sources) if sources else "anslutna källor"
+            self.prof_status_var.set(f"✓ Hämtade uppdaterade mått från {src_str}!")
+        except Exception as e:
+            self.prof_status_var.set(f"❌ Fel vid hämtning: {e}")
+
     def _change_password(self):
+
         curr = self.curr_pwd_var.get()
         new_p = self.new_pwd_var.get()
         conf = self.new_pwd_conf_var.get()
@@ -3941,8 +4037,14 @@ class HealthChatApp:
             current_profile=self.get_user_profile(),
             on_profile_saved=_on_prof_saved,
             on_logout=self.logout,
-            colors=self.colors
+            colors=self.colors,
+            db=self.db,
+            garmin_handler=getattr(self, 'garmin_handler', None),
+            fitbit_handler=getattr(self, 'fitbit_handler', None),
+            strava_handler=getattr(self, 'strava_handler', None),
+            withings_handler=getattr(self, 'withings_handler', None)
         )
+
         self.root.wait_window(dlg)
 
     def logout(self):

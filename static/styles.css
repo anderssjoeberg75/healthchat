@@ -605,3 +605,19 @@ body {
   gap: 10px;
   justify-content: flex-end;
 }
+
+/* Danger Zone Card */
+.danger-card-box {
+  background: #FEF2F2 !important;
+  border: 1px solid #FCA5A5 !important;
+}
+
+.danger-btn {
+  background: #DC2626 !important;
+  color: #FFFFFF !important;
+  font-weight: 700;
+}
+
+.danger-btn:hover {
+  background: #B91C1C !important;
+}

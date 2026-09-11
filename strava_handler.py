@@ -185,6 +185,30 @@ class StravaHandler:
             raise Exception("Strava not authenticated")
         return {"Authorization": f"Bearer {self.access_token}"}
 
+    def fetch_athlete_profile(self) -> Dict[str, Any]:
+        """Fetch Strava athlete profile data (sex, weight_kg)."""
+        res = {}
+        if not self.is_authenticated():
+            return res
+        try:
+            import requests
+            url = f"{STRAVA_API_BASE}/athlete"
+            resp = requests.get(url, headers=self._get_headers(), timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("sex"):
+                    s = str(data.get("sex")).upper()
+                    if s == "F":
+                        res["sex"] = "female"
+                    elif s == "M":
+                        res["sex"] = "male"
+                if data.get("weight") and float(data.get("weight")) > 0:
+                    res["weight_kg"] = round(float(data.get("weight")), 1)
+        except Exception as e:
+            logger.warning(f"Error fetching Strava athlete profile: {e}")
+        return res
+
+
     def fetch_activities(self, days: int = 30) -> List[Dict[str, Any]]:
         """Fetch activities from Strava API for the past `days`."""
         if not self._authenticated:

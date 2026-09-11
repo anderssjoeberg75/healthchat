@@ -30,6 +30,7 @@ import ai_client
 from ai_client import AIClient
 import calorie_calc
 import hr_zones_calc
+import profile_sync
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("server")
@@ -81,11 +82,24 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class RotateRecoveryKeyRequest(BaseModel):
+    current_password: str
+
+
 class ProfileUpdateRequest(BaseModel):
     sex: Optional[str] = None
     height_cm: Optional[float] = None
-    age: Optional[int] = None
+    age: Optional[float] = None
     weight_kg: Optional[float] = None
+    resting_hr: Optional[float] = None
+    max_hr: Optional[float] = None
+    fat_ratio_pct: Optional[float] = None
+    muscle_mass_kg: Optional[float] = None
+    bone_mass_kg: Optional[float] = None
+    water_pct: Optional[float] = None
+    bmi: Optional[float] = None
+
+
 
 
 class ChatRequest(BaseModel):
@@ -386,13 +400,47 @@ def logout(response: Response, healthchat_session: Optional[str] = Cookie(None))
     return {"status": "success", "message": "Utloggad!"}
 
 
+def auto_sync_user_profile(conn, session: UserSession, db: GarminDatabase):
+    """Auto-fetch external/synced metrics (Garmin, Fitbit, Strava, Withings, DB)
+    and auto-merge + persist into user session encrypted_profile in MariaDB."""
+    try:
+        ext_res = profile_sync.fetch_external_profile_metrics(db=db)
+        metrics = ext_res.get("metrics", {})
+        if metrics:
+            current = dict(session.encrypted_profile or {})
+            changed = False
+            for k, v in metrics.items():
+                if v is not None and v != 0 and v != "":
+                    if current.get(k) != v:
+                        current[k] = v
+                        changed = True
+            if changed:
+                session.encrypted_profile = current
+                if conn:
+                    auth.update_user_profile(conn, session, current)
+    except Exception as e:
+        logger.warning(f"Auto-sync profile failed: {e}")
+    return session.encrypted_profile or {}
+
+
 @app.get("/api/auth/me")
 def get_me(session: UserSession = Depends(get_current_session)):
-    return {
-        "user_id": session.user_id,
-        "email": session.email,
-        "profile": session.encrypted_profile or {}
-    }
+    db = bind_user_db(session)
+    conn = get_db_conn(db)
+    try:
+        prof = auto_sync_user_profile(conn, session, db)
+        return {
+            "user_id": session.user_id,
+            "email": session.email,
+            "profile": prof
+        }
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 
 @app.post("/api/auth/recover")
@@ -478,8 +526,18 @@ def get_dashboard_summary(
                         act_steps = int(dist * 1300)
             workout_steps += max(0, act_steps)
 
-    profile = session.encrypted_profile or {}
+    conn = get_db_conn(db)
+    try:
+        profile = auto_sync_user_profile(conn, session, db)
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     weight = profile.get("weight_kg") or (body_comp_latest.get("weight_kg") if body_comp_latest else 70.0)
+
     
     burn_estimate = calorie_calc.estimate_daily_burn(
         weight_kg=weight,
@@ -587,6 +645,21 @@ def update_profile(
             current_profile["age"] = req.age
         if req.weight_kg is not None:
             current_profile["weight_kg"] = req.weight_kg
+        if req.resting_hr is not None:
+            current_profile["resting_hr"] = req.resting_hr
+        if req.max_hr is not None:
+            current_profile["max_hr"] = req.max_hr
+        if req.fat_ratio_pct is not None:
+            current_profile["fat_ratio_pct"] = req.fat_ratio_pct
+        if req.muscle_mass_kg is not None:
+            current_profile["muscle_mass_kg"] = req.muscle_mass_kg
+        if req.bone_mass_kg is not None:
+            current_profile["bone_mass_kg"] = req.bone_mass_kg
+        if req.water_pct is not None:
+            current_profile["water_pct"] = req.water_pct
+        if req.bmi is not None:
+            current_profile["bmi"] = req.bmi
+
             
         if conn:
             auth.update_user_profile(conn, session, current_profile)
@@ -602,6 +675,20 @@ def update_profile(
             conn.close()
 
 
+@app.get("/api/user/profile/fetch_external")
+@app.post("/api/user/profile/fetch_external")
+def fetch_external_profile(session: UserSession = Depends(get_current_session)):
+    """Fetch external profile metrics from Garmin, Fitbit, Strava, Withings, and local DB."""
+    db = bind_user_db(session)
+    res = profile_sync.fetch_external_profile_metrics(db=db)
+    return {
+        "status": "success",
+        "metrics": res.get("metrics", {}),
+        "sources": res.get("sources", [])
+    }
+
+
+
 @app.post("/api/profile/change_password")
 @app.post("/api/user/password")
 def change_password(req: ChangePasswordRequest, session: UserSession = Depends(get_current_session)):
@@ -613,6 +700,39 @@ def change_password(req: ChangePasswordRequest, session: UserSession = Depends(g
         return {"status": "success", "message": "Lösenordet har ändrats!"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post("/api/user/rotate_recovery_key")
+def rotate_recovery_key(req: RotateRecoveryKeyRequest, session: UserSession = Depends(get_current_session)):
+    db = bind_user_db(session)
+    conn = get_db_conn(db)
+    try:
+        new_key = auth.rotate_recovery_key(conn, session.user_id, req.current_password)
+        return {"status": "success", "new_recovery_key": new_key}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.delete("/api/user/delete_account")
+@app.post("/api/user/delete_account")
+def delete_account(response: Response, healthchat_session: Optional[str] = Cookie(None), session: UserSession = Depends(get_current_session)):
+    db = bind_user_db(session)
+    conn = get_db_conn(db)
+    try:
+        if conn:
+            auth.delete_user_account(conn, session.user_id)
+        if healthchat_session and healthchat_session in _active_sessions:
+            _active_sessions.pop(healthchat_session)
+        if healthchat_session:
+            delete_session_from_db(conn, healthchat_session)
+        response.delete_cookie(SESSION_COOKIE_NAME)
+        return {"status": "success", "message": "Konto raderat!"}
     finally:
         if conn:
             conn.close()

@@ -271,7 +271,34 @@ class WithingsDataHandler:
         valid_records = [r for r in daily_records.values() if r.get("weight_kg", 0) > 0 or r.get("fat_ratio_pct", 0) > 0]
         return valid_records
 
+    def fetch_profile_data(self) -> Dict[str, Any]:
+        """Fetch latest profile/body metrics (weight_kg, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi) from Withings measurements."""
+        res = {}
+        try:
+            records = self.fetch_measurements(days=365)
+            if records:
+                for rec in reversed(records):
+                    w = rec.get("weight_kg", 0.0)
+                    if w > 0:
+                        res["weight_kg"] = round(float(w), 1)
+                        if rec.get("fat_ratio_pct"):
+                            res["fat_ratio_pct"] = round(float(rec["fat_ratio_pct"]), 1)
+                        if rec.get("muscle_mass_kg"):
+                            res["muscle_mass_kg"] = round(float(rec["muscle_mass_kg"]), 1)
+                        if rec.get("bone_mass_kg"):
+                            res["bone_mass_kg"] = round(float(rec["bone_mass_kg"]), 1)
+                        if rec.get("water_pct"):
+                            res["water_pct"] = round(float(rec["water_pct"]), 1)
+                        if rec.get("bmi"):
+                            res["bmi"] = round(float(rec["bmi"]), 1)
+                        break
+        except Exception as e:
+            logger.warning(f"Error fetching Withings profile data: {e}")
+        return res
+
+
     def sync_withings_data(self, days: int = 365, force_full: bool = False) -> Dict[str, Any]:
+
         """
         Fetch and save Withings body composition records to local SQLite DB.
         Single fast API request fetches measurements for the requested range.

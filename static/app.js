@@ -201,7 +201,23 @@ async function populateProfileInputs(profile) {
   if (hEl && p.height_cm !== undefined && p.height_cm !== null && p.height_cm !== '') hEl.value = p.height_cm;
   const wEl = document.getElementById('prof-weight');
   if (wEl && p.weight_kg !== undefined && p.weight_kg !== null && p.weight_kg !== '') wEl.value = p.weight_kg;
+  const rHrEl = document.getElementById('prof-resting-hr');
+  if (rHrEl && p.resting_hr !== undefined && p.resting_hr !== null && p.resting_hr !== '') rHrEl.value = p.resting_hr;
+  const mHrEl = document.getElementById('prof-max-hr');
+  if (mHrEl && p.max_hr !== undefined && p.max_hr !== null && p.max_hr !== '') mHrEl.value = p.max_hr;
+  const fatEl = document.getElementById('prof-fat');
+  if (fatEl && p.fat_ratio_pct !== undefined && p.fat_ratio_pct !== null && p.fat_ratio_pct !== '') fatEl.value = p.fat_ratio_pct;
+  const musEl = document.getElementById('prof-muscle');
+  if (musEl && p.muscle_mass_kg !== undefined && p.muscle_mass_kg !== null && p.muscle_mass_kg !== '') musEl.value = p.muscle_mass_kg;
+  const boneEl = document.getElementById('prof-bone');
+  if (boneEl && p.bone_mass_kg !== undefined && p.bone_mass_kg !== null && p.bone_mass_kg !== '') boneEl.value = p.bone_mass_kg;
+  const watEl = document.getElementById('prof-water');
+  if (watEl && p.water_pct !== undefined && p.water_pct !== null && p.water_pct !== '') watEl.value = p.water_pct;
+  const bmiEl = document.getElementById('prof-bmi');
+  if (bmiEl && p.bmi !== undefined && p.bmi !== null && p.bmi !== '') bmiEl.value = p.bmi;
 }
+
+
 
 function setDaysRange(days) {
   currentDaysRange = days;
@@ -910,24 +926,40 @@ async function handleUpdateProfile(event) {
   const ageVal = document.getElementById('prof-age').value.trim();
   const heightVal = document.getElementById('prof-height').value.trim();
   const weightVal = document.getElementById('prof-weight').value.trim();
+  const rHrVal = document.getElementById('prof-resting-hr') ? document.getElementById('prof-resting-hr').value.trim() : '';
+  const mHrVal = document.getElementById('prof-max-hr') ? document.getElementById('prof-max-hr').value.trim() : '';
+  const fatVal = document.getElementById('prof-fat') ? document.getElementById('prof-fat').value.trim() : '';
+  const musVal = document.getElementById('prof-muscle') ? document.getElementById('prof-muscle').value.trim() : '';
+  const boneVal = document.getElementById('prof-bone') ? document.getElementById('prof-bone').value.trim() : '';
+  const watVal = document.getElementById('prof-water') ? document.getElementById('prof-water').value.trim() : '';
+  const bmiVal = document.getElementById('prof-bmi') ? document.getElementById('prof-bmi').value.trim() : '';
 
-  const age = ageVal ? parseInt(ageVal) : null;
+  const age = ageVal ? parseFloat(ageVal) : null;
   const height_cm = heightVal ? parseFloat(heightVal.replace(',', '.')) : null;
   const weight_kg = weightVal ? parseFloat(weightVal.replace(',', '.')) : null;
+  const resting_hr = rHrVal ? parseFloat(rHrVal.replace(',', '.')) : null;
+  const max_hr = mHrVal ? parseFloat(mHrVal.replace(',', '.')) : null;
+  const fat_ratio_pct = fatVal ? parseFloat(fatVal.replace(',', '.')) : null;
+  const muscle_mass_kg = musVal ? parseFloat(musVal.replace(',', '.')) : null;
+  const bone_mass_kg = boneVal ? parseFloat(boneVal.replace(',', '.')) : null;
+  const water_pct = watVal ? parseFloat(watVal.replace(',', '.')) : null;
+  const bmi = bmiVal ? parseFloat(bmiVal.replace(',', '.')) : null;
 
   try {
     const res = await fetch('/api/profile/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sex, age, height_cm, weight_kg })
+      body: JSON.stringify({ sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi })
     });
     const data = await res.json();
     if (res.ok) {
-      const updated = data.profile || { sex, age, height_cm, weight_kg };
+      const updated = data.profile || { sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi };
       if (currentUser) currentUser.profile = updated;
       if (cachedSummary) cachedSummary.profile = updated;
       populateProfileInputs(updated);
-      alert('Profilen har sparats klientside-krypterat i MariaDB!');
+      const statusMsg = document.getElementById('prof-status-msg');
+      if (statusMsg) statusMsg.textContent = '✓ Profilen har sparats klientside-krypterat i MariaDB!';
+      else alert('Profilen har sparats klientside-krypterat i MariaDB!');
       refreshDashboard();
     } else {
       alert(data.detail || 'Kunde inte uppdatera profilen.');
@@ -937,10 +969,72 @@ async function handleUpdateProfile(event) {
   }
 }
 
+async function handleFetchExternalProfile() {
+  const statusMsg = document.getElementById('prof-status-msg');
+  if (statusMsg) statusMsg.textContent = '⏳ Hämtar data från Garmin, Strava, Fitbit, Withings...';
+  try {
+    const res = await fetch('/api/user/profile/fetch_external');
+    if (!res.ok) throw new Error('Failed to fetch external profile metrics');
+    const data = await res.json();
+    const metrics = data.metrics || {};
+    const sources = data.sources || [];
+
+    if (Object.keys(metrics).length === 0) {
+      if (statusMsg) statusMsg.textContent = 'ℹ️ Inga externa profilmått hittades från Garmin, Strava, Fitbit eller Withings.';
+      return;
+    }
+
+    if (metrics.sex) document.getElementById('prof-sex').value = metrics.sex;
+    if (metrics.age !== undefined && metrics.age !== null) document.getElementById('prof-age').value = metrics.age;
+    if (metrics.height_cm !== undefined && metrics.height_cm !== null) document.getElementById('prof-height').value = metrics.height_cm;
+    if (metrics.weight_kg !== undefined && metrics.weight_kg !== null) document.getElementById('prof-weight').value = metrics.weight_kg;
+    if (metrics.resting_hr !== undefined && metrics.resting_hr !== null && document.getElementById('prof-resting-hr')) {
+      document.getElementById('prof-resting-hr').value = metrics.resting_hr;
+    }
+    if (metrics.max_hr !== undefined && metrics.max_hr !== null && document.getElementById('prof-max-hr')) {
+      document.getElementById('prof-max-hr').value = metrics.max_hr;
+    }
+    if (metrics.fat_ratio_pct !== undefined && metrics.fat_ratio_pct !== null && document.getElementById('prof-fat')) {
+      document.getElementById('prof-fat').value = metrics.fat_ratio_pct;
+    }
+    if (metrics.muscle_mass_kg !== undefined && metrics.muscle_mass_kg !== null && document.getElementById('prof-muscle')) {
+      document.getElementById('prof-muscle').value = metrics.muscle_mass_kg;
+    }
+    if (metrics.bone_mass_kg !== undefined && metrics.bone_mass_kg !== null && document.getElementById('prof-bone')) {
+      document.getElementById('prof-bone').value = metrics.bone_mass_kg;
+    }
+    if (metrics.water_pct !== undefined && metrics.water_pct !== null && document.getElementById('prof-water')) {
+      document.getElementById('prof-water').value = metrics.water_pct;
+    }
+    if (metrics.bmi !== undefined && metrics.bmi !== null && document.getElementById('prof-bmi')) {
+      document.getElementById('prof-bmi').value = metrics.bmi;
+    }
+
+    const srcStr = sources.length ? sources.join(', ') : 'anslutna tjänster';
+    if (statusMsg) statusMsg.textContent = `✓ Hämtade uppdaterade profilmått från ${srcStr}! Klicka på "Spara profilmått" för att spara.`;
+  } catch (e) {
+    if (statusMsg) statusMsg.textContent = `❌ Fel vid hämtning av extern profil: ${e.message}`;
+  }
+}
+
+
+
 async function handleChangePassword(event) {
   event.preventDefault();
   const current_password = document.getElementById('pwd-current').value;
   const new_password = document.getElementById('pwd-new').value;
+  const confirm_password = document.getElementById('pwd-confirm') ? document.getElementById('pwd-confirm').value : new_password;
+  const statusEl = document.getElementById('pwd-status-msg');
+
+  if (new_password !== confirm_password) {
+    if (statusEl) {
+      statusEl.style.color = '#DC2626';
+      statusEl.textContent = '❌ Det nya lösenordet och bekräftelsen matchar inte.';
+    } else {
+      alert('Det nya lösenordet och bekräftelsen matchar inte.');
+    }
+    return;
+  }
 
   try {
     const res = await fetch('/api/profile/change_password', {
@@ -950,13 +1044,106 @@ async function handleChangePassword(event) {
     });
     const data = await res.json();
     if (res.ok) {
-      alert('Lösenordet har uppdaterats!');
+      if (statusEl) {
+        statusEl.style.color = '#16a34a';
+        statusEl.textContent = '✓ Lösenordet har uppdaterats!';
+      } else {
+        alert('Lösenordet har uppdaterats!');
+      }
       document.getElementById('pwd-current').value = '';
       document.getElementById('pwd-new').value = '';
+      if (document.getElementById('pwd-confirm')) document.getElementById('pwd-confirm').value = '';
     } else {
-      alert(data.detail || 'Kunde inte byta lösenord.');
+      const msg = data.detail || 'Kunde inte byta lösenord.';
+      if (statusEl) {
+        statusEl.style.color = '#DC2626';
+        statusEl.textContent = `❌ ${msg}`;
+      } else {
+        alert(msg);
+      }
     }
   } catch (e) {
-    alert('Nätverksfel vid lösenordsbyte.');
+    if (statusEl) {
+      statusEl.style.color = '#DC2626';
+      statusEl.textContent = '❌ Nätverksfel vid lösenordsbyte.';
+    } else {
+      alert('Nätverksfel vid lösenordsbyte.');
+    }
+  }
+}
+
+async function handleRotateRecoveryKey(event) {
+  event.preventDefault();
+  const current_password = document.getElementById('rot-key-pwd').value;
+  const statusEl = document.getElementById('rot-key-status-msg');
+
+  if (!current_password) {
+    if (statusEl) {
+      statusEl.style.color = '#DC2626';
+      statusEl.textContent = '❌ Fyll i nuvarande lösenord.';
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/user/rotate_recovery_key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password })
+    });
+    const data = await res.json();
+    if (res.ok && data.new_recovery_key) {
+      if (statusEl) {
+        statusEl.style.color = '#16a34a';
+        statusEl.textContent = '✓ Ny återställningsnyckel har skapats!';
+      }
+      document.getElementById('rot-key-pwd').value = '';
+      showRecoveryModal(data.new_recovery_key);
+    } else {
+      const msg = data.detail || 'Kunde inte generera ny återställningsnyckel.';
+      if (statusEl) {
+        statusEl.style.color = '#DC2626';
+        statusEl.textContent = `❌ ${msg}`;
+      } else {
+        alert(msg);
+      }
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.style.color = '#DC2626';
+      statusEl.textContent = '❌ Nätverksfel vid skapande av ny nyckel.';
+    } else {
+      alert('Nätverksfel vid skapande av ny nyckel.');
+    }
+  }
+}
+
+async function handleDeleteAccount() {
+  const confirmed = confirm(
+    '⚠️ VARNING! Vill du verkligen radera ditt konto?\n\n' +
+    'All din krypterade hälsodata (aktiviteter, sömn, mätvärden) tas bort permanent från databasen.\n\n' +
+    'Denna åtgärd kan INTE ångras!'
+  );
+  if (!confirmed) return;
+
+  const doubleConfirmed = prompt('Skriv "RADERA" för att bekräfta permanent konto-radering:');
+  if (doubleConfirmed !== 'RADERA') {
+    alert('Raderingen avbröts.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/user/delete_account', {
+      method: 'DELETE'
+    });
+    if (res.ok) {
+      alert('Ditt konto och all din hälsodata har raderats permanent.');
+      handleLogout();
+    } else {
+      const data = await res.json();
+      alert(data.detail || 'Kunde inte radera kontot.');
+    }
+  } catch (e) {
+    alert('Nätverksfel vid radering av konto.');
   }
 }

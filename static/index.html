@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=5.0.0">
+  <link rel="stylesheet" href="/static/styles.css?v=6.0.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -344,8 +344,10 @@
       <section id="tab-profile" class="content-tab hidden">
         <div class="charts-grid-2col">
           
+          <!-- CARD 1: Personliga Mått & BMR -->
           <div class="table-card-box">
-            <h3>👤 Personlig profil</h3>
+            <h3>👤 Personliga Mått & BMR</h3>
+            <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Dessa uppgifter sparas klientside-krypterat i MariaDB och används för BMR- och kaloriberäkning.</p>
             <form onsubmit="handleUpdateProfile(event)" style="margin-top:12px;">
               <div class="input-row">
                 <div class="input-group">
@@ -357,36 +359,111 @@
                 </div>
                 <div class="input-group">
                   <label for="prof-age">Ålder (år)</label>
-                  <input type="number" id="prof-age" min="10" max="120">
+                  <input type="number" id="prof-age" min="10" max="120" placeholder="t.ex. 42">
                 </div>
               </div>
               <div class="input-row">
                 <div class="input-group">
                   <label for="prof-height">Längd (cm)</label>
-                  <input type="number" id="prof-height" min="100" max="230">
+                  <input type="number" id="prof-height" min="100" max="230" placeholder="t.ex. 182">
                 </div>
                 <div class="input-group">
                   <label for="prof-weight">Vikt (kg)</label>
-                  <input type="number" id="prof-weight" step="0.1" min="30" max="300">
+                  <input type="number" id="prof-weight" step="0.1" min="30" max="300" placeholder="t.ex. 80.5">
                 </div>
               </div>
-              <button type="submit" class="btn btn-primary" style="margin-top:10px;">💾 Spara profilmått</button>
+              <div class="input-row">
+                <div class="input-group">
+                  <label for="prof-resting-hr">Vilopuls (bpm, valfri)</label>
+                  <input type="number" id="prof-resting-hr" min="30" max="180" placeholder="t.ex. 52">
+                </div>
+                <div class="input-group">
+                  <label for="prof-max-hr">Maxpuls (bpm, valfri)</label>
+                  <input type="number" id="prof-max-hr" min="100" max="230" placeholder="t.ex. 180">
+                </div>
+              </div>
+              <div class="input-row">
+                <div class="input-group">
+                  <label for="prof-fat">Kroppsfett (%)</label>
+                  <input type="number" id="prof-fat" step="0.1" min="1" max="60" placeholder="t.ex. 18.5">
+                </div>
+                <div class="input-group">
+                  <label for="prof-muscle">Muskelmassa (kg)</label>
+                  <input type="number" id="prof-muscle" step="0.1" min="10" max="150" placeholder="t.ex. 68.0">
+                </div>
+              </div>
+              <div class="input-row">
+                <div class="input-group">
+                  <label for="prof-bone">Skelettmassa (kg)</label>
+                  <input type="number" id="prof-bone" step="0.1" min="0.5" max="15" placeholder="t.ex. 3.5">
+                </div>
+                <div class="input-group">
+                  <label for="prof-water">Kroppsvatten (%)</label>
+                  <input type="number" id="prof-water" step="0.1" min="20" max="85" placeholder="t.ex. 58.0">
+                </div>
+              </div>
+              <div class="input-row">
+                <div class="input-group">
+                  <label for="prof-bmi">BMI</label>
+                  <input type="number" id="prof-bmi" step="0.1" min="10" max="60" placeholder="t.ex. 24.2">
+                </div>
+              </div>
+
+              <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="submit" class="btn btn-primary">💾 Spara personliga mått</button>
+                <button type="button" class="btn btn-secondary" onclick="handleFetchExternalProfile()">🔄 Hämta från anslutna källor</button>
+              </div>
+              <p id="prof-status-msg" style="margin-top:8px; font-size:0.85rem; font-weight:600; color:#16a34a;"></p>
             </form>
           </div>
 
-          <div class="table-card-box">
-            <h3>🔐 Byt lösenord</h3>
-            <form onsubmit="handleChangePassword(event)" style="margin-top:12px;">
-              <div class="input-group">
-                <label for="pwd-current">Nuvarande lösenord</label>
-                <input type="password" id="pwd-current" required placeholder="••••••••">
-              </div>
-              <div class="input-group">
-                <label for="pwd-new">Nytt lösenord (minst 8 tecken)</label>
-                <input type="password" id="pwd-new" required minlength="8" placeholder="••••••••">
-              </div>
-              <button type="submit" class="btn btn-secondary" style="margin-top:10px;">🔑 Uppdatera lösenord</button>
-            </form>
+          <!-- CARD 2: Byt Lösenord & Säkerhet -->
+          <div style="display:flex; flex-direction:column; gap:15px;">
+            
+            <div class="table-card-box">
+              <h3>🔐 Byt lösenord (Re-wrap DEK)</h3>
+              <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Krypteringsnyckeln packas om med ditt nya lösenord uten att datan behöver dekrypteras om.</p>
+              <form onsubmit="handleChangePassword(event)" style="margin-top:12px;">
+                <div class="input-group">
+                  <label for="pwd-current">Nuvarande lösenord</label>
+                  <input type="password" id="pwd-current" required placeholder="••••••••">
+                </div>
+                <div class="input-group">
+                  <label for="pwd-new">Nytt lösenord (minst 8 tecken)</label>
+                  <input type="password" id="pwd-new" required minlength="8" placeholder="••••••••">
+                </div>
+                <div class="input-group">
+                  <label for="pwd-confirm">Bekräfta nytt lösenord</label>
+                  <input type="password" id="pwd-confirm" required minlength="8" placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-secondary" style="margin-top:5px;">🔑 Uppdatera lösenord</button>
+                <p id="pwd-status-msg" style="margin-top:8px; font-size:0.85rem; font-weight:600;"></p>
+              </form>
+            </div>
+
+            <!-- CARD 3: Återställningsnyckel -->
+            <div class="table-card-box">
+              <h3>🔄 Återställningsnyckel</h3>
+              <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Generera en ny återställningsnyckel om du misstänker att den gamla komprometterats.</p>
+              <form onsubmit="handleRotateRecoveryKey(event)" style="margin-top:12px;">
+                <div class="input-group">
+                  <label for="rot-key-pwd">Bekräfta med nuvarande lösenord</label>
+                  <input type="password" id="rot-key-pwd" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-secondary">🔄 Skapa ny återställningsnyckel</button>
+                <p id="rot-key-status-msg" style="margin-top:8px; font-size:0.85rem; font-weight:600;"></p>
+              </form>
+            </div>
+
+            <!-- CARD 4: Farlig zon - Radera Konto -->
+            <div class="table-card-box danger-card-box">
+              <h3 style="color:#991B1B;">⚠️ Farlig zon: Radera konto</h3>
+              <p style="font-size:0.8rem; color:#7F1D1D; margin-top:2px; line-height:1.4;">
+                Om du raderar ditt konto tas all din krypterade hälsodata permanent bort från MariaDB-servern. Denna åtgärd kan <strong>INTE</strong> ångras!
+              </p>
+              <button class="btn danger-btn" onclick="handleDeleteAccount()" style="margin-top:12px;">🗑️ Radera konto och all hälsodata</button>
+            </div>
+
           </div>
 
         </div>
@@ -396,6 +473,8 @@
 
   </div>
 
-  <script src="/static/app.js?v=5.3.0"></script>
+  <script src="/static/app.js?v=6.0.0"></script>
+
 </body>
 </html>
+

@@ -15,7 +15,8 @@ import hashlib
 import urllib.parse
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Callable
+from typing import Optional, Dict, List, Callable, Any
+
 
 import requests
 from garmin_db import GarminDatabase
@@ -192,6 +193,42 @@ class FitbitHandler:
         if not self.access_token:
             raise Exception("Fitbit not authenticated")
         return {"Authorization": f"Bearer {self.access_token}"}
+
+    def fetch_user_profile(self) -> Dict[str, Any]:
+        """Fetch Fitbit profile data (gender, height, weight, age, resting_hr)."""
+        res = {}
+        if not self.is_authenticated():
+            return res
+        try:
+            import requests
+            url = "https://api.fitbit.com/1/user/-/profile.json"
+            resp = requests.get(url, headers=self._get_headers(), timeout=10)
+            if resp.status_code == 200:
+                data = resp.json().get("user", {})
+                if data.get("gender"):
+                    gen = str(data.get("gender")).lower()
+                    res["sex"] = "female" if "female" in gen or gen == "f" else "male"
+                if data.get("height"):
+                    res["height_cm"] = float(data.get("height"))
+                if data.get("weight"):
+                    res["weight_kg"] = round(float(data.get("weight")), 1)
+                if data.get("age"):
+                    res["age"] = float(data.get("age"))
+                elif data.get("dateOfBirth"):
+                    try:
+                        from datetime import datetime
+                        byear = int(str(data.get("dateOfBirth")).split("-")[0])
+                        res["age"] = float(datetime.now().year - byear)
+                    except Exception:
+                        pass
+                if data.get("averageDailySteps"):
+                    pass
+                if data.get("restingHeartRate"):
+                    res["resting_hr"] = float(data.get("restingHeartRate"))
+        except Exception as e:
+            logger.warning(f"Error fetching Fitbit profile: {e}")
+        return res
+
 
     def sync_fitbit_history(
         self, 

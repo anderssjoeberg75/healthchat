@@ -591,6 +591,52 @@ class GarminDataHandler:
         except Exception as e:
             logger.error(f"Error fetching user summary: {e}")
             return {}
+
+    def fetch_user_profile_data(self) -> Dict[str, Any]:
+        """
+        Fetch structured user profile data (sex, height_cm, age, weight_kg, resting_hr, max_hr) from Garmin Connect.
+        """
+        res = {}
+        if not self.authenticated or not self.client:
+            return res
+        try:
+            from datetime import datetime
+            prof = None
+            try:
+                prof = self.client.get_userprofile_settings()
+            except Exception:
+                pass
+            if not prof:
+                try:
+                    prof = self.client.get_user_profile()
+                except Exception:
+                    pass
+            if isinstance(prof, dict):
+                udata = prof.get("userData", {})
+                if isinstance(udata, dict):
+                    if udata.get("gender"):
+                        gen = str(udata.get("gender")).lower()
+                        res["sex"] = "female" if "female" in gen or gen == "f" else "male"
+                    if udata.get("height"):
+                        res["height_cm"] = float(udata.get("height"))
+                    if udata.get("weight"):
+                        raw_w = float(udata.get("weight"))
+                        res["weight_kg"] = round(raw_w / 1000.0 if raw_w > 300 else raw_w, 1)
+                    if udata.get("maxHeartRate") or udata.get("defaultMaxHeartRate"):
+                        res["max_hr"] = float(udata.get("maxHeartRate") or udata.get("defaultMaxHeartRate"))
+                    if udata.get("restingHeartRate"):
+                        res["resting_hr"] = float(udata.get("restingHeartRate"))
+                    if udata.get("birthDate"):
+                        try:
+                            bdate = str(udata.get("birthDate"))
+                            byear = int(bdate.split("-")[0])
+                            res["age"] = float(datetime.now().year - byear)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.warning(f"Error fetching Garmin user profile data: {e}")
+        return res
+
     
     def get_activities(self, limit: int = 10, start: int = 0) -> List[Dict]:
         """

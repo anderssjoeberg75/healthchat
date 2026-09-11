@@ -66,17 +66,36 @@ def test_register_login_and_me_flow(monkeypatch):
     # Test update profile
     update_res = client.post(
         "/api/profile/update",
-        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0},
+        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "resting_hr": 55.0, "max_hr": 185.0},
         cookies=reg_res.cookies
     )
     assert update_res.status_code == 200
     assert update_res.json()["profile"]["weight_kg"] == 68.0
+    assert update_res.json()["profile"]["resting_hr"] == 55.0
+    assert update_res.json()["profile"]["max_hr"] == 185.0
+
+    # Test fetch external profile endpoint
+    fetch_ext_res = client.get("/api/user/profile/fetch_external", cookies=reg_res.cookies)
+    assert fetch_ext_res.status_code == 200
+    assert fetch_ext_res.json()["status"] == "success"
 
     # Verify updated profile via /api/auth/me
     me_updated = client.get("/api/auth/me", cookies=reg_res.cookies)
     assert me_updated.status_code == 200
     assert me_updated.json()["profile"]["weight_kg"] == 68.0
     assert me_updated.json()["profile"]["age"] == 30
+
+    # Test rotate recovery key
+    monkeypatch.setattr("auth.rotate_recovery_key", lambda conn, uid, pwd: "NEW-REC-KEY-999")
+    rot_res = client.post("/api/user/rotate_recovery_key", json={"current_password": test_password}, cookies=reg_res.cookies)
+    assert rot_res.status_code == 200
+    assert rot_res.json()["new_recovery_key"] == "NEW-REC-KEY-999"
+
+    # Test delete account
+    monkeypatch.setattr("auth.delete_user_account", lambda conn, uid: True)
+    del_res = client.delete("/api/user/delete_account", cookies=reg_res.cookies)
+    assert del_res.status_code == 200
+    assert del_res.json()["status"] == "success"
 
     # Logout
     logout_res = client.post("/api/auth/logout", cookies=reg_res.cookies)
@@ -85,4 +104,5 @@ def test_register_login_and_me_flow(monkeypatch):
     # Verify Unauthorized after logout
     after_me_res = client.get("/api/auth/me")
     assert after_me_res.status_code == 401
+
 
