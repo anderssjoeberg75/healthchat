@@ -182,8 +182,17 @@ function showTab(tabId) {
   }
 }
 
-function populateProfileInputs(profile) {
-  const p = profile || (currentUser && currentUser.profile) || (cachedSummary && cachedSummary.profile) || {};
+async function populateProfileInputs(profile) {
+  let p = profile || (currentUser && currentUser.profile) || (cachedSummary && cachedSummary.profile) || {};
+  if (!p.height_cm || !p.age) {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        currentUser = await res.json();
+        p = (currentUser && currentUser.profile) || p;
+      }
+    } catch (e) {}
+  }
   const sexEl = document.getElementById('prof-sex');
   if (sexEl && p.sex) sexEl.value = p.sex;
   const ageEl = document.getElementById('prof-age');
@@ -213,6 +222,10 @@ async function refreshDashboard() {
     const res = await fetch(`/api/dashboard/summary?days=${currentDaysRange}`);
     if (!res.ok) return;
     cachedSummary = await res.json();
+    
+    if (cachedSummary.profile) {
+      populateProfileInputs(cachedSummary.profile);
+    }
     
     updateDashboardCards(cachedSummary);
     renderActivitiesTable(cachedSummary.history.activities || []);

@@ -193,6 +193,17 @@ def load_session_from_db(conn, session_id: str) -> Optional[UserSession]:
             
             dek_bytes = bytearray(dek_raw)
             prof_dict = json.loads(prof_raw) if prof_raw else None
+            if not prof_dict:
+                try:
+                    cur.execute(f"SELECT encrypted_profile, profile_nonce FROM users WHERE id = {placeholder}", (uid,))
+                    u_row = cur.fetchone()
+                    if u_row:
+                        enc_p = u_row["encrypted_profile"] if isinstance(u_row, dict) else u_row[0]
+                        p_n = u_row["profile_nonce"] if isinstance(u_row, dict) else u_row[1]
+                        if enc_p and p_n:
+                            prof_dict = crypto.decrypt_payload(dek_bytes, p_n, enc_p)
+                except Exception as ex:
+                    logger.debug(f"Failed fallback profile decrypt from users table: {ex}")
             return UserSession(user_id=uid, email=email, dek=dek_bytes, encrypted_profile=prof_dict)
     except Exception as e:
         logger.warning(f"Failed loading session {session_id} from DB: {e}")
@@ -224,7 +235,20 @@ def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> Use
             detail="Ej inloggad eller sessionen har löpt ut."
         )
     if healthchat_session in _active_sessions:
-        return _active_sessions[healthchat_session]
+        cached_session = _active_sessions[healthchat_session]
+        if not cached_session.encrypted_profile:
+            db = get_db()
+            conn = None
+            try:
+                conn = get_db_conn(db)
+                fresh = load_session_from_db(conn, healthchat_session)
+                if fresh and fresh.encrypted_profile:
+                    _active_sessions[healthchat_session] = fresh
+                    return fresh
+            finally:
+                if conn:
+                    conn.close()
+        return cached_session
     
     # Fallback to shared database session store across Uvicorn worker processes
     db = get_db()
