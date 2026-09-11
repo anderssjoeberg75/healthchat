@@ -551,6 +551,13 @@ def get_dashboard_summary(
         is_today=True
     )
 
+    hr_calc = hr_zones_calc.calculate_hr_zones(
+        age=profile.get("age", 40),
+        resting_hr=profile.get("resting_hr"),
+        max_hr_override=profile.get("max_hr"),
+        sex=profile.get("sex", "male")
+    )
+
     return {
         "today_date": today_str,
         "profile": profile,
@@ -561,6 +568,7 @@ def get_dashboard_summary(
         "stress_latest": stress_hist[-1] if stress_hist else None,
         "hrv_latest": hrv_hist[-1] if hrv_hist else None,
         "activities_recent": activities_hist[:10],
+        "hr_zones": hr_calc,
         "history": {
             "daily_summary": daily_summary_hist,
             "sleep": sleep_hist,

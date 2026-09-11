@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=7.0.0">
+  <link rel="stylesheet" href="/static/styles.css?v=8.0.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -256,26 +256,139 @@
 
       <!-- TAB 2: TRÄNING -->
       <section id="tab-training" class="content-tab hidden">
-        <div class="table-card-box">
-          <h3>🏃 Träningsbelastning & Zoner</h3>
-          <p style="font-size:0.9rem; color:#4B5563; margin-bottom:15px;">
-            Träningsvolym och pulszonsfördelning beräknat utifrån din Garmin/Fitbit-historik.
-          </p>
-          <div class="charts-grid-2col">
-            <div class="chart-card-box">
-              <h4>🏋️ Träningsvolym per vecka (timmar)</h4>
-              <div class="chart-canvas-wrapper">
-                <canvas id="chart-training-volume"></canvas>
-              </div>
+        
+        <!-- 1. Top 3 Training Summary Cards Grid -->
+        <div class="cards-row" style="margin-bottom:15px;">
+          
+          <!-- CARD 1: RUNNING & FITNESS INDEX -->
+          <div class="summary-card">
+            <h3>🏃 Running & Fitness Index</h3>
+            <div class="summary-value" id="val-train-fitness-score" style="color:#0078D4;">54.5</div>
+            <div class="summary-status-header" id="val-train-fitness-status">VO2max / Löpkonditionsindex (God form)</div>
+            <div class="summary-subtext" id="val-train-fitness-subtext" style="color:#4B5563; line-height:1.5; margin-top:6px;">
+              <div>⚡ Tröskeltempo: 4:45 min/km</div>
+              <div>🫀 Laktattröskelpuls: 165 bpm</div>
             </div>
-            <div class="chart-card-box">
-              <h4>🫀 Pulszonsfördelning (Z1-Z5)</h4>
-              <div class="chart-canvas-wrapper">
-                <canvas id="chart-hr-zones"></canvas>
-              </div>
+          </div>
+
+          <!-- CARD 2: TRAINING STATUS & LOAD IMPACT -->
+          <div class="summary-card">
+            <h3>⚡ Training Status & Load Impact</h3>
+            <div class="summary-value" id="val-train-status-title" style="color:#10B981; font-size:1.6rem;">⚡ Produktiv Träning</div>
+            <div class="summary-status-header" id="val-train-status-subtext">Akut belastning i perfekt balans med återhämtningen.</div>
+            <div id="val-train-status-metrics" style="font-size:0.85rem; color:#4B5563; line-height:1.5; margin-top:6px;">
+              <div>📊 7-dagars belastning: 420 / 300–600 (Optimal)</div>
+              <div>📈 Load Ratio (7d vs 28d): 1.12</div>
+              <div>🛌 Anbefalld vila: 18 timmar vila kvar</div>
+            </div>
+          </div>
+
+          <!-- CARD 3: TRÄNINGSÖVERSIKT (PERIOD) -->
+          <div class="summary-card">
+            <h3>📊 Träningsöversikt (Period)</h3>
+            <div class="summary-value" id="val-train-summary-dist" style="color:#1F2937; font-size:1.8rem;">112.5 km</div>
+            <div class="summary-trend" id="val-train-summary-trend" style="color:#10B981;">📈 +14.2 km (+14.4%) vs föregående period</div>
+            <div class="summary-subtext" id="val-train-summary-subtext" style="color:#4B5563; margin-top:4px;">14 träningspass | Totaltid: 11t 45m</div>
+            <div class="summary-subtext" id="val-train-summary-cal" style="color:#6B7280; font-style:italic; margin-top:4px;">🏋️ 4 850 kcal träningsförbränning</div>
+          </div>
+
+        </div>
+
+        <!-- 2. Pulszoner & MAF-beräkning Card (Philip Maffetone) -->
+        <div class="table-card-box" style="margin-bottom:15px;">
+          <h3>❤️ Personliga Pulszoner & MAF-beräkning (Philip Maffetone 180-Formel)</h3>
+          <p id="val-hr-zones-header-info" style="font-size:0.85rem; font-weight:600; color:#374151; margin-top:4px; margin-bottom:10px;">
+            👤 Ålder: 42 år | ❤️ Vilopuls: 54 bpm | ⚡ Maxpuls: 178 bpm | 📊 Pulsreserv (HRR): 124 bpm
+          </p>
+
+          <!-- Zones Table -->
+          <div class="table-responsive" style="margin-bottom:12px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Zon</th>
+                  <th>Beskrivning</th>
+                  <th>Intensitet (% HRR)</th>
+                  <th>Pulsintervall (bpm)</th>
+                  <th>Träningsfokus & Effekt</th>
+                </tr>
+              </thead>
+              <tbody id="hr-zones-table-body">
+                <tr><td colspan="5" style="text-align:center;">Laddar pulszoner...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- MAF 180 Info Box -->
+          <div style="background:#FFFBEB; border:1px solid #FCD34D; border-radius:var(--radius-sm); padding:12px; margin-top:8px;">
+            <h4 id="val-maf-title" style="color:#D97706; font-size:0.95rem; font-weight:700; margin-bottom:4px;">
+              🎯 Philip Maffetone MAF 180 Puls: 129 bpm (Aerobt träningstak: 119 – 129 bpm)
+            </h4>
+            <div id="val-maf-info" style="font-size:0.85rem; color:#4B5563; line-height:1.5;">
+              <div>📊 Formel: 180 – Ålder = Bas-MAF | Maximal aerob fettförbränning utan mjölksyra.</div>
+              <div>• Håll pulsen i intervallet under distanspass för maximal fettförbränning och aerob uthållighet.</div>
+              <div>• Träning över MAF-puls aktiverar anaerob förbränning och ökar uttröttning.</div>
             </div>
           </div>
         </div>
+
+        <!-- 3. 4 Charts Grid (2 Columns x 2 Rows) -->
+        <div class="charts-grid-2col" style="margin-bottom:15px;">
+          
+          <div class="chart-card-box">
+            <h4>📈 Träningsbelastning & Distans Trend (km)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-train-load"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🫀 Pulszonsfördelning Träning (Z1-Z5)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-hr-zones"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🏋️ Träningsvolym & Kalorier (per pass)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-training-volume"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🏃 Aktivitetsfördelning per Sport / Typ</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-train-types"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 4. Registrerade Träningspass (Datatabell) -->
+        <div class="table-card-box">
+          <h3>🏃 Registrerade Träningspass (Period)</h3>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Datum</th>
+                  <th>Källa</th>
+                  <th>Namn</th>
+                  <th>Typ</th>
+                  <th>Distans (km)</th>
+                  <th>Tid (min)</th>
+                  <th>Kalorier (kcal)</th>
+                  <th>Snittpuls (bpm)</th>
+                </tr>
+              </thead>
+              <tbody id="train-activities-table-body">
+                <tr><td colspan="8" style="text-align:center;">Laddar träningspass...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </section>
 
       <!-- TAB 3: SENASTE PASS & LOGG -->
@@ -473,7 +586,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=7.0.0"></script>
+  <script src="/static/app.js?v=8.0.0"></script>
 
 </body>
 </html>

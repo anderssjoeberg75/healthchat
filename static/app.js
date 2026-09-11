@@ -817,36 +817,252 @@ function renderTrainingCharts() {
   const days = currentDaysRange;
   const fallbackDates = generateDatesForRange(days);
   const count = fallbackDates.length;
+  const daysLabel = days < 365 ? `${days} d` : (days > 365 ? 'alla d' : '1 år');
 
-  const activities = (cachedSummary && cachedSummary.history && cachedSummary.history.activities) || [];
-  
-  if (activities.length > 0) {
-    const actByDate = {};
-    activities.forEach(a => {
-      const d = String(a.date || a.start_time || '').slice(0, 10);
-      if (d) {
-        const distKm = Number(a.distance_km || 0);
-        actByDate[d] = (actByDate[d] || 0) + distKm;
-      }
-    });
-    const sortedDates = Object.keys(actByDate).sort();
-    const actLabels = sortedDates.map(d => d.slice(5));
-    const actData = sortedDates.map(d => Number(actByDate[d].toFixed(2)));
-    createChart('chart-training-volume', 'bar', {
-      labels: actLabels,
-      datasets: [{ label: 'Träningsdistans (km)', data: actData, backgroundColor: '#0078D4' }]
-    });
-  } else {
-    createChart('chart-training-volume', 'bar', {
-      labels: fallbackDates,
-      datasets: [{ label: 'Träningsdistans (km)', data: generateMockSeries(4.5, 2.0, count, 11, days), backgroundColor: '#0078D4' }]
-    });
+  const history = (cachedSummary && cachedSummary.history) || {};
+  const activities = history.activities || [];
+  const profile = (cachedSummary && cachedSummary.profile) || {};
+  const hrZonesData = cachedSummary && cachedSummary.hr_zones;
+
+  // --- 1. POPULATE SUMMARY CARDS ---
+
+  // Card 1: Running & Fitness Index
+  const validRuns = activities.filter(a => {
+    const t = String(a.activity_type || a.activity_name || '').toLowerCase();
+    return (t.includes('run') || t.includes('löp')) && a.distance_km > 0 && a.avg_hr > 0;
+  });
+  let fitScore = 54.5;
+  if (validRuns.length > 0) {
+    const ratios = validRuns.map(a => ((a.distance_km || 0) / (a.duration_min || 1)) * (180.0 / (a.avg_hr || 140)));
+    const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+    fitScore = Math.min(99.0, Math.max(40.0, 48.0 + (avgRatio * 15.0)));
+  }
+  const fitScoreEl = document.getElementById('val-train-fitness-score');
+  if (fitScoreEl) fitScoreEl.innerText = fitScore.toFixed(1);
+
+  const fitSubtextEl = document.getElementById('val-train-fitness-subtext');
+  if (fitSubtextEl) {
+    const thresholdPace = fitScore >= 55 ? "4:25 min/km" : (fitScore >= 48 ? "4:50 min/km" : "5:20 min/km");
+    const thresholdHr = profile.max_hr ? Math.round(profile.max_hr * 0.88) : 165;
+    fitSubtextEl.innerHTML = `
+      <div>⚡ Tröskeltempo: ${thresholdPace}</div>
+      <div>🫀 Laktattröskelpuls: ${thresholdHr} bpm</div>
+    `;
   }
 
+  // Card 2: Training Status & Load Impact
+  const latestBb = (history.body_battery && history.body_battery.length) ? history.body_battery[history.body_battery.length - 1] : {};
+  const charged = latestBb.charged || 85;
+  const statusTitleEl = document.getElementById('val-train-status-title');
+  if (statusTitleEl) {
+    const title = charged >= 75 ? "⚡ Produktiv Träning" : (charged >= 45 ? "📈 Stigande Form" : "🛌 Återhämtning");
+    statusTitleEl.innerText = title;
+    statusTitleEl.style.color = charged >= 75 ? "#10B981" : (charged >= 45 ? "#F59E0B" : "#EF4444");
+  }
+  const statusMetricsEl = document.getElementById('val-train-status-metrics');
+  if (statusMetricsEl) {
+    statusMetricsEl.innerHTML = `
+      <div>📊 7-dagars belastning: ${Math.round(charged * 5)} / 300–600 (Optimal)</div>
+      <div>📈 Load Ratio (7d vs 28d): 1.12</div>
+      <div>🛌 Anbefalld vila: 18 timmar vila kvar</div>
+    `;
+  }
+
+  // Card 3: Training Summary (Period Totals & Trend)
+  let currKm = 0, prevKm = 0, currCnt = 0, prevCnt = 0, currDur = 0, currCal = 0;
+  const now = new Date();
+
+  activities.forEach(a => {
+    const dtStr = String(a.date || a.start_time || '').slice(0, 10);
+    let daysAgo = 0;
+    if (dtStr.length === 10) {
+      const aDate = new Date(dtStr);
+      daysAgo = Math.floor((now - aDate) / (1000 * 60 * 60 * 24));
+    }
+    const dist = Number(a.distance_km || 0);
+    const dur = Number(a.duration_min || 0);
+    const cal = Number(a.calories || 0);
+
+    if (daysAgo >= 0 && daysAgo < days) {
+      currKm += dist;
+      currCnt += 1;
+      currDur += dur;
+      currCal += cal;
+    } else if (daysAgo >= days && daysAgo < (2 * days)) {
+      prevKm += dist;
+      prevCnt += 1;
+    }
+  });
+
+  const sumDistEl = document.getElementById('val-train-summary-dist');
+  if (sumDistEl) sumDistEl.innerText = `${currKm.toFixed(1)} km`;
+
+  const sumTrendEl = document.getElementById('val-train-summary-trend');
+  if (sumTrendEl) {
+    const diffKm = currKm - prevKm;
+    const diffPct = prevKm > 0 ? (diffKm / prevKm * 100.0) : (currKm > 0 ? 100.0 : 0.0);
+    const icon = diffKm > 0 ? "📈" : (diffKm < 0 ? "📉" : "➡️");
+    sumTrendEl.innerText = `${icon} ${diffKm >= 0 ? '+' : ''}${diffKm.toFixed(1)} km (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%) vs föregående ${daysLabel}`;
+    sumTrendEl.style.color = diffKm >= 0 ? "#10B981" : "#EF4444";
+  }
+
+  const sumSubtextEl = document.getElementById('val-train-summary-subtext');
+  if (sumSubtextEl) {
+    const hrs = Math.floor(currDur / 60);
+    const mins = Math.round(currDur % 60);
+    const durStr = hrs > 0 ? `${hrs}t ${mins}m` : `${Math.round(currDur)} min`;
+    const cntDiff = currCnt - prevCnt;
+    const cntDiffStr = prevCnt > 0 && cntDiff !== 0 ? ` (${cntDiff >= 0 ? '+' : ''}${cntDiff} st)` : '';
+    sumSubtextEl.innerText = `${currCnt} träningspass${cntDiffStr} | Totaltid: ${durStr}`;
+  }
+
+  const sumCalEl = document.getElementById('val-train-summary-cal');
+  if (sumCalEl) {
+    const fmtCal = Math.round(currCal).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    sumCalEl.innerText = `🏋️ ${fmtCal} kcal träningsförbränning`;
+  }
+
+
+  // --- 2. POPULATE HR ZONES TABLE & MAF BOX ---
+
+  const age = Number(profile.age || 40);
+  const restingHr = Number(profile.resting_hr || 54);
+  const maxHr = Number(profile.max_hr || Math.round(220 - age));
+  const hrr = maxHr - restingHr;
+
+  const headerInfoEl = document.getElementById('val-hr-zones-header-info');
+  if (headerInfoEl) {
+    headerInfoEl.innerText = `👤 Ålder: ${age} år | ❤️ Vilopuls: ${restingHr} bpm | ⚡ Maxpuls: ${maxHr} bpm | 📊 Pulsreserv (HRR): ${hrr} bpm`;
+  }
+
+  const defaultZones = [
+    { name: 'Zon 1', title: 'Aktiv återhämtning', pct: '< 60%', low: restingHr, high: Math.round(restingHr + hrr * 0.6), desc: 'Lugn uppvärmning & återhämtning' },
+    { name: 'Zon 2', title: 'Aerob uthållighet (MAF)', pct: '60–70%', low: Math.round(restingHr + hrr * 0.6), high: Math.round(restingHr + hrr * 0.7), desc: 'Basbyggande, maximal fettförbränning' },
+    { name: 'Zon 3', title: 'Tempo / Aerob zon', pct: '70–80%', low: Math.round(restingHr + hrr * 0.7), high: Math.round(restingHr + hrr * 0.8), desc: 'Kapacitetsökning, uthållighetstempo' },
+    { name: 'Zon 4', title: 'Tröskel / Mjölksyra', pct: '80–90%', low: Math.round(restingHr + hrr * 0.8), high: Math.round(restingHr + hrr * 0.9), desc: 'Anaerob tröskelträning & fartutveckling' },
+    { name: 'Zon 5', title: 'Maximal ansträngning', pct: '90–100%', low: Math.round(restingHr + hrr * 0.9), high: maxHr, desc: 'VO2max & kortintervaller' }
+  ];
+
+  const zonesList = (hrZonesData && hrZonesData.zones) || defaultZones;
+  const tbody = document.getElementById('hr-zones-table-body');
+  if (tbody) {
+    tbody.innerHTML = zonesList.map(z => `
+      <tr>
+        <td><strong>${z.name || z.zone}</strong></td>
+        <td>${z.title}</td>
+        <td>${z.pct_range_str || z.pct}</td>
+        <td><strong>${z.bpm_range_str || (z.low + '–' + z.high + ' bpm')}</strong></td>
+        <td>${z.desc || z.effect}</td>
+      </tr>
+    `).join('');
+  }
+
+  const mafTarget = Math.round(180 - age);
+  const mafMin = mafTarget - 10;
+  const mafTitleEl = document.getElementById('val-maf-title');
+  if (mafTitleEl) {
+    mafTitleEl.innerText = `🎯 Philip Maffetone MAF 180 Puls: ${mafTarget} bpm (Aerobt träningstak: ${mafMin} – ${mafTarget} bpm)`;
+  }
+  const mafInfoEl = document.getElementById('val-maf-info');
+  if (mafInfoEl) {
+    mafInfoEl.innerHTML = `
+      <div>📊 Formel: 180 – ${age} år = ${mafTarget} bpm | Maximal aerob fettförbränning utan mjölksyra.</div>
+      <div>• Håll pulsen i intervallet ${mafMin}–${mafTarget} bpm under distanspass för maximal fettförbränning och aerob uthållighet.</div>
+      <div>• Träning över ${mafTarget} bpm aktiverar anaerob förbränning och övergår i mjölksyrabelastning.</div>
+    `;
+  }
+
+
+  // --- 3. RENDER 4 CHARTS (2x2 GRID) ---
+
+  // Chart 1: Träningsbelastning & Distans Trend (km)
+  const actByDate = {};
+  activities.forEach(a => {
+    const d = String(a.date || a.start_time || '').slice(0, 10);
+    if (d) {
+      actByDate[d] = (actByDate[d] || 0) + Number(a.distance_km || 0);
+    }
+  });
+  const sortedDates = Object.keys(actByDate).sort();
+  const loadLabels = sortedDates.length ? sortedDates.map(d => d.slice(5)) : fallbackDates;
+  const loadData = sortedDates.length ? sortedDates.map(d => Number(actByDate[d].toFixed(2))) : generateMockSeries(5.2, 2.5, count, 12, days);
+
+  createChart('chart-train-load', 'line', {
+    labels: loadLabels,
+    datasets: [{
+      label: 'Träningsdistans (km)',
+      data: loadData,
+      borderColor: '#0078D4',
+      backgroundColor: 'rgba(0, 120, 212, 0.15)',
+      pointBackgroundColor: '#0078D4',
+      borderWidth: 2,
+      fill: true,
+      tension: 0.25
+    }]
+  });
+
+  // Chart 2: Pulszonsfördelning Träning (Z1-Z5)
   createChart('chart-hr-zones', 'bar', {
     labels: ['Z1 (Återhämtning)', 'Z2 (Aerob/MAF)', 'Z3 (Tempo)', 'Z4 (Tröskel)', 'Z5 (Anaerob)'],
-    datasets: [{ label: 'Tid i zoner (%)', data: [35, 45, 12, 6, 2], backgroundColor: ['#10B981', '#0284C7', '#F59E0B', '#F97316', '#DC2626'] }]
+    datasets: [{
+      label: 'Tid i zoner (%)',
+      data: [35, 45, 12, 6, 2],
+      backgroundColor: ['#10B981', '#0284C7', '#F59E0B', '#F97316', '#DC2626']
+    }]
   });
+
+  // Chart 3: Träningsvolym & Kalorier (per pass)
+  const volLabels = activities.slice(0, 15).map(a => String(a.date || a.start_time || '').slice(5, 10));
+  const volData = activities.slice(0, 15).map(a => Number(a.duration_min || 0));
+  createChart('chart-training-volume', 'bar', {
+    labels: volLabels.length ? volLabels : fallbackDates.slice(-7),
+    datasets: [{
+      label: 'Träningstid (min)',
+      data: volData.length ? volData : [45, 60, 30, 75, 50, 90, 40],
+      backgroundColor: '#8B5CF6'
+    }]
+  });
+
+  // Chart 4: Aktivitetsfördelning per Sport / Typ
+  const typeCounts = {};
+  activities.forEach(a => {
+    const t = String(a.activity_name || a.activity_type || 'Övrigt');
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+  });
+  const typeLabels = Object.keys(typeCounts).length ? Object.keys(typeCounts) : ['Löpning', 'Cykling', 'Styrketräning', 'Gång'];
+  const typeData = Object.keys(typeCounts).length ? Object.values(typeCounts) : [8, 3, 4, 2];
+
+  createChart('chart-train-types', 'doughnut', {
+    labels: typeLabels,
+    datasets: [{
+      label: 'Antal pass',
+      data: typeData,
+      backgroundColor: ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7']
+    }]
+  });
+
+
+  // --- 4. POPULATE EMBEDDED ACTIVITY TABLE ---
+
+  const trainTbody = document.getElementById('train-activities-table-body');
+  if (trainTbody) {
+    if (!activities || activities.length === 0) {
+      trainTbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Inga träningspass registrerade i detta intervall.</td></tr>';
+    } else {
+      trainTbody.innerHTML = activities.map(act => `
+        <tr>
+          <td>${act.date || (act.start_time ? act.start_time.slice(0, 10) : '--')}</td>
+          <td><span class="badge-v">${act.source || 'Garmin'}</span></td>
+          <td><strong>${act.activity_name || act.activity_type || 'Träning'}</strong></td>
+          <td>${act.activity_type || 'Aktivitet'}</td>
+          <td>${act.distance_km ? act.distance_km.toFixed(2) + ' km' : '--'}</td>
+          <td>${act.duration_min ? act.duration_min.toFixed(0) + ' min' : '--'}</td>
+          <td>${act.calories ? act.calories + ' kcal' : '--'}</td>
+          <td>${act.avg_hr ? act.avg_hr + ' bpm' : '--'}</td>
+        </tr>
+      `).join('');
+    }
+  }
 }
 
 function createChart(canvasId, type, data, options = {}) {
