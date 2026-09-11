@@ -214,7 +214,36 @@ async function populateProfileInputs(profile) {
   const watEl = document.getElementById('prof-water');
   if (watEl && p.water_pct !== undefined && p.water_pct !== null && p.water_pct !== '') watEl.value = p.water_pct;
   const bmiEl = document.getElementById('prof-bmi');
-  if (bmiEl && p.bmi !== undefined && p.bmi !== null && p.bmi !== '') bmiEl.value = p.bmi;
+  let bmiVal = p.bmi;
+  if ((!bmiVal || parseFloat(bmiVal) === 0) && p.height_cm > 0 && p.weight_kg > 0) {
+    bmiVal = (p.weight_kg / ((p.height_cm / 100.0) ** 2)).toFixed(1);
+  }
+  if (bmiEl && bmiVal !== undefined && bmiVal !== null && bmiVal !== '') bmiEl.value = bmiVal;
+
+  bindLiveBmiCalculator();
+}
+
+function updateLiveBmi() {
+  const hVal = parseFloat((document.getElementById('prof-height')?.value || '').replace(',', '.'));
+  const wVal = parseFloat((document.getElementById('prof-weight')?.value || '').replace(',', '.'));
+  const bmiEl = document.getElementById('prof-bmi');
+  if (bmiEl && hVal > 0 && wVal > 0) {
+    const computedBmi = (wVal / ((hVal / 100.0) ** 2)).toFixed(1);
+    bmiEl.value = computedBmi;
+  }
+}
+
+function bindLiveBmiCalculator() {
+  const hEl = document.getElementById('prof-height');
+  const wEl = document.getElementById('prof-weight');
+  if (hEl && !hEl.dataset.bmiBound) {
+    hEl.addEventListener('input', updateLiveBmi);
+    hEl.dataset.bmiBound = 'true';
+  }
+  if (wEl && !wEl.dataset.bmiBound) {
+    wEl.addEventListener('input', updateLiveBmi);
+    wEl.dataset.bmiBound = 'true';
+  }
 }
 
 
@@ -943,7 +972,10 @@ async function handleUpdateProfile(event) {
   const muscle_mass_kg = musVal ? parseFloat(musVal.replace(',', '.')) : null;
   const bone_mass_kg = boneVal ? parseFloat(boneVal.replace(',', '.')) : null;
   const water_pct = watVal ? parseFloat(watVal.replace(',', '.')) : null;
-  const bmi = bmiVal ? parseFloat(bmiVal.replace(',', '.')) : null;
+  let bmi = bmiVal ? parseFloat(bmiVal.replace(',', '.')) : null;
+  if ((!bmi || bmi === 0) && height_cm > 0 && weight_kg > 0) {
+    bmi = parseFloat((weight_kg / ((height_cm / 100.0) ** 2)).toFixed(1));
+  }
 
   try {
     const res = await fetch('/api/profile/update', {
@@ -1006,8 +1038,13 @@ async function handleFetchExternalProfile() {
     if (metrics.water_pct !== undefined && metrics.water_pct !== null && document.getElementById('prof-water')) {
       document.getElementById('prof-water').value = metrics.water_pct;
     }
-    if (metrics.bmi !== undefined && metrics.bmi !== null && document.getElementById('prof-bmi')) {
-      document.getElementById('prof-bmi').value = metrics.bmi;
+    
+    let bmiVal = metrics.bmi;
+    if ((!bmiVal || parseFloat(bmiVal) === 0) && metrics.height_cm > 0 && metrics.weight_kg > 0) {
+      bmiVal = (metrics.weight_kg / ((metrics.height_cm / 100.0) ** 2)).toFixed(1);
+    }
+    if (document.getElementById('prof-bmi')) {
+      document.getElementById('prof-bmi').value = bmiVal || '';
     }
 
     const srcStr = sources.length ? sources.join(', ') : 'anslutna tjänster';

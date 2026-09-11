@@ -170,6 +170,16 @@ def fetch_external_profile_metrics(
         except Exception:
             pass
 
+    # Calculate BMI if height_cm and weight_kg exist and bmi is missing/zero
+    if ("bmi" not in merged_metrics or merged_metrics["bmi"] == 0) and merged_metrics.get("height_cm") and merged_metrics.get("weight_kg"):
+        try:
+            h_m = float(merged_metrics["height_cm"]) / 100.0
+            w_k = float(merged_metrics["weight_kg"])
+            if h_m > 0 and w_k > 0:
+                merged_metrics["bmi"] = round(w_k / (h_m ** 2), 1)
+        except Exception:
+            pass
+
     # Unique list of sources
     unique_sources = []
     for src in contributing_sources:
