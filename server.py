@@ -160,16 +160,23 @@ def register(req: RegisterRequest, response: Response):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Registreringsfel: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Serverfel vid registrering: {e}")
     finally:
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest, response: Response):
     db = get_db()
-    conn = get_db_conn(db)
+    conn = None
     try:
+        conn = get_db_conn(db)
         session = auth.authenticate_user(conn, req.email, req.password)
         session_id = str(uuid.uuid4())
         _active_sessions[session_id] = session
@@ -190,9 +197,15 @@ def login(req: LoginRequest, response: Response):
         }
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Inloggningsfel: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Serverfel vid inloggning: {e}")
     finally:
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.post("/api/auth/logout")

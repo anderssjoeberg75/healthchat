@@ -86,7 +86,12 @@ async function handleLogin(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = { detail: `Serverfel (${res.status}): ${res.statusText}` };
+    }
     if (res.ok) {
       currentUser = data;
       onAuthSuccess();
@@ -95,7 +100,7 @@ async function handleLogin(event) {
       errDiv.classList.remove('hidden');
     }
   } catch (err) {
-    errDiv.innerText = 'Nätverksfel vid inloggning.';
+    errDiv.innerText = `Nätverksfel vid inloggning: ${err.message || err}`;
     errDiv.classList.remove('hidden');
   }
 }

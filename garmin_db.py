@@ -112,7 +112,7 @@ class GarminDatabase:
         self.is_mariadb = False
 
         load_db_env()
-        if mariadb_config is None and user_id is not None:
+        if mariadb_config is None and db_path is None:
             password = os.environ.get("MARIADB_PASSWORD")
             if password or os.environ.get("MARIADB_HOST"):
                 mariadb_config = {
