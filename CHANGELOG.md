@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GarminDataHandler` accepts an optional `db` argument so each user's sync
   writes to their own database (defaults to the previous behaviour).
 
+### Fixed
+- **Daily calorie burn no longer has gaps.** The trend chart only ever got a bar
+  for days the dashboard happened to be open, because the calorie card was the
+  only writer and it wrote today's date only — a check-in never touched the
+  table, so a missed day stayed missing forever. Completed days are now computed
+  from the synced history (full resting burn instead of a pro-rated slice) on
+  dashboard load and after every check-in. Days that were frozen at a partial
+  value are repaired, days without any underlying data are left as honest gaps,
+  each day is priced with the weight measured by then, and today keeps growing
+  through the day as before.
+
 ### Removed
 - The Tkinter UI, PyInstaller spec, Inno Setup installer and the `.bat`/`.ps1`
   helper scripts. The complete desktop project is archived as

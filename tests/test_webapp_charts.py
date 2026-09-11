@@ -138,3 +138,132 @@ def test_calorie_card_sums_rest_steps_and_workouts_and_persists_the_day(db, toda
     assert card["workout"].startswith("🏋️ Träning: 500 kcal")
     assert card["note"] == "Vilo-BMR från Garmin"
     assert db.get_calorie_burn_history(2), "today's burn should be written to the database"
+
+
+# --- calorie-burn backfill --------------------------------------------------
+
+
+def _sync_day(db, date, steps=0, bmr=0, workout=0):
+    """Pretend a check-in stored one day of Garmin data."""
+    if steps or bmr:
+        db.upsert_daily_summary(date, steps=steps, raw_data={"bmrKilocalories": bmr} if bmr else {})
+    if workout:
+        db.upsert_activity({
+            "activityId": int(date.replace("-", "")),
+            "startTimeLocal": f"{date} 07:00:00",
+            "activityName": "Pass",
+            "distance_km": 5,
+            "duration_min": 30,
+            "calories": workout,
+        })
+
+
+PROFILE = {"weight_kg": 80, "height_cm": 180, "age": 40, "sex": "male"}
+
+
+def test_backfill_fills_days_the_dashboard_never_saw(db, days_ago):
+    _sync_day(db, days_ago(3), steps=9000, bmr=1800)
+    _sync_day(db, days_ago(2), steps=4000, bmr=1800, workout=600)
+
+    result = metrics.backfill_calorie_burn(db, PROFILE, days=30)
+
+    written = {row["date"]: row for row in db.get_calorie_burn_history(30)}
+    assert result["written"] == 2
+    assert set(written) == {days_ago(3), days_ago(2)}
+    assert written[days_ago(2)]["workout_burn"] == 600
+
+
+def test_backfilled_days_count_a_full_day_of_resting_burn(db, days_ago):
+    _sync_day(db, days_ago(1), steps=1000, bmr=1800)
+
+    metrics.backfill_calorie_burn(db, PROFILE, days=30)
+
+    row = db.get_calorie_burn_history(30)[0]
+    assert row["day_fraction"] == 1.0
+    assert row["resting_burn"] == 1800  # not pro-rated like today's card
+
+
+def test_backfill_never_touches_today(db, today_str, days_ago):
+    _sync_day(db, today_str, steps=5000, bmr=1800)
+    _sync_day(db, days_ago(1), steps=5000, bmr=1800)
+
+    metrics.backfill_calorie_burn(db, PROFILE, days=30)
+
+    assert [row["date"] for row in db.get_calorie_burn_history(30)] == [days_ago(1)]
+
+
+def test_backfill_leaves_days_without_evidence_alone(db, days_ago):
+    # A summary row exists but holds nothing: no steps, no device BMR, no workout.
+    db.upsert_daily_summary(days_ago(2), steps=0)
+
+    result = metrics.backfill_calorie_burn(db, PROFILE, days=30)
+
+    assert result["written"] == 0
+    assert result["skipped"] == 1
+    assert db.get_calorie_burn_history(30) == []
+
+
+def test_backfill_repairs_a_day_frozen_at_a_partial_value(db, days_ago):
+    date = days_ago(2)
+    _sync_day(db, date, steps=9000, bmr=1800)
+    # A row frozen mid-day, the way the dashboard used to leave it.
+    db.upsert_calorie_burn(date, total_burn=500, resting_burn=400, day_fraction=0.25)
+
+    metrics.backfill_calorie_burn(db, PROFILE, days=30)
+
+    repaired = db.get_calorie_burn_history(30)[0]
+    assert repaired["day_fraction"] == 1.0
+    assert repaired["resting_burn"] == 1800
+
+
+def test_backfill_leaves_complete_days_alone_unless_overwrite_is_set(db, days_ago):
+    date = days_ago(2)
+    _sync_day(db, date, steps=9000, bmr=1800)
+    # A day already stored as complete — a plain run must not touch it.
+    db.upsert_calorie_burn(date, total_burn=1234, resting_burn=1234, day_fraction=1.0)
+
+    assert metrics.backfill_calorie_burn(db, PROFILE, days=30)["written"] == 0
+    assert db.get_calorie_burn_history(30)[0]["total_burn"] == 1234
+
+    metrics.backfill_calorie_burn(db, PROFILE, days=30, overwrite=True)
+    assert db.get_calorie_burn_history(30)[0]["resting_burn"] == 1800
+
+
+def test_backfill_is_idempotent(db, days_ago):
+    _sync_day(db, days_ago(2), steps=9000, bmr=1800)
+
+    metrics.backfill_calorie_burn(db, PROFILE, days=30, overwrite=True)
+    first = db.get_calorie_burn_history(30)
+    metrics.backfill_calorie_burn(db, PROFILE, days=30, overwrite=True)
+    second = db.get_calorie_burn_history(30)
+
+    assert len(first) == len(second) == 1
+    assert first[0]["total_burn"] == second[0]["total_burn"]
+
+
+def test_backfill_prices_each_day_with_the_weight_measured_by_then(db, days_ago):
+    db.upsert_body_composition(days_ago(10), weight_kg=90.0, source="withings")
+    db.upsert_body_composition(days_ago(2), weight_kg=80.0, source="withings")
+    _sync_day(db, days_ago(5), steps=10000)
+    _sync_day(db, days_ago(1), steps=10000)
+
+    metrics.backfill_calorie_burn(db, {"height_cm": 180, "age": 40, "sex": "male"}, days=30)
+
+    rows = {row["date"]: row for row in db.get_calorie_burn_history(30)}
+    assert rows[days_ago(5)]["weight_kg"] == 90.0   # before the newer weigh-in
+    assert rows[days_ago(1)]["weight_kg"] == 80.0   # after it
+
+
+def test_backfill_uses_the_device_bmr_when_garmin_supplied_one(db, days_ago):
+    _sync_day(db, days_ago(2), steps=1000, bmr=1900)
+    _sync_day(db, days_ago(1), steps=1000)  # no device BMR
+
+    metrics.backfill_calorie_burn(db, PROFILE, days=30)
+
+    rows = {row["date"]: row for row in db.get_calorie_burn_history(30)}
+    assert rows[days_ago(2)]["bmr_source"] == "device"
+    assert rows[days_ago(1)]["bmr_source"] == "mifflin"
+
+
+def test_backfill_survives_an_empty_database(db):
+    assert metrics.backfill_calorie_burn(db, PROFILE, days=30)["written"] == 0

@@ -31,9 +31,18 @@ def _history(workspace: Workspace, days: int):
 @router.get("/dashboard")
 def dashboard(days: int = Query(30, ge=1, le=3650), workspace: Workspace = Depends(current_workspace)):
     data = _history(workspace, days)
+
+    # Fill in past days that never got a calorie-burn row (the card only ever
+    # writes today's). Missing days only, so this normally writes nothing.
+    profile = workspace.get_user_profile()
+    try:
+        metrics.backfill_calorie_burn(workspace.db, profile, days=max(365, days))
+    except Exception as exc:
+        logger.error("Calorie-burn backfill failed: %s", exc)
+
     cards = metrics.dashboard_cards(
         workspace.db,
-        workspace.get_user_profile(),
+        profile,
         data["sleep"],
         data["body_battery"],
         data["stress"],

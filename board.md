@@ -161,6 +161,12 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   5. Inställningar har profil-sektionen och värdena persisteras i `config.json`.
   6. `python -m pytest tests/test_calorie_calc.py tests/test_garmin_db.py` är grönt och hela projektet `python -m compileall .` kompilerar rent.
 
+### [x] F-1b: Kaloriförbränning saknades för dagar då appen inte var öppen
+- **Fil:** [webapp/backend/metrics.py](webapp/backend/metrics.py) (`backfill_calorie_burn`), [webapp/backend/routers/data_routes.py](webapp/backend/routers/data_routes.py), [webapp/backend/routers/sync_routes.py](webapp/backend/routers/sync_routes.py)
+- **Problem (rapporterat 2026-09-11):** Trendgrafen hade hål. Enda skrivaren till `calorie_burn` var kalorirutan, som bara skriver **dagens** datum – och check-in rörde aldrig tabellen. Två följder: (1) en dag då ingen öppnade appen fick aldrig någon rad, och luckan gick inte att fylla i efterhand; (2) en dag då appen öppnades på morgonen behöll morgonens **proraterade** värde för alltid, så stapeln blev för låg och saknade steg-/träningssegment.
+- **Åtgärdat:** Ny `backfill_calorie_burn(db, profile, days, overwrite=False)` som går igenom den synkade historiken och räknar varje **avslutad** dag med `is_today=False` (full BMR i stället för proraterad andel). Körs vid varje dashboard-laddning för dagar som saknas eller ligger kvar som halva dygn (`day_fraction < 1`), och med `overwrite=True` efter varje check-in så nysynkade steg/pass räknas in. Idag rörs aldrig – den ägs fortsatt av kalorirutan och ska växa under dygnet. Dagar helt utan underlag (inga steg, ingen enhets-BMR, inga pass) hoppas över i stället för att få en påhittad BMR-stapel. Varje dag prissätts med den vikt som senast var uppmätt **den dagen**, inte dagens vikt.
+- **Acceptanskriterier:** Luckor i grafen fylls efter en check-in eller en sidladdning ✅; frusna halvdagar rättas ✅; upprepade körningar skriver inget nytt (idempotent) ✅; dagens stapel fortsatt proraterad ✅. Täckt av 10 test i [tests/test_webapp_charts.py](tests/test_webapp_charts.py).
+
 ---
 
 ## 🔐 Konto, MariaDB & kryptering (önskemål)

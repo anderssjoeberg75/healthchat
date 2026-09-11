@@ -181,6 +181,165 @@ def calorie_card(
     }
 
 
+def _profile_weight(profile: Dict[str, Any]) -> float:
+    try:
+        weight = float((profile or {}).get("weight_kg") or 0)
+    except (TypeError, ValueError):
+        weight = 0.0
+    return weight if weight > 0 else 0.0
+
+
+def _weight_on(date: str, measurements: List[Dict[str, Any]], fallback: float) -> float:
+    """Body weight as last measured on or before ``date``.
+
+    A trend chart covering a year should not price every day at today's weight,
+    so each day uses the most recent weigh-in that had already happened.
+    """
+    weight = 0.0
+    for row in measurements:  # ascending by date
+        if str(row.get("date") or "")[:10] > date:
+            break
+        try:
+            candidate = float(row.get("weight_kg") or 0)
+        except (TypeError, ValueError):
+            continue
+        if candidate > 0:
+            weight = candidate
+    return weight or fallback
+
+
+def _device_bmr(day_summary: Dict[str, Any]) -> float:
+    raw = day_summary.get("raw_json")
+    if not raw:
+        return 0.0
+    try:
+        return float(json.loads(raw).get("bmrKilocalories", 0) or 0)
+    except Exception:
+        return 0.0
+
+
+def backfill_calorie_burn(
+    db,
+    profile: Dict[str, Any],
+    days: int = 365,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """Write a ``calorie_burn`` row for every completed day that has data.
+
+    Only :func:`calorie_card` used to write to this table, and only for *today*,
+    so the trend chart had two flaws: a day when nobody opened the app left a
+    permanent gap, and a day when it was opened once in the morning kept that
+    morning's partial value forever. This walks the synced history and computes
+    each past day in full (``is_today=False``, so the whole day's resting burn
+    counts instead of a pro-rated slice).
+
+    With ``overwrite=False`` only days that are missing *or* still stored as a
+    partial day (``day_fraction < 1``) are written, which makes this cheap
+    enough to run on every dashboard load: each day is repaired once and then
+    left alone. ``overwrite=True`` recomputes every day, which is what a sync
+    wants since it may have brought in new steps or workouts for days that
+    already looked complete.
+
+    Today is never touched — :func:`calorie_card` owns it, and its value is
+    meant to grow as the day elapses.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    summaries = {
+        str(row.get("date") or "")[:10]: row
+        for row in (db.get_daily_summary_history(days) or [])
+        if row.get("date")
+    }
+
+    workouts: Dict[str, float] = {}
+    for activity in db.get_activities_history(days) or []:
+        date = str(activity.get("date") or activity.get("start_time") or "")[:10]
+        if not date:
+            continue
+        try:
+            workouts[date] = workouts.get(date, 0.0) + float(activity.get("calories") or 0)
+        except (TypeError, ValueError):
+            continue
+
+    # date -> how much of that day the stored row covers. A completed day left
+    # at a fraction below 1 was frozen mid-day and needs recomputing.
+    existing: Dict[str, float] = {}
+    for row in db.get_calorie_burn_history(days) or []:
+        date = str(row.get("date") or "")[:10]
+        if not date:
+            continue
+        try:
+            existing[date] = float(row.get("day_fraction") or 0)
+        except (TypeError, ValueError):
+            existing[date] = 0.0
+
+    measurements = db.get_body_composition_history(days=days) or []
+    latest_comp = db.get_latest_body_composition() or {}
+    try:
+        latest_weight = float(latest_comp.get("weight_kg") or 0)
+    except (TypeError, ValueError):
+        latest_weight = 0.0
+    fallback_weight = _profile_weight(profile) or latest_weight
+
+    def _num(key: str) -> float:
+        try:
+            return float((profile or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    written = 0
+    skipped = 0
+    for date in sorted(set(summaries) | set(workouts)):
+        if date >= today:
+            continue  # today belongs to calorie_card; future dates are noise
+        if not overwrite and existing.get(date, 0.0) >= 1.0:
+            continue  # already stored as a complete day
+
+        day_summary = summaries.get(date, {})
+        steps = int(day_summary.get("total_steps", 0) or 0)
+        bmr_override = _device_bmr(day_summary)
+        workout_cal = workouts.get(date, 0.0)
+
+        # Without any of these three signals the day holds no evidence at all,
+        # and inventing a BMR-only bar would be worse than an honest gap.
+        if steps <= 0 and bmr_override <= 0 and workout_cal <= 0:
+            skipped += 1
+            continue
+
+        weight_kg = _weight_on(date, measurements, fallback_weight)
+        result = calorie_calc.estimate_daily_burn(
+            weight_kg=weight_kg,
+            height_cm=_num("height_cm"),
+            age_years=_num("age"),
+            sex=(profile or {}).get("sex", "male"),
+            steps=steps,
+            workout_calories=workout_cal,
+            bmr_override=bmr_override,
+            is_today=False,
+        )
+
+        try:
+            db.upsert_calorie_burn(
+                date,
+                total_burn=result["total_burn"],
+                resting_burn=result["resting_burn"],
+                steps_burn=result["steps_burn"],
+                workout_burn=result["workout_burn"],
+                bmr_full=result["bmr_full"],
+                steps=result["steps"],
+                weight_kg=weight_kg,
+                day_fraction=result["day_fraction"],
+                bmr_source=result["bmr_source"],
+            )
+            written += 1
+        except Exception as exc:
+            logger.error("Could not backfill calorie burn for %s: %s", date, exc)
+
+    if written:
+        logger.info("Backfilled calorie burn for %s day(s) (overwrite=%s)", written, overwrite)
+    return {"written": written, "skipped": skipped, "days": days}
+
+
 def activity_rows(act_hist: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Rows for the activities table, newest first, with source detection."""
     if not act_hist:

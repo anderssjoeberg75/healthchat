@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from .. import config
+from .. import config, metrics
 from ..deps import current_workspace
 from ..workspace import Workspace
 
@@ -139,6 +139,21 @@ def _run_checkin(workspace: Workspace, days: int, full: bool) -> None:
         with lock:
             remaining["count"] -= 1
             if remaining["count"] <= 0:
+                # Now that the history is up to date, (re)compute the daily
+                # calorie burn for every completed day. overwrite=True also
+                # repairs days that were frozen at a partial value because the
+                # dashboard happened to be open mid-day.
+                _set_sync(workspace, "⏳ Beräknar kaloriförbränning...")
+                try:
+                    metrics.backfill_calorie_burn(
+                        workspace.db,
+                        workspace.get_user_profile(),
+                        days=3650 if full else max(365, days),
+                        overwrite=True,
+                    )
+                except Exception as exc:
+                    logger.error("Calorie-burn backfill failed after check-in: %s", exc)
+
                 _set_sync(workspace, f"✅ Synkning klar ({source_str})!", running=False, done=True)
                 workspace.status = {
                     "text": f"✅ Check-in genomförd för {source_str}! Graferna har uppdaterats.",
