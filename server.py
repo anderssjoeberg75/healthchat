@@ -441,6 +441,7 @@ def get_dashboard_summary(
         "hrv_latest": hrv_hist[-1] if hrv_hist else None,
         "activities_recent": activities_hist[:10],
         "history": {
+            "daily_summary": daily_summary_hist,
             "sleep": sleep_hist,
             "body_battery": bb_hist,
             "stress": stress_hist,

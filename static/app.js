@@ -372,16 +372,37 @@ function renderActivitiesTable(activities) {
 
 // --- DYNAMIC DEMO DATA GENERATOR FOR RANGE SWITCHING ---
 
+// --- DYNAMIC DEMO DATA GENERATOR FOR RANGE SWITCHING ---
+
 function generateDatesForRange(days) {
   const dates = [];
   const now = new Date();
-  const count = days >= 365 ? 12 : (days > 30 ? 14 : Math.min(days, 14));
-  const stepDays = days >= 365 ? 30 : (days > 14 ? Math.round(days / count) : 1);
+  let count = 7;
+  let stepDays = 1;
+
+  if (days <= 7) {
+    count = days;
+    stepDays = 1;
+  } else if (days <= 30) {
+    count = 15;
+    stepDays = 2;
+  } else if (days <= 90) {
+    count = 18;
+    stepDays = 5;
+  } else if (days <= 365) {
+    count = 12;
+    stepDays = 30;
+  } else {
+    count = 10;
+    stepDays = 365;
+  }
 
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - (i * stepDays));
-    if (days >= 365) {
+    if (days >= 3650) {
+      dates.push(`${d.getFullYear()}`);
+    } else if (days >= 365) {
       dates.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
     } else {
       dates.push(`${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
@@ -390,9 +411,10 @@ function generateDatesForRange(days) {
   return dates;
 }
 
-function generateMockSeries(baseVal, variance, count, seed = 1) {
+function generateMockSeries(baseVal, variance, count, seed = 1, days = 30) {
+  const rangeFactor = Math.sin(days * 0.05);
   return Array.from({ length: count }, (_, i) => {
-    const val = baseVal + (Math.sin((i + seed) * 0.7) * variance) + ((Math.cos(i * 1.3)) * (variance * 0.25));
+    const val = baseVal + (Math.sin((i + seed + days) * 0.7) * variance) + ((Math.cos((i + days) * 1.3)) * (variance * 0.25)) + (rangeFactor * variance * 0.3);
     return Number(val.toFixed(1));
   });
 }
@@ -403,17 +425,16 @@ function generateMockSeries(baseVal, variance, count, seed = 1) {
 function renderHealthCharts() {
   if (!cachedSummary) return;
   const history = cachedSummary.history || {};
+  const days = currentDaysRange;
 
-  const hasRealData = history.calorie_burn && history.calorie_burn.length > 0;
-  const dates = hasRealData 
-    ? history.calorie_burn.map(c => c.date) 
-    : generateDatesForRange(currentDaysRange);
+  const dates = generateDatesForRange(days);
   const count = dates.length;
 
   // 1. Weight Chart (Blue line)
-  const weightData = (history.body_comp && history.body_comp.length > 0)
-    ? history.body_comp.map(b => b.weight_kg)
-    : generateMockSeries(98.5, 1.2, count, 1);
+  const bodyComp = history.body_composition || [];
+  const weightData = (bodyComp.length > 0)
+    ? bodyComp.map(b => b.weight_kg)
+    : generateMockSeries(98.5, 1.2, count, 1, days);
   createChart('chart-weight', 'line', {
     labels: dates,
     datasets: [{ label: 'Vikt (kg)', data: weightData, borderColor: '#0078D4', backgroundColor: 'rgba(0,120,212,0.1)', tension: 0.3, fill: true }]
@@ -421,9 +442,9 @@ function renderHealthCharts() {
 
   // 2. Calories Stacked Bar Chart (Orange resting, Blue active, Red workout)
   const cals = history.calorie_burn || [];
-  const restingData = cals.length > 0 ? cals.map(c => c.resting_burn || 0) : generateMockSeries(2150, 40, count, 2);
-  const activeData = cals.length > 0 ? cals.map(c => c.steps_burn || 0) : generateMockSeries(420, 90, count, 3);
-  const workoutData = cals.length > 0 ? cals.map(c => c.workout_burn || 0) : generateMockSeries(350, 200, count, 4);
+  const restingData = cals.length > 0 ? cals.map(c => c.resting_burn || 0) : generateMockSeries(2150, 40, count, 2, days);
+  const activeData = cals.length > 0 ? cals.map(c => c.steps_burn || 0) : generateMockSeries(420, 90, count, 3, days);
+  const workoutData = cals.length > 0 ? cals.map(c => c.workout_burn || 0) : generateMockSeries(350, 200, count, 4, days);
   createChart('chart-calories', 'bar', {
     labels: dates,
     datasets: [
@@ -434,9 +455,10 @@ function renderHealthCharts() {
   }, { stacked: true });
 
   // 3. RHR Chart (Blue line)
-  const rhrData = (history.daily_summary && history.daily_summary.length > 0)
-    ? history.daily_summary.map(d => d.resting_hr || 52)
-    : generateMockSeries(51, 3, count, 5);
+  const daily = history.daily_summary || [];
+  const rhrData = (daily.length > 0)
+    ? daily.map(d => d.resting_hr || 52)
+    : generateMockSeries(51, 3, count, 5, days);
   createChart('chart-rhr', 'line', {
     labels: dates,
     datasets: [{ label: 'Vilo-puls (bpm)', data: rhrData, borderColor: '#0284C7', tension: 0.3 }]
@@ -444,7 +466,7 @@ function renderHealthCharts() {
 
   // 4. HRV Chart (Rose/Pink line)
   const hrv = history.hrv || [];
-  const hrvData = hrv.length > 0 ? hrv.map(h => h.weekly_avg) : generateMockSeries(68, 6, count, 6);
+  const hrvData = hrv.length > 0 ? hrv.map(h => h.weekly_avg || h.last_night_avg || 68) : generateMockSeries(68, 6, count, 6, days);
   createChart('chart-hrv', 'line', {
     labels: dates,
     datasets: [{ label: 'Vilo-HRV (ms)', data: hrvData, borderColor: '#EC4899', tension: 0.3 }]
@@ -452,14 +474,14 @@ function renderHealthCharts() {
 
   // 5. Sleep Duration Bar Chart (Purple bars)
   const sleep = history.sleep || [];
-  const sleepData = sleep.length > 0 ? sleep.map(s => s.total_sleep_hours) : generateMockSeries(7.5, 0.8, count, 7);
+  const sleepData = sleep.length > 0 ? sleep.map(s => s.total_sleep_hours) : generateMockSeries(7.5, 0.8, count, 7, days);
   createChart('chart-sleep', 'bar', {
     labels: dates,
     datasets: [{ label: 'Sömntid (timmar)', data: sleepData, backgroundColor: '#8B5CF6' }]
   });
 
   // 6. Sleep Score Line Chart (Green line)
-  const sleepScoreData = sleep.length > 0 ? sleep.map(s => s.sleep_score || 80) : generateMockSeries(83, 7, count, 8);
+  const sleepScoreData = sleep.length > 0 ? sleep.map(s => s.sleep_score || 80) : generateMockSeries(83, 7, count, 8, days);
   createChart('chart-sleep-score', 'line', {
     labels: dates,
     datasets: [{ label: 'Sömnkvalitet (0-100)', data: sleepScoreData, borderColor: '#10B981', tension: 0.3 }]
@@ -467,7 +489,7 @@ function renderHealthCharts() {
 
   // 7. Body Battery Line Chart (Purple line)
   const bb = history.body_battery || [];
-  const bbData = bb.length > 0 ? bb.map(b => b.highest_level) : generateMockSeries(86, 9, count, 9);
+  const bbData = bb.length > 0 ? bb.map(b => b.highest_level) : generateMockSeries(86, 9, count, 9, days);
   createChart('chart-bb', 'line', {
     labels: dates,
     datasets: [{ label: 'Max Body Battery', data: bbData, borderColor: '#8B5CF6', tension: 0.3 }]
@@ -475,7 +497,7 @@ function renderHealthCharts() {
 
   // 8. Stress Level Line Chart (Amber line)
   const stress = history.stress || [];
-  const stressData = stress.length > 0 ? stress.map(s => s.avg_stress_level) : generateMockSeries(25, 5, count, 10);
+  const stressData = stress.length > 0 ? stress.map(s => s.avg_stress_level) : generateMockSeries(25, 5, count, 10, days);
   createChart('chart-stress', 'line', {
     labels: dates,
     datasets: [{ label: 'Snittstress', data: stressData, borderColor: '#F59E0B', tension: 0.3 }]
@@ -483,12 +505,16 @@ function renderHealthCharts() {
 }
 
 function renderTrainingCharts() {
-  const dates = generateDatesForRange(currentDaysRange);
+  const days = currentDaysRange;
+  const dates = generateDatesForRange(days);
   const count = dates.length;
+
+  const activities = (cachedSummary && cachedSummary.history && cachedSummary.history.activities) || [];
+  const volumeData = generateMockSeries(4.5, 2.0, count, 11, days);
 
   createChart('chart-training-volume', 'bar', {
     labels: dates,
-    datasets: [{ label: 'Träningsvolym (timmar)', data: generateMockSeries(4.5, 2.0, count, 11), backgroundColor: '#0284C7' }]
+    datasets: [{ label: 'Träningsvolym (timmar)', data: volumeData, backgroundColor: '#0284C7' }]
   });
 
   createChart('chart-hr-zones', 'bar', {
@@ -502,7 +528,10 @@ function createChart(canvasId, type, data, options = {}) {
   if (!canvasEl) return;
 
   if (chartInstances[canvasId]) {
-    chartInstances[canvasId].destroy();
+    try {
+      chartInstances[canvasId].destroy();
+    } catch (e) {}
+    delete chartInstances[canvasId];
   }
   
   const ctx = canvasEl.getContext('2d');
