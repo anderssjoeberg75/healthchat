@@ -5,6 +5,11 @@
 >
 > **Prioritet:** `P0` = bugg/säkerhet som påverkar användaren nu · `P1` = viktig robusthet/korrekthet · `P2` = kodkvalitet/underhåll.
 >
+> ⚠️ **Radnumren är ögonblicksbilder.** De stämde när uppgiften skrevs, men förskjuts så fort någon
+> ändrar filen ovanför. Uppgifterna citerar därför alltid den berörda koden eller funktionsnamnet –
+> **sök på citatet, lita inte på radnumret**. Hittar du inte koden på angiven rad: kontrollera om en
+> tidigare omgång redan åtgärdat uppgiften innan du gör något annat.
+>
 > **ID-serier:** `B-` buggar/korrekthet · `S-` säkerhet (fortsätter efter `S-12`) · `TLS-` transportkryptering · `UI-` frontend · `PF-` prestanda (fortsätter efter `PF-6`) · `Q-` kodkvalitet.
 
 ---
@@ -42,7 +47,7 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 | 1 | `B-1` | `server.py`, `static/app.js` | AI-chatten visar inget svar. Störst användarpåverkan, helt isolerad. |
 | 2 | `B-4` | `server.py:218` | Omkastade argument – i praktiken en rad. |
 | 3 | `B-3` | `server.py:539`, `calorie_calc.py` | BMR blir tyst 0. |
-| 4 | `B-2` | `garmin_db.py:863` | Dedupliceringen slår ihop olika pass. Kräver nya tester. |
+| 4 | `B-2` | `garmin_db.py:904` | Dedupliceringen slår ihop olika pass. Kräver nya tester. |
 
 Ingen av dessa kräver designbeslut. Alla fyra har reproducerbara felfall beskrivna i sina uppgifter.
 
@@ -154,6 +159,7 @@ av `Q-9` punkt 7.
 - **Åtgärd:**
   1. **Lagra aldrig DEK:en i beständig lagring.** Välj en av två vägar och dokumentera valet i README:
      - **A (rekommenderad):** håll DEK:en enbart i processminnet (`_active_sessions`) och kör Uvicorn med **en** worker, alternativt med sticky sessions. Sessionstabellen behövs då inte.
+       ⚠️ Observera att [healthchat_web.service](healthchat_web.service) i dag kör `--workers 4`. Väljer du A **måste** unit-filen ändras i samma ändring, annars loggas användare ut slumpmässigt när requests landar på olika workers. Det är en kapacitetsminskning – stäm av med ägaren först.
      - **B:** om DEK:en måste delas mellan workers – kryptera den med en server-side nyckel som **inte** ligger i databasen (miljövariabel/KMS/keyring) innan den skrivs, och lagra i Redis eller motsvarande med TTL i stället för i MariaDB.
   2. Lägg till `expires_at DATETIME NOT NULL` och avvisa utgångna sessioner i `load_session_from_db`. Synka livslängden med cookiens `max_age`.
   3. Lägg till ett städanrop (`DELETE FROM user_sessions WHERE expires_at < NOW()`) vid inloggning eller som periodiskt jobb.
@@ -167,7 +173,7 @@ av `Q-9` punkt 7.
 ---
 
 ### [ ] S-14: All hälsodata delas mellan användare när MariaDB inte är tillgänglig
-- **Fil:** [garmin_db.py:126-144](garmin_db.py) (`__init__`), samtliga getters [garmin_db.py:743-995](garmin_db.py), [secret_store.py:18-37](secret_store.py)
+- **Fil:** [garmin_db.py:167-185](garmin_db.py) (`__init__`), samtliga getters [garmin_db.py:784-1036](garmin_db.py), [secret_store.py:18-37](secret_store.py)
 - **Problem:** Varje läs- och skrivmetod i `GarminDatabase` har mönstret:
   ```python
   if self.is_mariadb and self.user_id and self.dek:
@@ -175,12 +181,12 @@ av `Q-9` punkt 7.
   else:
       ...SQLite utan user_id...
   ```
-  SQLite-tabellerna saknar helt `user_id`-kolumn. Misslyckas MariaDB-anslutningen sätts `is_mariadb = False` och **applikationen fortsätter utan att klaga** ([garmin_db.py:133-135](garmin_db.py)) – men då läser och skriver *alla* inloggade användare mot samma globala `~/.healthchat/healthdata.db`. Användare A ser användare B:s sömn, vikt och träningspass. Samma sak gäller om `MARIADB_PASSWORD` saknas i miljön.
+  SQLite-tabellerna saknar helt `user_id`-kolumn. Misslyckas MariaDB-anslutningen sätts `is_mariadb = False` och **applikationen fortsätter utan att klaga** ([garmin_db.py:174-176](garmin_db.py)) – men då läser och skriver *alla* inloggade användare mot samma globala `~/.healthchat/healthdata.db`. Användare A ser användare B:s sömn, vikt och träningspass. Samma sak gäller om `MARIADB_PASSWORD` saknas i miljön.
   Samma klass av problem finns i [secret_store.py](secret_store.py): API-nycklar, Garmin-inloggning och OAuth-tokens ligger i **en global** OS-keyring utan `user_id`-dimension, och `chat_stream` hämtar dem globalt ([server.py:604](server.py)). I en flerandvändarapplikation delas alltså även integrationer och AI-nycklar.
 - **Åtgärd:**
   1. Inför ett explicit läge. När `server.py` kör ska MariaDB vara **obligatoriskt**: låt `GarminDatabase` ta en flagga `require_mariadb: bool` (eller läs `HEALTHCHAT_MULTIUSER=1`) och **kasta** i stället för att falla tillbaka. SQLite-fallbacken är rimlig för desktop-läget, aldrig för webben.
   2. Lägg till en startkontroll i `server.py` som vägrar starta utan fungerande MariaDB-anslutning, med tydligt felmeddelande.
-  3. Om SQLite-fallbacken ska behållas för webben: lägg till `user_id` i samtliga SQLite-tabeller ([garmin_db.py:203-328](garmin_db.py)) och filtrera på den i alla getters – annars ta bort fallbacken helt ur webbvägen.
+  3. Om SQLite-fallbacken ska behållas för webben: lägg till `user_id` i samtliga SQLite-tabeller ([garmin_db.py:244-370](garmin_db.py)) och filtrera på den i alla getters – annars ta bort fallbacken helt ur webbvägen.
   4. Gör hemligheter per användare: nyckla keyring-posterna på `user_id` (`f"{user_id}:openai_api_key"`) eller flytta dem till en krypterad kolumn på `users`, krypterad med användarens DEK.
 - **Acceptanskriterier:**
   1. Med MariaDB nedstängd startar inte webbservern / returnerar 503 – den serverar inte delad SQLite-data.
@@ -192,13 +198,13 @@ av `Q-9` punkt 7.
 ## 🟠 P1 – Robusthet & korrekthet
 
 ### [ ] B-2: Deduplicering slår ihop olika träningspass samma dag
-- **Fil:** [garmin_db.py:812-886](garmin_db.py) (`deduplicate_activities`), villkoret på [garmin_db.py:863](garmin_db.py)
+- **Fil:** [garmin_db.py:855-927](garmin_db.py) (`deduplicate_activities`), villkoret på [garmin_db.py:904](garmin_db.py)
 - **Status:** ✅ Reproducerat.
 - **Problem:** Villkoret
   ```python
   if is_dist_match and (is_hr_match or is_dur_match or dist_diff <= 0.1):
   ```
-  låter `dist_diff <= 0.1` **kortsluta både puls- och tidskontrollen**. För distanslösa pass (styrka, yoga, simning) är `act_dist == ex_dist == 0`, vilket ger `is_dist_match = True` (else-grenen på [garmin_db.py:859](garmin_db.py)) **och** `dist_diff == 0`. Resultatet blir att varje par av distanslösa pass samma dag klassas som dubbletter. Reproduktion:
+  låter `dist_diff <= 0.1` **kortsluta både puls- och tidskontrollen**. För distanslösa pass (styrka, yoga, simning) är `act_dist == ex_dist == 0`, vilket ger `is_dist_match = True` (else-grenen på [garmin_db.py:900](garmin_db.py)) **och** `dist_diff == 0`. Resultatet blir att varje par av distanslösa pass samma dag klassas som dubbletter. Reproduktion:
   ```
   Styrketräning 45 min / 110 bpm + Yoga 20 min / 75 bpm + Simning 60 min / 140 bpm
       (samma datum, 0 km)                           ->  1 pass kvar ("Styrketräning")
@@ -366,9 +372,9 @@ av `Q-9` punkt 7.
 ---
 
 ### [ ] PF-7: Ny connection pool skapas per HTTP-request
-- **Fil:** [server.py:113-116](server.py) (`get_db`), [server.py:289-293](server.py) (`bind_user_db`), [garmin_db.py:126-144](garmin_db.py), [garmin_db.py:146-183](garmin_db.py) (`_init_mariadb_pool`)
-- **Problem:** `get_db()` och `bind_user_db()` instansierar `GarminDatabase()` vid **varje** anrop. Konstruktorn bygger en helt ny `PooledDB` med `mincached=2` ([garmin_db.py:167-169](garmin_db.py)) – alltså två nya TCP-anslutningar och handskakningar mot MariaDB per request – och kör dessutom `init_sqlite_db()` ([garmin_db.py:144](garmin_db.py)) som öppnar SQLite-filen och kör `CREATE TABLE IF NOT EXISTS` för samtliga tabeller, varje gång.
-  `/api/dashboard/summary` anropar `bind_user_db` en gång och `get_db_conn` flera gånger; `get_current_session` kan skapa ytterligare en instans i samma request. Under last äter det upp MariaDB:s `max_connections`, och eftersom `blocking=True` ([garmin_db.py:170](garmin_db.py)) börjar requests hänga i stället för att fela snabbt.
+- **Fil:** [server.py:113-116](server.py) (`get_db`), [server.py:289-293](server.py) (`bind_user_db`), [garmin_db.py:167-185](garmin_db.py), [garmin_db.py:187-224](garmin_db.py) (`_init_mariadb_pool`)
+- **Problem:** `get_db()` och `bind_user_db()` instansierar `GarminDatabase()` vid **varje** anrop. Konstruktorn bygger en helt ny `PooledDB` med `mincached=2` ([garmin_db.py:207-209](garmin_db.py)) – alltså två nya TCP-anslutningar och handskakningar mot MariaDB per request – och kör dessutom `init_sqlite_db()` ([garmin_db.py:185](garmin_db.py)) som öppnar SQLite-filen och kör `CREATE TABLE IF NOT EXISTS` för samtliga tabeller, varje gång.
+  `/api/dashboard/summary` anropar `bind_user_db` en gång och `get_db_conn` flera gånger; `get_current_session` kan skapa ytterligare en instans i samma request. Under last äter det upp MariaDB:s `max_connections`, och eftersom `blocking=True` ([garmin_db.py:210](garmin_db.py)) börjar requests hänga i stället för att fela snabbt.
 - **Åtgärd:**
   1. Gör poolen modulglobal i `garmin_db.py` – skapa den **en gång** (lazy, med lås) och låt alla `GarminDatabase`-instanser dela den.
   2. Flytta `init_sqlite_db()` till en engångsinitiering (modulnivå eller FastAPI `startup`-event), inte till konstruktorn.
@@ -415,7 +421,7 @@ av `Q-9` punkt 7.
 
 ### [ ] Q-1: `/api/user/profile/fetch_external` hämtar inget externt
 - **Fil:** [server.py:692-701](server.py), [profile_sync.py:14-20](profile_sync.py), [static/app.js:1232](static/app.js)
-- **Problem:** `fetch_external_profile_metrics` anropas alltid som `fetch_external_profile_metrics(db=db)` – parametrarna `garmin_handler`, `fitbit_handler`, `strava_handler` och `withings_handler` skickas **aldrig** in från någon plats i repot (`grep` bekräftar att ingen av handlarna instansieras i webbvägen). Hela Garmin/Fitbit/Strava/Withings-logiken i [profile_sync.py:77-200](profile_sync.py) är död kod, och endpointen läser i praktiken bara den lokala databasen – trots att namnet, docstringen och knappen i UI:t lovar något annat. `sources`-listan i svaret innehåller bara `"Databas"`.
+- **Problem:** `fetch_external_profile_metrics` anropas alltid som `fetch_external_profile_metrics(db=db)` – parametrarna `garmin_handler`, `fitbit_handler`, `strava_handler` och `withings_handler` skickas **aldrig** in från någon plats i repot (`grep` bekräftar att ingen av handlarna instansieras i webbvägen). Hela Garmin/Fitbit/Strava/Withings-logiken i [profile_sync.py:77-192](profile_sync.py) är död kod, och endpointen läser i praktiken bara den lokala databasen – trots att namnet, docstringen och knappen i UI:t lovar något annat. `sources`-listan i svaret innehåller bara `"Databas"`.
 - **Åtgärd:** Välj en linje och genomför den fullt ut:
   - **A:** Koppla in handlarna på riktigt – instansiera dem per användare från `secret_store` (kräver `S-14` punkt 4) och skicka in dem.
   - **B:** Ta bort den döda koden ur `profile_sync.py`, döp om endpointen till `/api/user/profile/refresh` och uppdatera knapptexten i UI:t så att den beskriver vad som faktiskt händer.
@@ -502,7 +508,8 @@ av `Q-9` punkt 7.
 - **Fil:** [.agents/rules/compile.md](.agents/rules/compile.md)
 - **Problem:** Regeln kräver `pyinstaller --noconfirm HealthChatDesktop_optimized.spec` och `sign_executable.ps1` efter varje kodändring. Båda filerna flyttades till `temp/` i commit `33ae88d` och `temp/` är gitignorerad – stegen går alltså inte att utföra i repot längre. En agent som följer regeln bokstavligt fastnar.
 - **Åtgärd:** Uppdatera regeln till webbapplikationens verklighet: kör `pytest`, verifiera att `uvicorn server:app` startar, och beskriv desktop-bygget som valfritt/historiskt.
-- **Acceptanskriterier:** Regeln går att följa från en ren klon av repot.
+- **Se även:** [.agents/rules/github.md](.agents/rules/github.md) säger `git push origin main`. Arbetar agenten i stället på en feature-gren med pull request blir de två reglerna motstridiga. Bestäm vilket som gäller och skriv det i en av filerna, så att nästa agent inte behöver gissa.
+- **Acceptanskriterier:** Regeln går att följa från en ren klon av repot, och det finns exakt ett svar på frågan vart arbetet ska pushas.
 
 ---
 
@@ -551,6 +558,7 @@ av `Q-9` punkt 7.
   Detta överlappar med `S-15` (CORS) – ta gärna båda i samma pass.
 - **Åtgärd:**
   1. Sätt `secure=True` på cookien, styrt av en miljövariabel (`COOKIE_SECURE`, default `1`) så att lokal HTTP-utveckling fortsatt fungerar.
+     ⚠️ **Beroende:** med default `1` slutar inloggningen fungera i en driftmiljö som fortfarande kör ren HTTP. Sätt `COOKIE_SECURE=0` i driften tills `TLS-1` är klar, och ta bort den raden när proxyn är på plats. Skriv in det i driftdokumentationen i samma ändring.
   2. Överväg att byta `samesite="lax"` till `"strict"` – appen har inga inkommande cross-site-flöden som behöver `lax`.
   3. Lägg till en middleware i [server.py](server.py) som sätter säkerhetsheaders på alla svar. Sätt `Strict-Transport-Security` **antingen** i proxyn eller i appen, inte båda.
   4. `Content-Security-Policy` behöver tillåta `cdn.jsdelivr.net` för Chart.js (se `TLS-5`) – eller så flyttas Chart.js lokalt och policyn kan bli `default-src 'self'`.
@@ -562,10 +570,10 @@ av `Q-9` punkt 7.
 ---
 
 ### [ ] TLS-3: Databastrafiken går okrypterad över LAN (lösenordsdelen åtgärdad, se `S-17`)
-- **Fil:** [healthchat_web.service:13](healthchat_web.service), [garmin_db.py:41-58](garmin_db.py) (`load_db_env`), [garmin_db.py:151-160](garmin_db.py) (`_init_mariadb_pool`), [garmin_db.py:76-97](garmin_db.py) (`get_mariadb_connection`)
+- **Fil:** [healthchat_web.service:13](healthchat_web.service), [garmin_db.py:84-114](garmin_db.py) (`load_db_env`), [garmin_db.py:192-199](garmin_db.py) (`_init_mariadb_pool`), [garmin_db.py:117-138](garmin_db.py) (`get_mariadb_connection`)
 - **Problem:** Tre saker som förstärker varandra:
-  1. **Ingen TLS mot databasen.** `_init_mariadb_pool` har stöd för TLS, men aktiverar det **bara om filen `~/.healthchat/ca.pem` råkar finnas** ([garmin_db.py:157-158](garmin_db.py)). Service-filen sätter varken `MARIADB_SSL_CA` eller `MARIADB_REQUIRE_TLS=1`, så `ssl_config` blir `None` och anslutningen går i klartext. Databasen ligger på `192.168.101.106` – en **annan maskin** – så all trafik passerar nätverket. Innehållet är visserligen envelope-krypterat, men **DEK:en skickas också** över samma anslutning (se `S-13`), liksom e-postadresser, lösenordshashar och hela sessionstabellen.
-  2. **`get_mariadb_connection()` har inget TLS-stöd alls** ([garmin_db.py:90-97](garmin_db.py)) – ingen `ssl`-parameter. Migreringsskriptet [migrate_sqlite_to_mariadb.py](migrate_sqlite_to_mariadb.py) använder den och skickar alltså hela databasen i klartext över nätet.
+  1. **Ingen TLS mot databasen.** `_init_mariadb_pool` har stöd för TLS, men aktiverar det **bara om filen `~/.healthchat/ca.pem` råkar finnas** ([garmin_db.py:196-197](garmin_db.py)). Service-filen sätter varken `MARIADB_SSL_CA` eller `MARIADB_REQUIRE_TLS=1`, så `ssl_config` blir `None` och anslutningen går i klartext. Databasen ligger på `192.168.101.106` – en **annan maskin** – så all trafik passerar nätverket. Innehållet är visserligen envelope-krypterat, men **DEK:en skickas också** över samma anslutning (se `S-13`), liksom e-postadresser, lösenordshashar och hela sessionstabellen.
+  2. **`get_mariadb_connection()` har inget TLS-stöd alls** ([garmin_db.py:130-138](garmin_db.py)) – ingen `ssl`-parameter. Migreringsskriptet [migrate_sqlite_to_mariadb.py](migrate_sqlite_to_mariadb.py) använder den och skickar alltså hela databasen i klartext över nätet.
   3. ~~**Databaslösenordet är committat i klartext.**~~ ✅ **Åtgärdat i koden** – se `S-17`. Värdet ligger dock kvar i git-historiken sedan `7db86ef`, så **lösenordet måste fortfarande roteras**.
 - **Åtgärd:**
   1. ✅ Klart – lösenordet är borta ur arbetskopian (`S-17`).
@@ -595,7 +603,7 @@ av `Q-9` punkt 7.
      Historikomskrivning (`git filter-repo`) krävs för att få bort värdet ur gamla commits; är repot
      privat och lösenordet roterat kan det vara acceptabelt att bara rotera – ta ett medvetet beslut
      och skriv ned det här.
-  3. Sätt `MARIADB_REQUIRE_TLS=1` och `MARIADB_SSL_CA=/etc/healthchat/ca.pem` i driftmiljön. Koden kastar då redan i dag om certifikatet saknas ([garmin_db.py:159-160](garmin_db.py)) – bra beteende, se till att det används.
+  3. Sätt `MARIADB_REQUIRE_TLS=1` och `MARIADB_SSL_CA=/etc/healthchat/ca.pem` i driftmiljön. Koden kastar då redan i dag om certifikatet saknas ([garmin_db.py:198-199](garmin_db.py)) – bra beteende, se till att det används.
   4. Lägg till `ssl`-stöd i `get_mariadb_connection()` med samma logik som poolen, så att migreringsskriptet inte blir en bakdörr.
   5. Konfigurera MariaDB-servern med `require_secure_transport=ON` och ge användaren `REQUIRE SSL` (`ALTER USER 'healthchat'@'%' REQUIRE SSL`), så att en felkonfigurerad klient **inte kan** ansluta i klartext.
   6. Verifiera att `pymysql` faktiskt validerar certifikatet – enbart `{"ca": path}` ger kryptering men inte nödvändigtvis värdnamnsvalidering. Sätt `check_hostname` explicit och testa mot ett felaktigt certifikat.
@@ -644,7 +652,7 @@ av `Q-9` punkt 7.
 ## Avfärdat (verifierat som icke-buggar)
 
 - **`crypto.py`** – AES-256-GCM med färsk nonce per operation, korrekt KEK/DEK-separation, `low_level.Type.ID` överallt. Inga fynd.
-- **SQL-injektion** – alla värden binds som parametrar; tabellnamn valideras mot `_ALLOWED_TABLES` ([garmin_db.py:356-360](garmin_db.py), [garmin_db.py:374-378](garmin_db.py)) sedan `S-11`.
+- **SQL-injektion** – alla värden binds som parametrar; tabellnamn valideras mot `_ALLOWED_TABLES` ([garmin_db.py:397-401](garmin_db.py), [garmin_db.py:415-419](garmin_db.py)) sedan `S-11`.
 - **Sorteringsordning i dashboarden** – `sleep_hist[-1]`, `hrv_hist[-1]` (ASC → senaste sist) och `activities_hist[:10]` (DESC → senaste först) är alla korrekta för sina respektive frågor.
 - **Staplade route-dekoratorer** – `@app.post` / `@app.put` på samma funktion ([server.py:636-638](server.py)) fungerar som avsett i FastAPI; varje dekorator registrerar en route och returnerar funktionen oförändrad.
 - **Nakna `except:`** – inga kvar i kodbasen (`P2-1` håller).
