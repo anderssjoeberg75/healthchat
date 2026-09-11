@@ -6,7 +6,11 @@ Provides transparent migration out of plaintext config files.
 
 import os
 import logging
-import keyring
+
+try:
+    import keyring
+except ImportError:
+    keyring = None
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger("secret_store")
@@ -35,12 +39,13 @@ SECRET_KEYS = (
 
 def get_secret(name: str) -> Optional[str]:
     """Retrieve secret string from Keyring, falling back to environment variables."""
-    try:
-        val = keyring.get_password(SERVICE_NAME, name)
-        if val and str(val).strip():
-            return str(val).strip()
-    except Exception as e:
-        logger.debug(f"Keyring lookup failed for '{name}': {e}")
+    if keyring is not None:
+        try:
+            val = keyring.get_password(SERVICE_NAME, name)
+            if val and str(val).strip():
+                return str(val).strip()
+        except Exception as e:
+            logger.debug(f"Keyring lookup failed for '{name}': {e}")
     
     env_val = os.environ.get(name.upper()) or os.environ.get(name)
     if env_val and str(env_val).strip():
@@ -51,6 +56,8 @@ def get_secret(name: str) -> Optional[str]:
 
 def set_secret(name: str, value: Optional[str]) -> bool:
     """Set or delete secret string in Keyring."""
+    if keyring is None:
+        return False
     try:
         if value:
             keyring.set_password(SERVICE_NAME, name, str(value))
