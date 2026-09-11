@@ -9,6 +9,9 @@ import sys
 import time
 import json
 import logging
+import secrets
+import base64
+import hashlib
 import urllib.parse
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -41,6 +44,8 @@ class FitbitHandler:
         self.expires_at: Optional[float] = None
         self.last_error: Optional[str] = None
         self._authenticated = False
+        self.current_state: Optional[str] = None
+        self.code_verifier: Optional[str] = None
         
         self.load_stored_tokens()
 
@@ -55,19 +60,20 @@ class FitbitHandler:
                     self.client_id = data.get("client_id")
                     self.client_secret = data.get("client_secret")
                     self.expires_at = data.get("expires_at")
-                    if self.access_token:
+                    if self.access_token or self.refresh_token:
                         self._authenticated = True
                         logger.info("Fitbit tokens loaded successfully from disk.")
                         return True
             except Exception as e:
                 logger.error(f"Error loading stored Fitbit tokens: {e}")
+                self.last_error = str(e)
         return False
 
-    def save_tokens(self, tokens: Dict):
+    def save_tokens(self, tokens: Dict) -> None:
         """Save OAuth tokens to disk."""
         try:
-            tokens["client_id"] = self.client_id
-            tokens["client_secret"] = self.client_secret
+            tokens["client_id"] = self.client_id or tokens.get("client_id")
+            tokens["client_secret"] = self.client_secret or tokens.get("client_secret")
             if "expires_in" in tokens and "expires_at" not in tokens:
                 tokens["expires_at"] = time.time() + float(tokens["expires_in"])
             with open(self.token_file, "w", encoding="utf-8") as f:
@@ -83,21 +89,37 @@ class FitbitHandler:
     def is_authenticated(self) -> bool:
         return self._authenticated
 
-    def get_auth_url(self, client_id: str, redirect_uri: str = "http://localhost:8080/") -> str:
-        """Generate Fitbit OAuth 2.0 authorization URL."""
+    def get_auth_url(self, client_id: str, redirect_uri: str = "http://127.0.0.1:8080/", state: Optional[str] = None) -> str:
+        """Generate Fitbit OAuth 2.0 authorization URL with dynamic state and PKCE (S256)."""
         self.client_id = client_id
+        self.current_state = state or secrets.token_urlsafe(32)
+        
+        # PKCE S256 generation
+        self.code_verifier = secrets.token_urlsafe(64)
+        hashed = hashlib.sha256(self.code_verifier.encode("ascii")).digest()
+        code_challenge = base64.urlsafe_b64encode(hashed).decode("ascii").rstrip("=")
+
         scope = "activity heartrate location nutrition profile settings sleep weight"
         params = {
             "response_type": "code",
             "client_id": client_id,
             "redirect_uri": redirect_uri,
             "scope": scope,
-            "expires_in": "31536000"
+            "expires_in": "31536000",
+            "state": self.current_state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256"
         }
         return f"{FITBIT_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
-    def exchange_code_for_token(self, code: str, client_id: str, client_secret: str, redirect_uri: str = "http://localhost:8080/") -> Dict:
-        """Exchange authorization code for OAuth access tokens."""
+    def verify_state(self, received_state: str) -> bool:
+        """Verify CSRF state token against current session state."""
+        if not self.current_state or not received_state:
+            return False
+        return secrets.compare_digest(received_state.strip(), self.current_state.strip())
+
+    def exchange_code_for_token(self, code: str, client_id: str, client_secret: str, redirect_uri: str = "http://127.0.0.1:8080/") -> Dict:
+        """Exchange authorization code for OAuth access tokens with PKCE verifier."""
         self.client_id = client_id
         self.client_secret = client_secret
         
@@ -111,6 +133,8 @@ class FitbitHandler:
             "grant_type": "authorization_code",
             "redirect_uri": redirect_uri
         }
+        if self.code_verifier:
+            data["code_verifier"] = self.code_verifier
         
         try:
             res = requests.post(FITBIT_TOKEN_URL, headers=headers, data=data, timeout=(5, 30))

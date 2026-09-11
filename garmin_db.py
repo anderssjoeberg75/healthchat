@@ -112,14 +112,14 @@ class GarminDatabase:
         self.is_mariadb = False
 
         load_db_env()
-        if mariadb_config is None:
+        if mariadb_config is None and user_id is not None:
             password = os.environ.get("MARIADB_PASSWORD")
-            if password or os.environ.get("MARIADB_HOST") or user_id is not None:
+            if password or os.environ.get("MARIADB_HOST"):
                 mariadb_config = {
                     "host": os.environ.get("MARIADB_HOST", DEFAULT_MARIADB_HOST),
                     "port": int(os.environ.get("MARIADB_PORT", DEFAULT_MARIADB_PORT)),
                     "user": os.environ.get("MARIADB_USER", DEFAULT_MARIADB_USER),
-                    "password": password or "powerman",
+                    "password": password,
                     "database": os.environ.get("MARIADB_DB", DEFAULT_MARIADB_DB),
                 }
         self.mariadb_config = mariadb_config
@@ -140,27 +140,44 @@ class GarminDatabase:
             db_path = config_dir / 'healthdata.db'
             
         self.db_path = db_path
-        if not self.is_mariadb:
-            self.init_sqlite_db()
+        self.init_sqlite_db()
 
     def _init_mariadb_pool(self, config: Dict[str, Any]):
-        """Initialize connection pool for MariaDB."""
+        """Initialize connection pool for MariaDB with ping, timeouts, and optional TLS."""
         password = config.get("password") or os.environ.get("MARIADB_PASSWORD")
         if not password:
             raise RuntimeError("MARIADB_PASSWORD saknas – sätt miljövariabel eller ~/.healthchat/db.env")
+
+        ssl_config = None
+        require_tls = os.environ.get("MARIADB_REQUIRE_TLS", "0") == "1" or config.get("require_tls")
+        ca_path = config.get("ssl_ca") or os.environ.get("MARIADB_SSL_CA") or str(Path.home() / ".healthchat" / "ca.pem")
+        if os.path.exists(ca_path):
+            ssl_config = {"ca": ca_path}
+        elif require_tls:
+            raise RuntimeError(f"MARIADB_REQUIRE_TLS=1 men SSL CA certifikat saknas på sökvägen: {ca_path}")
+
+        connect_timeout = int(config.get("connect_timeout") or os.environ.get("MARIADB_CONNECT_TIMEOUT", 5))
+        read_timeout = int(config.get("read_timeout") or os.environ.get("MARIADB_READ_TIMEOUT", 30))
+        write_timeout = int(config.get("write_timeout") or os.environ.get("MARIADB_WRITE_TIMEOUT", 30))
+
         self.pool = PooledDB(
             creator=pymysql,
-            maxconnections=10,
-            mincached=2,
-            maxcached=5,
+            maxconnections=int(os.environ.get("MARIADB_MAX_CONNECTIONS", "10")),
+            mincached=int(os.environ.get("MARIADB_MIN_CACHED", "2")),
+            maxcached=int(os.environ.get("MARIADB_MAX_CACHED", "5")),
             blocking=True,
+            ping=1,
             host=config.get("host", DEFAULT_MARIADB_HOST),
             port=int(config.get("port", DEFAULT_MARIADB_PORT)),
             user=config.get("user", DEFAULT_MARIADB_USER),
             password=password,
             database=config.get("database", DEFAULT_MARIADB_DB),
             charset="utf8mb4",
-            autocommit=True
+            autocommit=True,
+            ssl=ssl_config,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
         )
 
     def set_user_session(self, user_id: int, dek: bytes):
@@ -521,9 +538,13 @@ class GarminDatabase:
             """, (date, last_night_avg, weekly_avg, status))
             conn.commit()
 
-    def upsert_activity(self, activity: Dict):
-        act_id = activity.get('activityId')
-        if act_id is None or act_id == '':
+    def upsert_activity(self, activity: Dict) -> None:
+        """Upsert activity record to database."""
+        if hasattr(self, "_max_hr_cache"):
+            self._max_hr_cache.clear()
+
+        act_id = str(activity.get('activityId') or activity.get('id') or activity.get('activity_id') or '').strip()
+        if not act_id:
             return
             
         act_name = activity.get('activityName') or 'Aktivitet'
@@ -903,12 +924,19 @@ class GarminDatabase:
 
     def get_max_recorded_hr(self, source: Optional[str] = None) -> int:
         """Find highest plausible max heart rate recorded across activities in database, optionally filtered by source."""
-        acts = self.get_activities_history(days=3650, deduplicate=False)
+        if not hasattr(self, "_max_hr_cache"):
+            self._max_hr_cache = {}
+
+        cache_key = source.lower().strip() if source else "__all__"
+        if cache_key in self._max_hr_cache:
+            return self._max_hr_cache[cache_key]
+
+        acts = self.get_activities_history(days=0, deduplicate=False)
         max_hrs = []
         for a in acts:
             if source:
                 act_src = str(a.get("source") or "").strip().lower()
-                if source.lower() not in act_src:
+                if source.lower().strip() not in act_src:
                     continue
             val = a.get("max_hr") or a.get("maxHR") or a.get("max_heartrate")
             if val is not None:
@@ -918,7 +946,9 @@ class GarminDatabase:
                         max_hrs.append(num)
                 except (ValueError, TypeError):
                     pass
-        return max(max_hrs) if max_hrs else 0
+        res = max(max_hrs) if max_hrs else 0
+        self._max_hr_cache[cache_key] = res
+        return res
 
 
     def get_latest_body_composition(self) -> Optional[Dict]:

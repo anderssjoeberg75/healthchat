@@ -10,11 +10,12 @@ import json
 import csv
 import zipfile
 import logging
+import secrets
 import urllib.parse
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Callable, Any
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, List, Callable, Any, Tuple
 
 import requests
 from garmin_db import GarminDatabase
@@ -43,34 +44,34 @@ class StravaHandler:
         self.client_secret: Optional[str] = None
         self._authenticated = False
         self.last_error: Optional[str] = None
+        self.current_state: Optional[str] = None
         
         self.load_stored_tokens()
 
     def load_stored_tokens(self) -> bool:
         """Load stored OAuth tokens from disk if available."""
-        if self.token_file.exists():
-            try:
-                with open(self.token_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self.access_token = data.get("access_token")
-                    self.refresh_token = data.get("refresh_token")
-                    self.expires_at = data.get("expires_at")
-                    self.client_id = data.get("client_id")
-                    self.client_secret = data.get("client_secret")
-                    if self.access_token or self.refresh_token:
-                        self._authenticated = True
-                        logger.info("Strava tokens loaded successfully from disk.")
-                        return True
-            except Exception as e:
-                logger.error(f"Error loading stored Strava tokens: {e}")
-                self.last_error = str(e)
+        if not self.token_file.exists():
+            return False
+        try:
+            with open(self.token_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.access_token = data.get("access_token")
+            self.refresh_token = data.get("refresh_token")
+            self.expires_at = data.get("expires_at")
+            self.client_id = data.get("client_id")
+            self.client_secret = data.get("client_secret")
+            if self.access_token and self.refresh_token:
+                self._authenticated = True
+                return True
+        except Exception as e:
+            logger.error(f"Failed to read Strava tokens: {e}")
         return False
 
-    def save_tokens(self, tokens: Dict):
-        """Save OAuth tokens to disk."""
+    def save_tokens(self, tokens: Dict) -> None:
+        """Save active OAuth tokens to disk."""
         try:
-            tokens["client_id"] = self.client_id or tokens.get("client_id")
-            tokens["client_secret"] = self.client_secret or tokens.get("client_secret")
+            tokens["client_id"] = self.client_id
+            tokens["client_secret"] = self.client_secret
             with open(self.token_file, "w", encoding="utf-8") as f:
                 json.dump(tokens, f, indent=2)
             self.access_token = tokens.get("access_token")
@@ -87,18 +88,26 @@ class StravaHandler:
             self.load_stored_tokens()
         return self._authenticated
 
-    def get_auth_url(self, client_id: str, redirect_uri: str = "http://localhost:8081/") -> str:
-        """Generate Strava OAuth 2.0 authorization URL."""
+    def get_auth_url(self, client_id: str, redirect_uri: str = "http://127.0.0.1:8081/", state: Optional[str] = None) -> str:
+        """Generate Strava OAuth 2.0 authorization URL with dynamic state token."""
         self.client_id = client_id
+        self.current_state = state or secrets.token_urlsafe(32)
         scope = "read,activity:read_all"
         params = {
             "client_id": client_id,
             "response_type": "code",
             "redirect_uri": redirect_uri,
             "approval_prompt": "auto",
-            "scope": scope
+            "scope": scope,
+            "state": self.current_state
         }
         return f"{STRAVA_AUTH_URL}?{urllib.parse.urlencode(params)}"
+
+    def verify_state(self, received_state: str) -> bool:
+        """Verify CSRF state token against current session state."""
+        if not self.current_state or not received_state:
+            return False
+        return secrets.compare_digest(received_state.strip(), self.current_state.strip())
 
     def exchange_code_for_token(self, code: str, client_id: str, client_secret: str, redirect_uri: str = "http://localhost:8081/") -> Dict:
         """Exchange authorization code for OAuth access and refresh tokens."""

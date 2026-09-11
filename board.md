@@ -253,7 +253,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ---
 
-### [ ] S-3: 🟠 All MariaDB-trafik går okrypterad över nätverket
+### [x] S-3: 🟠 All MariaDB-trafik går okrypterad över nätverket
 - **Fil:** [garmin_db.py:34-42](garmin_db.py) (`get_mariadb_connection`), [garmin_db.py:90-106](garmin_db.py) (`_init_mariadb_pool`)
 - **Problem:** Båda anslutningsvägarna anropar `pymysql` **utan `ssl`-parameter** — MySQL-protokollet går då i klartext över LAN:et. Nyttolasten är visserligen DEK-krypterad, men i klartext över tråden går: e-postadresser, `password_hash`, `kdf_salt`, `wrapped_dek`, `dek_nonce` och `recovery_wrapped_dek`. En passiv avlyssnare på nätet får därmed **allt material som behövs för en offline-attack mot KEK:en**. Argon2id (`t=2, m=64 MB`) bromsar en sådan attack men stoppar den inte om lösenordet är svagt — och som S-1 visar är lösenordet i det här fallet en ordboksnära sträng.
 - **Åtgärd:**
@@ -268,11 +268,11 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ---
 
-### [ ] S-4: 🟠 API-nycklar, Garmin-lösenord och OAuth-tokens sparas i klartext i `config.json`
+### [x] S-4: 🟠 API-nycklar, Garmin-lösenord och OAuth-tokens sparas i klartext i `config.json`
 - **Fil:** [HealthChatDesktop.py:2292-2355](HealthChatDesktop.py) (`save_config`), [HealthChatDesktop.py:2166-2200](HealthChatDesktop.py) (`load_config`)
 - **Problem:** `~/.healthchat/config.json` skrivs som vanlig JSON och innehåller `xai_api_key`, `openai_api_key`, `azure_api_key`, `gemini_api_key`, `anthropic_api_key`, `garmin_password`, `withings_client_secret`, `withings_refresh_token`, `withings_access_token`, `strava_client_secret`, `strava_refresh_token`, `strava_access_token` — **allt i klartext**. `P0-2` "löstes" tidigare enbart genom att skriva om README:n, inte genom att skydda datan. Nu när `keyring` (DPAPI) redan är ett beroende (K-4) finns ingen kvarvarande ursäkt: appen har en säker nyckellagring men använder den bara för DEK:en.
 - **Åtgärd:**
-  1. Inför en `secrets.py` med `get_secret(name)` / `set_secret(name, value)` / `delete_secret(name)` som lagrar via `keyring` under tjänstnamnet `HealthChatDesktop_Secrets`.
+  1. Inför en `secret_store.py` med `get_secret(name)` / `set_secret(name, value)` / `delete_secret(name)` som lagrar via `keyring` under tjänstnamnet `HealthChatDesktop_Secrets`.
   2. Flytta samtliga fält i listan ovan från `config.json` till keyring. `config.json` behåller **enbart** icke-hemliga inställningar (`ai_provider`, modellval, `ollama_base_url`, `azure_endpoint`, `window_state`, `dark_mode`, `auto_login`, profilvärden).
   3. Skriv en engångsmigrering vid uppstart: finns hemliga fält kvar i `config.json` → flytta till keyring, skriv om filen utan dem, logga att migreringen skett. Radera inte filen och tappa inga övriga inställningar.
   4. Sätt restriktiva rättigheter på `~/.healthchat/` när den skapas ([HealthChatDesktop.py:2064](HealthChatDesktop.py)) — `icacls` på Windows, `0700` på POSIX.
@@ -313,7 +313,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ---
 
-### [ ] S-7: 🟡 Rate-limiting är svagare än dokumenterat och nollställs vid omstart
+### [x] S-7: 🟡 Rate-limiting är svagare än dokumenterat och nollställs vid omstart
 - **Fil:** [auth.py:29](auth.py), [auth.py:67-91](auth.py)
 - **Problem:**
   - `K-2` påstår "max 5 misslyckade försök per **15 min**"; koden implementerar 5 per **60 sekunder** ([auth.py:73](auth.py)). Dokumentation och kod går isär.
@@ -361,7 +361,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ---
 
-### [ ] S-10: 🟡 OAuth-flödena saknar `state`/PKCE → CSRF på auktoriseringssvaret
+### [x] S-10: 🟡 OAuth-flödena saknar `state`/PKCE → CSRF på auktoriseringssvaret
 - **Fil:** [withings_handler.py:46-56](withings_handler.py), [strava_handler.py:90-101](strava_handler.py), [fitbit_handler.py:86-97](fitbit_handler.py)
 - **Problem:**
   - Withings skickar en **hårdkodad, konstant** `state=withings_state` ([withings_handler.py:53](withings_handler.py)). En konstant `state` ger noll CSRF-skydd — den är känd för alla.
@@ -388,7 +388,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 ---
 
-### [ ] S-12: 🟢 DEK:en ligger i Windows Credential Manager utan förfallotid
+### [x] S-12: 🟢 DEK:en ligger i Windows Credential Manager utan förfallotid
 - **Fil:** [auth.py:420-445](auth.py)
 - **Problem:** "Spara inloggning" (K-4) lagrar den **oskyddade DEK:en** base64-kodad i Credential Manager. Det är ett medvetet designval och skyddas av DPAPI, men konsekvensen bör vara uttalad: **varje process som kör som samma Windows-användare kan läsa ut DEK:en** och dekryptera all hälsodata utan att någonsin se lösenordet. Rate-limiting, Argon2 och återställningsnyckeln kringgås helt. Nyckeln ligger dessutom kvar för alltid.
 - **Åtgärd:**
@@ -418,7 +418,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   3. `SHOW GRANTS FOR 'healthchat'@'192.168.101.%';` innehåller varken `ALL PRIVILEGES`, `GRANT OPTION`, `DROP` eller `CREATE`.
   4. Appen ansluter och hela testsviten är grön med det nya kontot.
 
-### [ ] DB-2: 🟠 Slå på TLS och kräv krypterad anslutning
+### [x] DB-2: 🟠 Slå på TLS och kräv krypterad anslutning
 - **Åtgärd:**
   1. Generera server- och CA-certifikat (`mysql_ssl_rsa_setup` eller egen CA). Lägg `ssl_ca`, `ssl_cert`, `ssl_key` i `my.cnf` och starta om.
   2. Verifiera: `SHOW VARIABLES LIKE '%ssl%';` → `have_ssl = YES`.
@@ -426,14 +426,14 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   4. Distribuera CA-certet till klienten (`~/.healthchat/ca.pem`) och koppla ihop med S-3.
 - **Acceptanskriterier:** en anslutning utan `--ssl` nekas; appen ansluter och `SHOW STATUS LIKE 'Ssl_cipher'` visar en cipher.
 
-### [ ] DB-3: 🟠 Bind serversocketen och lås ner brandväggen
+### [x] DB-3: 🟠 Bind serversocketen och lås ner brandväggen
 - **Åtgärd:**
   1. Kontrollera `bind-address` i `my.cnf`. Ska servern bara nås från LAN:et: bind till LAN-adressen, inte `0.0.0.0`.
   2. Brandväggsregel som endast släpper in port 3306 från klientens IP/subnät.
   3. Verifiera att 3306 **inte** är nåbar utifrån — kontrollera även eventuell port forwarding i routern.
 - **Acceptanskriterier:** en portskanning mot 3306 från utanför LAN:et ger `filtered`/`closed`.
 
-### [ ] DB-4: 🟡 Verifiera att produktionsschemat faktiskt matchar koden
+### [x] DB-4: 🟡 Verifiera att produktionsschemat faktiskt matchar koden
 - **Åtgärd:**
   1. `mysqldump --no-data --skip-comments healthchat > schema_actual.sql` och jämför kolumn för kolumn mot vad `auth.py` och `garmin_db.py` läser och skriver.
   2. Bekräfta att **varje** datatabell har `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`. K-8 påstår att cascade-radering är testad, men [init_mariadb.sql](init_mariadb.sql) innehåller inga foreign keys alls — saknas de i produktion raderas hälsodata **inte** när ett konto tas bort, vilket är ett GDPR-problem utöver ett datastädningsproblem.
@@ -441,7 +441,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   4. Rapportera avvikelser och uppdatera [init_mariadb.sql](init_mariadb.sql) enligt S-2.
 - **Acceptanskriterier:** `schema_actual.sql` och `init_mariadb.sql` är funktionellt identiska; `EXPLAIN` på den datumfiltrerade aktivitetsfrågan visar index-användning, inte `type: ALL`.
 
-### [ ] DB-5: 🟡 Säkerhetskopiering av den krypterade databasen
+### [x] DB-5: 🟡 Säkerhetskopiering av den krypterade databasen
 - **Problem:** All hälsodata ligger nu enbart på en enskild server. `~/.healthchat/healthdata.db.backup` från K-6 är en engångsfrys från migreringstillfället — den växer inte. Går servern förlorad är historiken borta, och eftersom datan är klientkrypterad kan den inte återskapas från Garmin/Withings/Strava i efterhand utan att allt synkas om.
 - **Åtgärd:**
   1. Schemalägg `mysqldump --single-transaction healthchat` dagligen till en separat disk eller NAS.
@@ -474,7 +474,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   3. `get_activities_history` anropas högst en gång per `refresh_all_views`.
   4. Snabba klick mellan 7d/30d/90d ger aldrig fler än en pågående hämtning.
 
-### [ ] PF-2: 🟠 `get_max_recorded_hr` hämtar och dekrypterar **hela** aktivitetshistoriken
+### [x] PF-2: 🟠 `get_max_recorded_hr` hämtar och dekrypterar **hela** aktivitetshistoriken
 - **Fil:** [garmin_db.py:804-822](garmin_db.py)
 - **Problem:** Metoden anropar `self.get_activities_history(days=3650, deduplicate=False)`, vilket i MariaDB-läget hämtar **samtliga** aktivitetsrader (1 123 st i dag) över nätet och kör en AES-GCM-dekryptering + `json.loads` per rad — allt för att plocka ut `max_hr` och ta `max()`. Det är hundratals kilobyte trafik och tusentals kryptooperationer för ett enda heltal. Eftersom nyttolasten är krypterad kan `MAX()` inte pushas ner till databasen, så det går inte att lösa med enbart SQL.
 - **Åtgärd:** välj en av två vägar.
@@ -508,7 +508,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   1. En upsert mot en befintlig `(user_id, date)` uppdaterar raden utan att radera den — verifiera genom att lägga till `created_at DATETIME DEFAULT CURRENT_TIMESTAMP` och kontrollera att värdet **inte** ändras vid uppdatering.
   2. `tests/test_garmin_db_mariadb.py` är grönt.
 
-### [ ] PF-5: 🟡 Ingen radbegränsning i `_mariadb_get_history` — allt dekrypteras oavsett vad som visas
+### [x] PF-5: 🟡 Ingen radbegränsning i `_mariadb_get_history` — allt dekrypteras oavsett vad som visas
 - **Fil:** [garmin_db.py:289-313](garmin_db.py), [garmin_db.py:775-802](garmin_db.py), [garmin_db.py:853-864](garmin_db.py)
 - **Problem:** `_mariadb_get_history` hämtar alla rader i intervallet och dekrypterar var och en. `get_latest_body_composition` gör rätt (`LIMIT 1`), men `get_activities_history` och `get_calorie_burn_history` laddar hela historiken när `days >= 3650`. "Allt"-knappen i dashboarden sätter just `days_range >= 3650` ([charts_view.py:211](charts_view.py)) — ett klick betyder alltså full nedladdning och dekryptering av samtliga tabeller, på UI-tråden (se PF-1).
 - **Åtgärd:**
@@ -517,7 +517,7 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   3. Sätt ett tak i UI:t för "Allt": aggregera grafdata per vecka bortom 1 år i stället för per dag — bortom ett år är dagsupplösning ändå inte läsbar i graferna.
 - **Acceptanskriterier:** "Allt"-vyn renderar på < 2 s med full historik; upprepade fliksbyten inom 60 s utlöser inga nya databasfrågor.
 
-### [ ] PF-6: 🟡 Anslutningspoolen kan svälta och återhämtar sig inte från tappade anslutningar
+### [x] PF-6: 🟡 Anslutningspoolen kan svälta och återhämtar sig inte från tappade anslutningar
 - **Fil:** [garmin_db.py:90-106](garmin_db.py)
 - **Problem:** `PooledDB(maxconnections=10, mincached=2, maxcached=5, blocking=True)`.
   - `blocking=True` utan timeout betyder att en tråd som inte får en anslutning **blockerar för alltid**. Sker det på UI-tråden — vilket det gör i dag, se PF-1 — fryser appen permanent i stället för att ge ett felmeddelande.

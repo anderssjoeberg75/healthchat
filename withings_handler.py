@@ -6,6 +6,7 @@ from Withings Health Mate API (WBS API v2) and stores them in local SQLite datab
 
 import logging
 import requests
+import secrets
 import urllib.parse
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -18,7 +19,8 @@ class WithingsDataHandler:
     """Handler for Withings Health Mate API integration."""
 
     MEASURE_ENDPOINT = "https://wbsapi.withings.net/v2/measure"
-    OAUTH_ENDPOINT = "https://wbsapi.withings.net/v2/oauth2"
+    TOKEN_ENDPOINT = "https://wbsapi.withings.net/v2/oauth2"
+    OAUTH_ENDPOINT = TOKEN_ENDPOINT
 
     # Withings Measurement Types
     TYPE_WEIGHT = 1        # Weight (kg)
@@ -30,10 +32,10 @@ class WithingsDataHandler:
 
     def __init__(
         self,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None,
-        refresh_token: Optional[str] = None,
-        access_token: Optional[str] = None,
+        client_id: str = "",
+        client_secret: str = "",
+        refresh_token: str = "",
+        access_token: str = "",
         db: Optional[GarminDatabase] = None
     ):
         self.client_id = client_id or ""
@@ -42,18 +44,25 @@ class WithingsDataHandler:
         self.access_token = access_token or ""
         self.db = db or GarminDatabase()
         self.last_error: Optional[str] = None
+        self.current_state: Optional[str] = None
 
-    @staticmethod
-    def get_auth_url(client_id: str, redirect_uri: str = "http://localhost:8000") -> str:
-        """Build Withings OAuth2 authorization URL with encoded redirect_uri."""
+    def get_auth_url(self, client_id: str, redirect_uri: str = "http://127.0.0.1:8000", state: Optional[str] = None) -> str:
+        """Build Withings OAuth2 authorization URL with dynamic state and encoded redirect_uri."""
+        self.current_state = state or secrets.token_urlsafe(32)
         encoded_uri = urllib.parse.quote(redirect_uri.strip(), safe='')
         return (
             "https://account.withings.com/oauth2_user/authorize2"
             f"?response_type=code&client_id={client_id.strip()}"
-            "&state=withings_state"
+            f"&state={self.current_state}"
             "&scope=user.metrics,user.info,user.activity"
             f"&redirect_uri={encoded_uri}"
         )
+
+    def verify_state(self, received_state: str) -> bool:
+        """Verify CSRF state token against current session state."""
+        if not self.current_state or not received_state:
+            return False
+        return secrets.compare_digest(received_state.strip(), self.current_state.strip())
 
     def exchange_code_for_token(
         self,
