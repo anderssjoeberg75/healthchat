@@ -2,10 +2,13 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=5.0.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -176,11 +179,14 @@
           <!-- CARD 3: ACTIVE CALORIES BURNED -->
           <div class="summary-card">
             <h3>🔥 Kaloriförbränning idag</h3>
-            <div class="summary-value" id="val-calories-total">2 848 kcal</div>
-            <div class="summary-subtext" id="val-calories-breakdown">
-              Vila: 2 150 kcal | Aktivitet: 420 kcal | Träning: 278 kcal
+            <div class="summary-value" id="val-calories-total" style="color:#EA580C; font-size:1.8rem; font-weight:bold;">🔥 1 195 kcal</div>
+            <div class="summary-subtext" id="val-calories-subtext" style="color:#6B7280; font-size:0.85rem; margin-bottom:6px;">Förbränt hittills idag (ungefärligt)</div>
+            <div id="val-calories-breakdown" style="font-size:0.9rem; color:#4B5563; line-height:1.6;">
+              <div>🛌 Vila (BMR): 1 123 kcal</div>
+              <div>👟 Vardagssteg: 72 kcal (1 273 st)</div>
+              <div>🏋️ Träning: 0 kcal</div>
             </div>
-            <div class="summary-source" id="val-calories-source">Källa: Mifflin-St Jeor / Garmins BMR</div>
+            <div class="summary-source" id="val-calories-source" style="font-style:italic; color:#9CA3AF; margin-top:6px; font-size:0.8rem;">Vilo-BMR från Garmin</div>
           </div>
 
         </div>
@@ -390,6 +396,6 @@
 
   </div>
 
-  <script src="/static/app.js?v=4.4.0"></script>
+  <script src="/static/app.js?v=5.1.0"></script>
 </body>
 </html>

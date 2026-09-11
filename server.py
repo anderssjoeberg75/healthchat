@@ -412,10 +412,48 @@ def get_dashboard_summary(
     # Calculate today's calorie burn estimate using calorie_calc
     today_str = datetime.now().strftime("%Y-%m-%d")
     daily_sum_today = db.get_daily_summary(today_str) or {}
-    workout_cals_today = sum(
-        a.get("calories", 0) for a in activities_hist if str(a.get("date", ""))[:10] == today_str
-    )
     
+    # Extract Garmin device BMR from raw_json matching desktop charts_view.py
+    bmr_override = 0.0
+    raw = daily_sum_today.get("raw_json")
+    if raw:
+        try:
+            rd = json.loads(raw) if isinstance(raw, str) else raw
+            device_bmr = float(rd.get("bmrKilocalories", 0) or 0)
+            frac = calorie_calc.day_fraction_elapsed()
+            if device_bmr > 0 and frac > 0.05:
+                bmr_override = device_bmr / frac
+            else:
+                bmr_override = device_bmr
+        except Exception:
+            bmr_override = 0.0
+
+    workout_cal = 0
+    workout_steps = 0
+    for a in (activities_hist or []):
+        if str(a.get("date") or a.get("start_time") or "")[:10] == today_str:
+            try:
+                workout_cal += int(float(a.get("calories") or 0))
+            except (TypeError, ValueError):
+                pass
+            act_steps = 0
+            raw_act = a.get("raw_json")
+            if raw_act:
+                try:
+                    ra = json.loads(raw_act) if isinstance(raw_act, str) else raw_act
+                    act_steps = int(ra.get("steps") or ra.get("totalSteps") or 0)
+                except Exception:
+                    act_steps = 0
+            if not act_steps:
+                act_steps = int(a.get("steps") or a.get("total_steps") or 0)
+            if not act_steps:
+                act_type = str(a.get("activity_type") or "").lower()
+                if any(k in act_type for k in ("run", "walk", "hike", "löp", "gång", "jogg")):
+                    dist = float(a.get("distance_km") or 0.0)
+                    if dist > 0:
+                        act_steps = int(dist * 1300)
+            workout_steps += max(0, act_steps)
+
     profile = session.encrypted_profile or {}
     weight = profile.get("weight_kg") or (body_comp_latest.get("weight_kg") if body_comp_latest else 70.0)
     
@@ -425,8 +463,9 @@ def get_dashboard_summary(
         age_years=profile.get("age"),
         sex=profile.get("sex", "male"),
         steps=daily_sum_today.get("total_steps", 0),
-        workout_calories=workout_cals_today,
-        bmr_override=daily_sum_today.get("bmrKilocalories", 0),
+        workout_steps=workout_steps,
+        workout_calories=workout_cal,
+        bmr_override=bmr_override,
         is_today=True
     )
 
@@ -552,7 +591,14 @@ def root():
     index_path = os.path.join(static_dir, "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            return HTMLResponse(
+                content=f.read(),
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
     return HTMLResponse(content="<h1>HealthChat Web Server Running</h1><p>Static files missing.</p>")
 
 

@@ -329,24 +329,50 @@ function updateDashboardCards(data) {
   const srcEl = document.getElementById('val-weight-source');
   if (srcEl) srcEl.innerText = `Källa: ${bodyComp.source || 'Withings'} (${data.today_date || '2026-09-11'})`;
 
-  // 3. Calorie Burn Card
+  // 3. Calorie Burn Card (matching Desktop card_calories)
   const burn = data.calorie_burn_today || {};
-  const totalBurn = burn.total_burn || 2848;
-  const restingBurn = burn.resting_burn || 2150;
-  const stepsBurn = burn.steps_burn || 420;
-  const workoutBurn = burn.workout_burn || 278;
+  const totalBurn = burn.total_burn !== undefined ? burn.total_burn : 1195;
+  const restingBurn = burn.resting_burn !== undefined ? burn.resting_burn : 1123;
+  const stepsBurn = burn.steps_burn !== undefined ? burn.steps_burn : 72;
+  const workoutBurn = burn.workout_burn !== undefined ? burn.workout_burn : 0;
+  const everydaySteps = burn.everyday_steps !== undefined ? burn.everyday_steps : (burn.steps || 1273);
 
   const calTotalEl = document.getElementById('val-calories-total');
-  if (calTotalEl) calTotalEl.innerText = `${formatNumber(totalBurn)} kcal`;
+  if (calTotalEl) {
+    calTotalEl.innerText = `🔥 ${formatNumber(totalBurn)} kcal`;
+    calTotalEl.style.color = '#EA580C';
+  }
+
+  const calSubtextEl = document.getElementById('val-calories-subtext');
+  if (calSubtextEl) {
+    calSubtextEl.innerText = 'Förbränt hittills idag (ungefärligt)';
+  }
 
   const calBreakdownEl = document.getElementById('val-calories-breakdown');
   if (calBreakdownEl) {
-    calBreakdownEl.innerText = `Vila: ${formatNumber(restingBurn)} kcal | Aktivitet: ${formatNumber(stepsBurn)} kcal | Träning: ${formatNumber(workoutBurn)} kcal`;
+    let stepsLine = `👟 Vardagssteg: ${formatNumber(stepsBurn)} kcal (${formatNumber(everydaySteps)} st)`;
+    if (burn.workout_steps > 0) {
+      stepsLine += ` (avdrag ${formatNumber(burn.workout_steps)} st träning)`;
+    }
+    calBreakdownEl.innerHTML = `
+      <div>🛌 Vila (BMR): ${formatNumber(restingBurn)} kcal</div>
+      <div>${stepsLine}</div>
+      <div>🏋️ Träning: ${formatNumber(workoutBurn)} kcal</div>
+    `;
   }
 
-  const bmrSourceMap = { 'device': 'Garmins BMR', 'mifflin': 'Mifflin-St Jeor', 'simple': 'Viktbaserad BMR' };
+  const bmrSourceMap = {
+    'device': 'Vilo-BMR från Garmin',
+    'mifflin': 'Vilo-BMR beräknad från din profil',
+    'simple': 'Vilo-BMR grovt uppskattad (ange profil för bättre värde)'
+  };
   const calSrcEl = document.getElementById('val-calories-source');
-  if (calSrcEl) calSrcEl.innerText = `Källa: ${bmrSourceMap[burn.bmr_source] || 'Mifflin-St Jeor / Garmins BMR'}`;
+  if (calSrcEl) {
+    const srcText = bmrSourceMap[burn.bmr_source] || 'Vilo-BMR från Garmin';
+    calSrcEl.innerText = srcText;
+    calSrcEl.style.fontStyle = 'italic';
+    calSrcEl.style.color = '#9CA3AF';
+  }
 }
 
 function renderActivitiesTable(activities) {
