@@ -310,6 +310,8 @@ def get_dashboard_summary(
 
 # --- AI CHAT ENDPOINT (SSE STREAMING) ---
 
+import secret_store
+
 @app.post("/api/ai/chat")
 async def chat_stream(req: ChatRequest, session: UserSession = Depends(get_current_session)):
     db = bind_user_db(session)
@@ -324,7 +326,16 @@ async def chat_stream(req: ChatRequest, session: UserSession = Depends(get_curre
     
     prompt = f"Hälsokontext:\n{context_text}\nAnvändarens fråga: {req.message}"
     
-    client = AIClient(provider=req.provider or "openai", model=req.model)
+    provider = (req.provider or "openai").lower()
+    api_key = secret_store.get_secret(f"{provider}_api_key") or ""
+    ollama_url = secret_store.get_secret("ollama_base_url") or os.environ.get("OLLAMA_BASE_URL")
+
+    client = AIClient(
+        provider=provider,
+        api_key=api_key,
+        model=req.model,
+        ollama_base_url=ollama_url
+    )
 
     async def event_generator():
         try:

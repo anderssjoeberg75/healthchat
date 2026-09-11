@@ -212,7 +212,7 @@ class AIClient:
 
     def _init_ollama(self, kwargs):
         """Initialize Ollama local/network client using OpenAI-compatible API."""
-        raw_url = kwargs.get('ollama_base_url', self.PROVIDERS['ollama']['base_url'])
+        raw_url = kwargs.get('ollama_base_url') or os.environ.get('OLLAMA_BASE_URL') or self.PROVIDERS['ollama']['base_url']
         base_url = self.normalize_ollama_url(raw_url)
         logger.info(f"Connecting to Ollama server at: {base_url}")
         return OpenAI(
