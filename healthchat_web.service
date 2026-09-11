@@ -7,11 +7,23 @@ Type=simple
 User=healthchat
 WorkingDirectory=/opt/healthchat
 Environment="PATH=/opt/healthchat/venv/bin"
-Environment="MARIADB_HOST=192.168.101.106"
-Environment="MARIADB_PORT=3306"
-Environment="MARIADB_USER=healthchat"
-Environment="MARIADB_PASSWORD=powerman"
-Environment="MARIADB_DB=healthchat"
+
+# Databaskonfigurationen - inklusive lösenordet - läses ur en fil utanför
+# git-repot. Skapa den en gång på servern:
+#   sudo mkdir -p /etc/healthchat
+#   sudo install -o healthchat -g healthchat -m 600 /dev/null /etc/healthchat/db.env
+#   sudo -u healthchat editor /etc/healthchat/db.env
+# Se .env.example för vilka nycklar som ska sättas.
+#
+# Lägg ALDRIG lösenord som Environment= här: unit-filen ligger i git, och
+# `systemctl show healthchat_web` visar dessutom Environment= för alla
+# användare på systemet. EnvironmentFile läses av systemd som root och
+# exponeras inte på samma sätt.
+EnvironmentFile=/etc/healthchat/db.env
+
+# NOTE: --host 0.0.0.0 exponerar appen okrypterad mot hela nätverket.
+# Se TLS-1 i board.md: när en reverse proxy med TLS är på plats ska detta
+# ändras till --host 127.0.0.1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4
 Restart=always
 RestartSec=5

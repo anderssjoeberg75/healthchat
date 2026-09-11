@@ -38,28 +38,69 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
 })
 
 
+# Template written to ~/.healthchat/db.env when no configuration exists yet.
+# Every line is commented out and no credential is embedded: the operator fills
+# it in. Never add a default password here - it would end up in version control
+# and in every installation.
+_DB_ENV_TEMPLATE = """\
+# HealthChat MariaDB-konfiguration.
+# Läses av load_db_env() i garmin_db.py. Filen ligger utanför git-repot.
+# Avkommentera och fyll i värdena nedan, eller sätt motsvarande
+# miljövariabler i systemd-enheten (EnvironmentFile).
+#
+# Filen ska ha rättigheterna 0600 (endast ägaren kan läsa den).
+
+#MARIADB_HOST=
+#MARIADB_PORT=3306
+#MARIADB_USER=healthchat
+#MARIADB_PASSWORD=
+#MARIADB_DB=healthchat
+"""
+
+
+def _write_db_env_template(path: Path):
+    """Write the credential-free db.env template with owner-only permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Create with 0600 from the start so the file is never briefly world-readable.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(_DB_ENV_TEMPLATE)
+    logger.info(f"Skapade konfigurationsmall utan lösenord: {path}")
+
+
+def _warn_if_world_readable(path: Path):
+    """Log a warning when a file holding credentials is readable by others."""
+    try:
+        mode = path.stat().st_mode
+        if mode & 0o077:
+            logger.warning(
+                f"{path} är läsbar för andra användare (rättigheter {mode & 0o777:o}). "
+                f"Kör: chmod 600 {path}"
+            )
+    except OSError:
+        pass
+
+
 def load_db_env():
-    """Load key-value environment variables from ~/.healthchat/db.env or local .env into os.environ if missing."""
+    """Load key-value environment variables from ~/.healthchat/db.env or local .env into os.environ if missing.
+
+    Values already present in os.environ always win, so a systemd EnvironmentFile
+    or an explicitly exported variable cannot be overridden by a stray file in the
+    user's home directory.
+    """
     db_env_file = Path.home() / ".healthchat" / "db.env"
     local_env_file = Path.cwd() / ".env"
 
     if not db_env_file.exists() and not local_env_file.exists():
         try:
-            db_env_file.parent.mkdir(parents=True, exist_ok=True)
-            db_env_file.write_text(
-                "MARIADB_HOST=192.168.101.106\n"
-                "MARIADB_PORT=3306\n"
-                "MARIADB_USER=healthchat\n"
-                "MARIADB_PASSWORD=powerman\n"
-                "MARIADB_DB=healthchat\n",
-                encoding="utf-8"
-            )
+            _write_db_env_template(db_env_file)
         except Exception as e:
             logger.debug(f"Could not auto-create db.env: {e}")
 
     env_paths = [local_env_file, db_env_file]
     for p in env_paths:
         if p.is_file():
+            _warn_if_world_readable(p)
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     for line in f:
@@ -67,8 +108,8 @@ def load_db_env():
                         if line and not line.startswith("#") and "=" in line:
                             k, v = line.split("=", 1)
                             k, v = k.strip(), v.strip().strip("'\"")
-                            if k:
-                                os.environ[k] = v
+                            if k and v:
+                                os.environ.setdefault(k, v)
             except Exception as e:
                 logger.debug(f"Failed to load env file {p}: {e}")
 

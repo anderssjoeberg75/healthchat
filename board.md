@@ -20,7 +20,7 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 - Därtill tolv mindre fynd kring OAuth-tokenhantering, connection pooling och kodkvalitet.
 - **Ingen transportkryptering:** webbläsare→app och app→MariaDB går båda i klartext (`TLS-1`, `TLS-3`). Klientkrypteringen skyddar data i vila – inte på tråden. Se avsnittet *Transportkryptering*.
 
-**Verifieringsstatus:** `B-2`, `B-3` och `B-6` är reproducerade med körbara skript. Övriga är verifierade genom kodläsning. Testsviten kunde **inte** köras i genomgångsmiljön (varken `pytest`, `fastapi`, `pymysql` eller `cryptography` fanns installerat och pip nådde inte PyPI) – **Antigravity ska köra `pytest` före och efter varje åtgärd** för att fånga regressioner.
+**Verifieringsstatus:** `B-2`, `B-3` och `B-6` är reproducerade med körbara skript. Övriga fynd är verifierade genom kodläsning. Testsviten går att köra: `118 passed, 6 skipped` med ett **känt fel som fanns före genomgången** (`test_withings_handler.py::test_sync_profile_weight_from_db`) plus en testmodul som inte kan samlas in headless (`test_charts_view_tabs.py`) – se `Q-9` punkt 7. **Antigravity ska köra `pytest` före och efter varje åtgärd** för att fånga regressioner.
 
 **Arbetsordning:** ta `B-1`, `B-2`, `B-3`, `B-4`, `UI-1` först – de är små, avgränsade och ger direkt märkbar effekt. `S-13`, `S-14` och `S-15` bör tas som ett separat säkerhetspass eftersom de kräver designbeslut. Se även `Q-10` om `.agents/rules/compile.md`.
 
@@ -296,6 +296,25 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 
 ---
 
+### [x] S-17: Hårdkodade databasuppgifter borta ur repot
+- **Fil:** [garmin_db.py:41-114](garmin_db.py) (`_DB_ENV_TEMPLATE`, `_write_db_env_template`, `_warn_if_world_readable`, `load_db_env`), [healthchat_web.service](healthchat_web.service), [.env.example](.env.example), [tests/test_no_hardcoded_secrets.py](tests/test_no_hardcoded_secrets.py), [tests/test_db_config.py](tests/test_db_config.py)
+- **Problem:** Databaslösenordet låg hårdkodat på två ställen: som `Environment=` i systemd-enheten och som värde i mallen `load_db_env()` skrev till `~/.healthchat/db.env` vid första körningen. Den senare innebar att **varje installation fick samma lösenord**. Tre följdproblem hittades i samma kod:
+  - Mallfilen skapades med processens umask, alltså typiskt `0644` – läsbar för alla användare på systemet.
+  - `load_db_env()` gjorde `os.environ[k] = v` trots att docstringen sa "if missing". En fil i användarens hemkatalog kunde därmed **skriva över** det driftmiljön satt via `EnvironmentFile`.
+  - Tomma värden (`MARIADB_PASSWORD=`) sattes som tom sträng i miljön i stället för att hoppas över.
+- **Åtgärdat:**
+  1. `_DB_ENV_TEMPLATE` innehåller inga värden alls – varje rad är utkommenterad. Operatören fyller i själv, och appen felar med `"MARIADB_PASSWORD saknas"` tills dess.
+  2. Mallen skapas med `os.open(..., O_EXCL, 0o600)` så att den aldrig ens kortvarigt är läsbar för andra.
+  3. `_warn_if_world_readable()` loggar en varning med `chmod`-kommandot när en env-fil har för vida rättigheter.
+  4. `os.environ.setdefault()` i stället för direkt tilldelning – miljön vinner alltid över filer.
+  5. Tomma värden hoppas över.
+  6. Systemd-enheten läser `EnvironmentFile=/etc/healthchat/db.env` med en kommentar om varför `Environment=` är olämpligt (unit-filen ligger i git, och `systemctl show` exponerar `Environment=` för alla användare på systemet).
+  7. `.env.example` har tom platshållare för lösenordet, dokumenterar `chmod 600` och de tre platser filen kan ligga på.
+- **Regressionsskydd:** [tests/test_no_hardcoded_secrets.py](tests/test_no_hardcoded_secrets.py) skannar alla källfiler efter hemlighetsliknande nycklar som tilldelas literaler, och kontrollerar särskilt systemd-enheten, `.env.example` och `_DB_ENV_TEMPLATE`. Testet är verifierat genom att lösenordsmönstren återinfördes tillfälligt – då fallerar 3 av 4 tester. Det rapporterar **plats och nyckelnamn, aldrig värdet**. Testfixturer under `tests/` skannas inte, eftersom de medvetet använder påhittade uppgifter.
+- **Kvarstår:** lösenordet ligger kvar i git-historiken sedan `7db86ef` och **måste roteras** – se `TLS-3` punkt 2.
+
+---
+
 ### [ ] Q-1: `/api/user/profile/fetch_external` hämtar inget externt
 - **Fil:** [server.py:692-701](server.py), [profile_sync.py:14-20](profile_sync.py), [static/app.js:1232](static/app.js)
 - **Problem:** `fetch_external_profile_metrics` anropas alltid som `fetch_external_profile_metrics(db=db)` – parametrarna `garmin_handler`, `fitbit_handler`, `strava_handler` och `withings_handler` skickas **aldrig** in från någon plats i repot (`grep` bekräftar att ingen av handlarna instansieras i webbvägen). Hela Garmin/Fitbit/Strava/Withings-logiken i [profile_sync.py:77-200](profile_sync.py) är död kod, och endpointen läser i praktiken bara den lokala databasen – trots att namnet, docstringen och knappen i UI:t lovar något annat. `sources`-listan i svaret innehåller bara `"Databas"`.
@@ -376,6 +395,7 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
   4. **Aliasing av DEK vid samtidig utloggning.** [server.py:386](server.py) – `session.clear()` nollar den `bytearray` som `bind_user_db` redan delat ut till en pågående request i en annan tråd. Osannolikt men reellt. **Åtgärd:** kopiera DEK:en in i `GarminDatabase` i stället för att dela referensen.
   5. **`delete_account` kräver inget lösenord.** [server.py:736-751](server.py) – till skillnad från `change_password` och `rotate_recovery_key`. **Åtgärd:** kräv `current_password` för en irreversibel operation.
   6. **Rate-limiting är process-lokal.** [auth.py:98-122](auth.py) – med flera Uvicorn-workers multipliceras gränsen med antalet workers. **Åtgärd:** samordna med `S-7`-lösningen (räknare i databasen).
+  7. **Två testmoduler refererar till `temp/`.** [tests/test_withings_handler.py:108-112](tests/test_withings_handler.py) importerar `HealthChatDesktop` och [tests/test_charts_view_tabs.py:4-9](tests/test_charts_view_tabs.py) importerar `charts_view` + `tkinter` – båda modulerna flyttades till den gitignorerade `temp/` i `33ae88d`. Det första testet **fallerar** på en ren klon, det andra kan inte ens samlas in utan `tkinter`. Felet fanns före denna genomgång (verifierat mot `HEAD`). **Åtgärd:** flytta de desktopberoende testerna till samma plats som koden, eller markera dem med `pytest.importorskip` så att sviten är grön på en ren klon.
 - **Acceptanskriterier:** Varje delpunkt åtgärdad eller uttryckligen avfärdad med motivering i denna fil.
 
 ---
@@ -443,15 +463,15 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 
 ---
 
-### [ ] TLS-3: Databastrafiken går okrypterad över LAN – och lösenordet ligger i repot
+### [ ] TLS-3: Databastrafiken går okrypterad över LAN (lösenordsdelen åtgärdad, se `S-17`)
 - **Fil:** [healthchat_web.service:13](healthchat_web.service), [garmin_db.py:41-58](garmin_db.py) (`load_db_env`), [garmin_db.py:151-160](garmin_db.py) (`_init_mariadb_pool`), [garmin_db.py:76-97](garmin_db.py) (`get_mariadb_connection`)
 - **Problem:** Tre saker som förstärker varandra:
   1. **Ingen TLS mot databasen.** `_init_mariadb_pool` har stöd för TLS, men aktiverar det **bara om filen `~/.healthchat/ca.pem` råkar finnas** ([garmin_db.py:157-158](garmin_db.py)). Service-filen sätter varken `MARIADB_SSL_CA` eller `MARIADB_REQUIRE_TLS=1`, så `ssl_config` blir `None` och anslutningen går i klartext. Databasen ligger på `192.168.101.106` – en **annan maskin** – så all trafik passerar nätverket. Innehållet är visserligen envelope-krypterat, men **DEK:en skickas också** över samma anslutning (se `S-13`), liksom e-postadresser, lösenordshashar och hela sessionstabellen.
   2. **`get_mariadb_connection()` har inget TLS-stöd alls** ([garmin_db.py:90-97](garmin_db.py)) – ingen `ssl`-parameter. Migreringsskriptet [migrate_sqlite_to_mariadb.py](migrate_sqlite_to_mariadb.py) använder den och skickar alltså hela databasen i klartext över nätet.
-  3. **Databaslösenordet är committat i klartext.** Värdet står på [healthchat_web.service:13](healthchat_web.service) och som auto-genererad default på [garmin_db.py:53](garmin_db.py) – samma sträng på båda ställena – och finns i git-historiken sedan `7db86ef`. (Värdet återges inte här; läs det på plats i filerna.) En okrypterad anslutning med ett publikt känt lösenord mot en databas på LAN är en fullständig kompromiss av hälsodatan för vem som helst med nätverksåtkomst.
+  3. ~~**Databaslösenordet är committat i klartext.**~~ ✅ **Åtgärdat i koden** – se `S-17`. Värdet ligger dock kvar i git-historiken sedan `7db86ef`, så **lösenordet måste fortfarande roteras**.
 - **Åtgärd:**
-  1. **Rotera lösenordet omgående** – det ska betraktas som läckt. Ta bort det ur [healthchat_web.service](healthchat_web.service) (använd `EnvironmentFile=/etc/healthchat/db.env` med `0600` och ägare `healthchat`) och ur defaulten i [garmin_db.py:53](garmin_db.py) – låt `load_db_env` skapa en mall **utan** lösenord och låta appen fela med tydligt meddelande i stället.
-  2. Historikomskrivning (`git filter-repo`) krävs för att få bort det ur gamla commits. Är repot privat och lösenordet roterat kan det vara acceptabelt att bara rotera – ta ett medvetet beslut och skriv ned det.
+  1. ✅ Klart – lösenordet är borta ur arbetskopian (`S-17`).
+  2. ⚠️ **Kvarstår: rotera lösenordet.** Det ligger kvar i git-historiken och ska betraktas som läckt. Historikomskrivning (`git filter-repo`) krävs för att få bort det ur gamla commits; är repot privat och lösenordet roterat kan det vara acceptabelt att bara rotera – ta ett medvetet beslut och skriv ned det.
   3. Sätt `MARIADB_REQUIRE_TLS=1` och `MARIADB_SSL_CA=/etc/healthchat/ca.pem` i driftmiljön. Koden kastar då redan i dag om certifikatet saknas ([garmin_db.py:159-160](garmin_db.py)) – bra beteende, se till att det används.
   4. Lägg till `ssl`-stöd i `get_mariadb_connection()` med samma logik som poolen, så att migreringsskriptet inte blir en bakdörr.
   5. Konfigurera MariaDB-servern med `require_secure_transport=ON` och ge användaren `REQUIRE SSL` (`ALTER USER 'healthchat'@'%' REQUIRE SSL`), så att en felkonfigurerad klient **inte kan** ansluta i klartext.
@@ -459,8 +479,9 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 - **Acceptanskriterier:**
   1. `SHOW STATUS LIKE 'Ssl_cipher';` i en session öppnad av appen returnerar en chiffersvit, inte tom sträng.
   2. En anslutning utan TLS avvisas av servern.
-  3. Inget hårdkodat lösenord kvar i arbetskopian – varken i [healthchat_web.service](healthchat_web.service) eller i `load_db_env` ([garmin_db.py:41-58](garmin_db.py)).
+  3. ✅ Inget hårdkodat lösenord kvar i arbetskopian – bevakas av [tests/test_no_hardcoded_secrets.py](tests/test_no_hardcoded_secrets.py).
   4. Migreringsskriptet ansluter med TLS.
+  5. Lösenordet är roterat på MariaDB-servern.
 
 ---
 
