@@ -22,9 +22,107 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 
 **Verifieringsstatus:** `B-2`, `B-3` och `B-6` är reproducerade med körbara skript. Övriga fynd är verifierade genom kodläsning. Testsviten går att köra: `118 passed, 6 skipped` med ett **känt fel som fanns före genomgången** (`test_withings_handler.py::test_sync_profile_weight_from_db`) plus en testmodul som inte kan samlas in headless (`test_charts_view_tabs.py`) – se `Q-9` punkt 7. **Antigravity ska köra `pytest` före och efter varje åtgärd** för att fånga regressioner.
 
-**Arbetsordning:** ta `B-1`, `B-2`, `B-3`, `B-4`, `UI-1` först – de är små, avgränsade och ger direkt märkbar effekt. `S-13`, `S-14` och `S-15` bör tas som ett separat säkerhetspass eftersom de kräver designbeslut. Se även `Q-10` om `.agents/rules/compile.md`.
+**Arbetsordning:** se avsnittet *Arbetskö för Antigravity* nedan – uppgifterna är grupperade i omgångar med en commit per omgång.
 
-**Driftsättning är ett eget spår.** `TLS-1` och `TLS-3` är infrastrukturarbete på servern, inte kodändringar, och kan köras parallellt med buggfixarna. `TLS-3` innehåller dessutom ett **committat databaslösenord** som bör roteras omgående, oberoende av allt annat i tavlan.
+---
+
+## ▶️ Arbetskö för Antigravity
+
+> Uppgifterna nedan är grupperade i **omgångar**. Varje omgång rör i stort sett samma filer och bör bli
+> **en commit / en PR**. Ta dem uppifrån och ned – ordningen är vald så att senare omgångar inte river
+> upp tidigare arbete. Detaljerna för varje ID står längre ned i dokumentet.
+>
+> **Före varje omgång:** `pytest` ska vara grönt (se *Miljö* nedan för vad som måste installeras).
+> **Efter varje omgång:** `pytest` igen, plus de acceptanskriterier som står under respektive uppgift.
+> Bocka av `[ ]` → `[x]` i den här filen som en del av commiten.
+
+### Omgång 1 – Trasig funktionalitet (börja här)
+| Ordning | ID | Fil | Omfattning |
+|---|---|---|---|
+| 1 | `B-1` | `server.py`, `static/app.js` | AI-chatten visar inget svar. Störst användarpåverkan, helt isolerad. |
+| 2 | `B-4` | `server.py:218` | Omkastade argument – i praktiken en rad. |
+| 3 | `B-3` | `server.py:539`, `calorie_calc.py` | BMR blir tyst 0. |
+| 4 | `B-2` | `garmin_db.py:863` | Dedupliceringen slår ihop olika pass. Kräver nya tester. |
+
+Ingen av dessa kräver designbeslut. Alla fyra har reproducerbara felfall beskrivna i sina uppgifter.
+
+### Omgång 2 – Frontend
+| Ordning | ID | Fil | Omfattning |
+|---|---|---|---|
+| 5 | `UI-1` | `static/app.js` | Ta bort påhittade hälsovärden och `generateMockSeries`. |
+| 6 | `UI-2` | `static/app.js` | Escapa data i `innerHTML`. |
+
+Gör dem tillsammans – de rör samma renderingsfunktioner. `UI-2` blir enklare efter `UI-1`, eftersom
+flera `innerHTML`-block försvinner helt när fallbackvärdena tas bort.
+
+### Omgång 3 – Webbsäkerhet i appen
+| Ordning | ID | Fil | Omfattning |
+|---|---|---|---|
+| 7 | `S-15` | `server.py:44-51` | CORS-lista ur miljövariabel. |
+| 8 | `TLS-2` | `server.py` | `secure=True` på cookien + säkerhetsheaders som middleware. |
+
+Samma fil och samma uppstartsblock – gör dem i en omgång. **`TLS-2` punkt 1 (`COOKIE_SECURE`) får inte
+slås på i produktion förrän `TLS-1` är klar**, annars slutar inloggningen fungera över HTTP. Låt
+default vara `1` men dokumentera flaggan.
+
+### Omgång 4 – Databaslagret
+| Ordning | ID | Fil | Omfattning |
+|---|---|---|---|
+| 9 | `TLS-3` (kod) | `garmin_db.py:117-138` | `ssl`-stöd i `get_mariadb_connection()` + värdnamnsvalidering. |
+| 10 | `PF-7` | `garmin_db.py`, `server.py` | Delad connection pool i stället för en per request. |
+| 11 | `S-14` | `garmin_db.py`, `server.py` | Kräv MariaDB i webbläget. **Designbeslut – läs uppgiften först.** |
+
+`S-14` ändrar hur appen beter sig vid databasfel och bör tas efter `PF-7`, eftersom båda rör
+`GarminDatabase.__init__`. `TLS-3`:s serverdel (certifikat, `require_secure_transport`) är
+operatörsarbete, se nedan.
+
+### Omgång 5 – Sessionshantering
+| Ordning | ID | Fil | Omfattning |
+|---|---|---|---|
+| 12 | `S-13` | `server.py`, `init_mariadb.sql` | DEK:en ur databasen + sessionsförfallotid. **Designbeslut – välj väg A eller B i uppgiften och stäm av med ägaren innan du börjar.** |
+
+Största enskilda ändringen i tavlan. Ta den separat, inte ihop med något annat.
+
+### Omgång 6 – Integrationer och robusthet
+`B-5` (Garmin-MFA) · `B-6` (Withings felmeddelande) · `B-7` (OAuth-tokens) · `S-16` (keyring vid kontoradering)
+
+Fristående från varandra; kan tas i valfri ordning eller delas upp.
+
+### Omgång 7 – Kodkvalitet
+`Q-1` … `Q-10` samt `TLS-4`, `TLS-5`, `TLS-6`.
+
+Börja med **`Q-10`** (agentregeln pekar på filer i den gitignorerade `temp/`) och **`TLS-6`**
+(`requirements.txt` saknar webbappens beroenden) – båda hindrar nästa agent från att komma igång
+på en ren klon. `Q-9` punkt 7 (två testmoduler som importerar från `temp/`) hör ihop med dem.
+
+---
+
+### 🔧 Operatörsarbete – kan inte göras av en agent
+
+Dessa kräver åtkomst till servern och databasen. De blockerar inte kodarbetet ovan.
+
+- [ ] **Rotera databaslösenordet.** Kvarstår från `S-17`; värdet ligger i git-historiken sedan `7db86ef`. Se checklistan i `TLS-3`.
+- [x] **Skapa `/etc/healthchat/db.env`** med rättigheterna `0600` och ägare `healthchat`. Klart.
+- [ ] **`TLS-1`: reverse proxy med TLS** framför uvicorn, plus `--host 127.0.0.1` i unit-filen.
+- [ ] **`TLS-3`: TLS mot MariaDB** – CA-certifikat på plats, `MARIADB_REQUIRE_TLS=1`, `require_secure_transport=ON` på servern.
+
+---
+
+### Miljö – så här får du testsviten att köra
+
+Repot saknar webbappens beroenden i `requirements.txt` (det är `TLS-6`). Tills den är fixad:
+
+```bash
+pip install pytest pymysql dbutils cryptography argon2-cffi keyring \
+            fastapi "uvicorn[standard]" httpx email-validator requests garth garminconnect
+pytest --ignore=tests/test_charts_view_tabs.py -q
+```
+
+Förväntat utfall i dagsläget: **118 passed, 6 skipped, 1 failed**. Det enda felet
+(`test_withings_handler.py::test_sync_profile_weight_from_db`) är **känt sedan tidigare** och beror på
+att `HealthChatDesktop.py` ligger i den gitignorerade `temp/` – inte på något du gjort. `pytest` utan
+`--ignore` avbryter vid insamling eftersom `test_charts_view_tabs.py` kräver `tkinter`. Båda hanteras
+av `Q-9` punkt 7.
 
 ---
 
@@ -471,7 +569,32 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
   3. ~~**Databaslösenordet är committat i klartext.**~~ ✅ **Åtgärdat i koden** – se `S-17`. Värdet ligger dock kvar i git-historiken sedan `7db86ef`, så **lösenordet måste fortfarande roteras**.
 - **Åtgärd:**
   1. ✅ Klart – lösenordet är borta ur arbetskopian (`S-17`).
-  2. ⚠️ **Kvarstår: rotera lösenordet.** Det ligger kvar i git-historiken och ska betraktas som läckt. Historikomskrivning (`git filter-repo`) krävs för att få bort det ur gamla commits; är repot privat och lösenordet roterat kan det vara acceptabelt att bara rotera – ta ett medvetet beslut och skriv ned det.
+  2. ⚠️ **Kvarstår: rotera lösenordet.** Det ligger kvar i git-historiken och ska betraktas som läckt. Operatörschecklista:
+
+     ```sql
+     -- På MariaDB-servern. Samma nya värde som i /etc/healthchat/db.env.
+     ALTER USER 'healthchat'@'192.168.101.%' IDENTIFIED BY '<nytt lösenord>';
+     ALTER USER 'healthchat'@'localhost'     IDENTIFIED BY '<nytt lösenord>';
+     FLUSH PRIVILEGES;
+     ```
+
+     ```bash
+     # På applikationsservern, efter att db.env uppdaterats:
+     sudo systemctl daemon-reload && sudo systemctl restart healthchat_web
+     sudo journalctl -u healthchat_web -n 50 --no-pager | grep -iE "mariadb|saknas|sqlite"
+     ```
+
+     Leta efter `Connected to MariaDB at …`. Står det i stället `Failed to connect to MariaDB pool,
+     falling back to SQLite` gick lösenordet **inte** fram – och appen serverar då delad SQLite-data
+     i stället för att stanna (det är `S-14`). Kontrollera detta uttryckligen; felet är annars tyst.
+
+     **Formatet i `db.env`:** innehåller lösenordet `$`, mellanslag eller citattecken ska hela värdet
+     omges av enkla citattecken (`MARIADB_PASSWORD='mitt$lösen'`). Både systemd och parsern i
+     `load_db_env()` strippar citattecken. Kommentarer måste stå på egen rad, inte efter ett värde.
+
+     Historikomskrivning (`git filter-repo`) krävs för att få bort värdet ur gamla commits; är repot
+     privat och lösenordet roterat kan det vara acceptabelt att bara rotera – ta ett medvetet beslut
+     och skriv ned det här.
   3. Sätt `MARIADB_REQUIRE_TLS=1` och `MARIADB_SSL_CA=/etc/healthchat/ca.pem` i driftmiljön. Koden kastar då redan i dag om certifikatet saknas ([garmin_db.py:159-160](garmin_db.py)) – bra beteende, se till att det används.
   4. Lägg till `ssl`-stöd i `get_mariadb_connection()` med samma logik som poolen, så att migreringsskriptet inte blir en bakdörr.
   5. Konfigurera MariaDB-servern med `require_secure_transport=ON` och ge användaren `REQUIRE SSL` (`ALTER USER 'healthchat'@'%' REQUIRE SSL`), så att en felkonfigurerad klient **inte kan** ansluta i klartext.
