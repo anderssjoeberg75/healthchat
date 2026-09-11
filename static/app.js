@@ -453,7 +453,7 @@ function extractChartData(dataset, dateKey, valueKey, fallbackVal = 0) {
 }
 
 
-// --- 8 COROS-INSPIRED CHARTS (CHART.JS) ---
+// --- 8 COROS-INSPIRED CHARTS (CHART.JS) MATCHING DESKTOP APP ---
 
 function renderHealthCharts() {
   if (!cachedSummary) return;
@@ -463,19 +463,71 @@ function renderHealthCharts() {
   const fallbackDates = generateDatesForRange(days);
   const count = fallbackDates.length;
 
-  // 1. Weight Chart (Blue line)
-  const bodyComp = history.body_composition || [];
+  // 1. Weight Chart (Blue line, matching Desktop ax_health_weight)
+  const bodyComp = (history.body_composition || []).filter(b => b.weight_kg && Number(b.weight_kg) > 0);
   const weightExt = extractChartData(bodyComp, 'date', 'weight_kg');
   const weightLabels = weightExt ? weightExt.labels : fallbackDates;
   const weightData = weightExt ? weightExt.data : generateMockSeries(98.5, 1.2, count, 1, days);
   createChart('chart-weight', 'line', {
     labels: weightLabels,
-    datasets: [{ label: 'Vikt (kg)', data: weightData, borderColor: '#0078D4', backgroundColor: 'rgba(0,120,212,0.1)', tension: 0.3, fill: true }]
+    datasets: [{
+      label: 'Vikt (kg)',
+      data: weightData,
+      borderColor: '#0078D4',
+      backgroundColor: 'rgba(0,120,212,0.1)',
+      pointBackgroundColor: '#0078D4',
+      pointBorderColor: '#0078D4',
+      pointStyle: 'rect',
+      pointRadius: weightLabels.length > 50 ? 2 : 4,
+      tension: 0.2,
+      fill: true
+    }]
   });
 
-  // 2. Calories Stacked Bar Chart (Orange resting, Blue active, Red workout)
-  const cals = history.calorie_burn || [];
-  const calExt = extractChartData(cals, 'date', item => item);
+  // 2. Calories Stacked Bar Chart (Vila BMR, Steg, Träning matching Desktop ax_health_calories)
+  const calsMap = {};
+  (history.daily_summary || []).forEach(d => {
+    const dt = String(d.date || '').slice(0, 10);
+    if (!dt) return;
+    const tot = Number(d.total_calories || 0);
+    const act = Number(d.active_calories || 0);
+    const rest = Math.max(0, tot - act);
+    calsMap[dt] = {
+      date: dt,
+      resting_burn: rest,
+      steps_burn: act,
+      workout_burn: 0,
+      total_burn: tot
+    };
+  });
+
+  (history.activities || []).forEach(a => {
+    const dt = String(a.date || a.start_time || '').slice(0, 10);
+    if (!dt) return;
+    const wCals = Number(a.calories || 0);
+    if (wCals > 0) {
+      if (!calsMap[dt]) {
+        calsMap[dt] = { date: dt, resting_burn: 0, steps_burn: 0, workout_burn: 0, total_burn: 0 };
+      }
+      calsMap[dt].workout_burn += wCals;
+      calsMap[dt].total_burn += wCals;
+    }
+  });
+
+  (history.calorie_burn || []).forEach(c => {
+    const dt = String(c.date || '').slice(0, 10);
+    if (!dt) return;
+    calsMap[dt] = {
+      date: dt,
+      resting_burn: Number(c.resting_burn || 0),
+      steps_burn: Number(c.steps_burn || 0),
+      workout_burn: Number(c.workout_burn || 0),
+      total_burn: Number(c.total_burn || 0)
+    };
+  });
+
+  const mergedCals = Object.values(calsMap).filter(c => (c.resting_burn + c.steps_burn + c.workout_burn) > 0);
+  const calExt = extractChartData(mergedCals, 'date', item => item);
   const calLabels = calExt ? calExt.labels : fallbackDates;
   const restingData = calExt ? calExt.raw.map(c => Number(c.resting_burn || 0)) : generateMockSeries(2150, 40, count, 2, days);
   const activeData = calExt ? calExt.raw.map(c => Number(c.steps_burn || 0)) : generateMockSeries(420, 90, count, 3, days);
@@ -483,23 +535,53 @@ function renderHealthCharts() {
   createChart('chart-calories', 'bar', {
     labels: calLabels,
     datasets: [
-      { label: 'Vilo-BMR', data: restingData, backgroundColor: '#F59E0B' },
-      { label: 'Aktivitet', data: activeData, backgroundColor: '#0284C7' },
-      { label: 'Träning', data: workoutData, backgroundColor: '#DC2626' }
+      { label: 'Vila (BMR)', data: restingData, backgroundColor: '#F59E0B' },
+      { label: 'Steg / Aktivitet', data: activeData, backgroundColor: '#0078D4' },
+      { label: 'Träning', data: workoutData, backgroundColor: '#EF4444' }
     ]
   }, { stacked: true });
 
-  // 3. RHR Chart (Blue line)
-  const daily = history.daily_summary || [];
-  const rhrExt = extractChartData(daily, 'date', 'resting_hr');
-  const rhrLabels = rhrExt ? rhrExt.labels : fallbackDates;
-  const rhrData = rhrExt ? rhrExt.data : generateMockSeries(51, 3, count, 5, days);
-  createChart('chart-rhr', 'line', {
-    labels: rhrLabels,
-    datasets: [{ label: 'Vilo-puls (bpm)', data: rhrData, borderColor: '#0284C7', tension: 0.3 }]
+  // 3. Resting Heart Rate / Vilopuls (Pink/rose matching Desktop ax_health_rhr)
+  const rhrMap = {};
+  (history.daily_summary || []).forEach(d => {
+    const dt = String(d.date || '').slice(0, 10);
+    const rhr = Number(d.resting_hr || 0);
+    if (dt && rhr > 0) rhrMap[dt] = rhr;
+  });
+  (history.sleep || []).forEach(s => {
+    const dt = String(s.date || '').slice(0, 10);
+    if (!dt) return;
+    let rhr = Number(s.resting_hr || s.resting_heart_rate || 0);
+    if (!rhr && s.raw_json) {
+      try {
+        const raw = typeof s.raw_json === 'string' ? JSON.parse(s.raw_json) : s.raw_json;
+        rhr = Number(raw.restingHeartRate || raw.resting_hr || 0);
+      } catch (e) {}
+    }
+    if (rhr > 0) rhrMap[dt] = rhr;
   });
 
-  // 4. Nattlig HRV Trend (Emerald line with triangle markers matching Desktop app)
+  const sortedRhrDates = Object.keys(rhrMap).sort();
+  const hasRhr = sortedRhrDates.length > 0;
+  const rhrLabels = hasRhr ? sortedRhrDates.map(d => d.slice(5)) : fallbackDates;
+  const rhrData = hasRhr ? sortedRhrDates.map(d => rhrMap[d]) : generateMockSeries(51, 3, count, 5, days);
+  createChart('chart-rhr', 'line', {
+    labels: rhrLabels,
+    datasets: [{
+      label: 'Vilo-puls (bpm)',
+      data: rhrData,
+      borderColor: '#EC4899',
+      backgroundColor: 'rgba(236, 72, 153, 0.1)',
+      pointBackgroundColor: '#EC4899',
+      pointBorderColor: '#EC4899',
+      pointStyle: 'circle',
+      pointRadius: rhrLabels.length > 50 ? 2 : 3,
+      borderWidth: 2,
+      tension: 0.2
+    }]
+  });
+
+  // 4. Nattlig HRV Trend (Emerald green matching Desktop ax_health_hrv)
   const hrv = history.hrv || [];
   const hrvExt = extractChartData(hrv, 'date', item => {
     if (item.last_night_avg !== undefined && item.last_night_avg !== null) {
@@ -519,14 +601,14 @@ function renderHealthCharts() {
       pointBackgroundColor: '#10B981',
       pointBorderColor: '#10B981',
       pointStyle: 'triangle',
-      pointRadius: hrvLabels.length > 50 ? 3 : 4,
+      pointRadius: hrvLabels.length > 50 ? 2 : 4,
       borderWidth: 2,
       tension: 0.15
     }]
   });
 
-  // 5. Sleep Duration Bar Chart (Purple bars)
-  const sleep = history.sleep || [];
+  // 5. Sleep Duration Bar Chart (Purple matching Desktop ax_health_sleep)
+  const sleep = (history.sleep || []).filter(s => (s.total_sleep_hours !== undefined && Number(s.total_sleep_hours) > 0));
   const sleepExt = extractChartData(sleep, 'date', 'total_sleep_hours');
   const sleepLabels = sleepExt ? sleepExt.labels : fallbackDates;
   const sleepData = sleepExt ? sleepExt.data : generateMockSeries(7.5, 0.8, count, 7, days);
@@ -535,33 +617,97 @@ function renderHealthCharts() {
     datasets: [{ label: 'Sömntid (timmar)', data: sleepData, backgroundColor: '#8B5CF6' }]
   });
 
-  // 6. Sleep Score Line Chart (Green line)
-  const sleepScoreExt = extractChartData(sleep, 'date', 'sleep_score');
-  const sleepScoreLabels = sleepScoreExt ? sleepScoreExt.labels : fallbackDates;
-  const sleepScoreData = sleepScoreExt ? sleepScoreExt.data : generateMockSeries(83, 7, count, 8, days);
-  createChart('chart-sleep-score', 'line', {
-    labels: sleepScoreLabels,
-    datasets: [{ label: 'Sömnkvalitet (0-100)', data: sleepScoreData, borderColor: '#10B981', tension: 0.3 }]
+  // 6. Sleep Quality / Score Trend (Purple matching Desktop ax_health_sleep_score)
+  const scoreMap = {};
+  (history.sleep || []).forEach(s => {
+    const dt = String(s.date || s.start_time || '').slice(0, 10);
+    if (!dt) return;
+    let score = Number(s.sleep_score || s.score || 0);
+    if (!score && s.raw_json) {
+      try {
+        const raw = typeof s.raw_json === 'string' ? JSON.parse(s.raw_json) : s.raw_json;
+        if (raw && typeof raw === 'object') {
+          const dto = raw.dailySleepDTO || {};
+          const scoresD = dto.sleepScores || raw.sleepScores || {};
+          if (scoresD && typeof scoresD === 'object' && scoresD.overall) {
+            const ov = scoresD.overall;
+            score = typeof ov === 'object' ? Number(ov.value || 0) : Number(ov || 0);
+          }
+          if (!score) {
+            score = Number(dto.sleepQualityScore || (dto.overallSleepScore && dto.overallSleepScore.value) || 0);
+          }
+        }
+      } catch (e) {}
+    }
+    if (score > 0) scoreMap[dt] = score;
   });
 
-  // 7. Body Battery Line Chart (Purple line)
+  const sortedScoreDates = Object.keys(scoreMap).sort();
+  const hasScore = sortedScoreDates.length > 0;
+  const scoreLabels = hasScore ? sortedScoreDates.map(d => d.slice(5)) : fallbackDates;
+  const scoreData = hasScore ? sortedScoreDates.map(d => scoreMap[d]) : generateMockSeries(83, 7, count, 8, days);
+  createChart('chart-sleep-score', 'line', {
+    labels: scoreLabels,
+    datasets: [{
+      label: 'Sömnkvalitet (0-100)',
+      data: scoreData,
+      borderColor: '#8B5CF6',
+      backgroundColor: 'rgba(139, 92, 246, 0.1)',
+      pointBackgroundColor: '#8B5CF6',
+      pointBorderColor: '#8B5CF6',
+      pointStyle: 'rect',
+      pointRadius: scoreLabels.length > 50 ? 2 : 4,
+      borderWidth: 2,
+      tension: 0.2
+    }]
+  });
+
+  // 7. Body Battery Uppladdat (+) (Emerald green matching Desktop ax_health_bb)
   const bb = history.body_battery || [];
-  const bbExt = extractChartData(bb, 'date', 'highest_level');
+  const bbExt = extractChartData(bb, 'date', item => {
+    const val = item.charged !== undefined && item.charged !== null ? item.charged : item.highest_level;
+    return val !== undefined ? Number(val) : 0;
+  });
   const bbLabels = bbExt ? bbExt.labels : fallbackDates;
   const bbData = bbExt ? bbExt.data : generateMockSeries(86, 9, count, 9, days);
   createChart('chart-bb', 'line', {
     labels: bbLabels,
-    datasets: [{ label: 'Max Body Battery', data: bbData, borderColor: '#8B5CF6', tension: 0.3 }]
+    datasets: [{
+      label: 'Body Battery Uppladdat (+)',
+      data: bbData,
+      borderColor: '#10B981',
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      pointBackgroundColor: '#10B981',
+      pointBorderColor: '#10B981',
+      pointStyle: 'circle',
+      pointRadius: bbLabels.length > 50 ? 2 : 3,
+      borderWidth: 2,
+      tension: 0.2
+    }]
   });
 
-  // 8. Stress Level Line Chart (Amber line)
+  // 8. Genomsnittlig Stress Level (Coral/orange-red matching Desktop ax_health_stress)
   const stress = history.stress || [];
-  const stressExt = extractChartData(stress, 'date', 'avg_stress_level');
+  const stressExt = extractChartData(stress, 'date', item => {
+    const val = item.average !== undefined && item.average !== null ? item.average : item.avg_stress_level;
+    return val !== undefined ? Number(val) : 0;
+  });
   const stressLabels = stressExt ? stressExt.labels : fallbackDates;
   const stressData = stressExt ? stressExt.data : generateMockSeries(25, 5, count, 10, days);
   createChart('chart-stress', 'line', {
     labels: stressLabels,
-    datasets: [{ label: 'Snittstress', data: stressData, borderColor: '#F59E0B', tension: 0.3 }]
+    datasets: [{
+      label: 'Genomsnittlig Stress',
+      data: stressData,
+      borderColor: '#FF5722',
+      backgroundColor: 'rgba(255, 87, 34, 0.1)',
+      pointBackgroundColor: '#FF5722',
+      pointBorderColor: '#FF5722',
+      pointStyle: 'rect',
+      pointRadius: stressLabels.length > 50 ? 2 : 3,
+      borderWidth: 2,
+      tension: 0.2
+    }]
   });
 }
 
@@ -577,8 +723,8 @@ function renderTrainingCharts() {
     activities.forEach(a => {
       const d = String(a.date || a.start_time || '').slice(0, 10);
       if (d) {
-        const durHours = (a.duration_min || (a.duration_sec ? a.duration_sec / 60 : 0)) / 60.0;
-        actByDate[d] = (actByDate[d] || 0) + durHours;
+        const distKm = Number(a.distance_km || 0);
+        actByDate[d] = (actByDate[d] || 0) + distKm;
       }
     });
     const sortedDates = Object.keys(actByDate).sort();
@@ -586,12 +732,12 @@ function renderTrainingCharts() {
     const actData = sortedDates.map(d => Number(actByDate[d].toFixed(2)));
     createChart('chart-training-volume', 'bar', {
       labels: actLabels,
-      datasets: [{ label: 'Träningsvolym (timmar)', data: actData, backgroundColor: '#0284C7' }]
+      datasets: [{ label: 'Träningsdistans (km)', data: actData, backgroundColor: '#0078D4' }]
     });
   } else {
     createChart('chart-training-volume', 'bar', {
       labels: fallbackDates,
-      datasets: [{ label: 'Träningsvolym (timmar)', data: generateMockSeries(4.5, 2.0, count, 11, days), backgroundColor: '#0284C7' }]
+      datasets: [{ label: 'Träningsdistans (km)', data: generateMockSeries(4.5, 2.0, count, 11, days), backgroundColor: '#0078D4' }]
     });
   }
 
