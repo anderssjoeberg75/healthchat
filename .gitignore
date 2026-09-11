@@ -53,6 +53,7 @@ graphify-out/
 db.env
 recovery_key_*.txt
 
-# Temporary scratch directory
+# Temporary scratch directory & Desktop backup directory
 scratch/
+temp/
 
