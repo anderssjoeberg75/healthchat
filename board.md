@@ -539,7 +539,77 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
   3. Lägg till ett test som verifierar varningen och `strict`-beteendet.
 - **Acceptanskriterier:** en okänd datumsträng ger en loggad varning; samtliga befintliga format parsas oförändrat.
 
+## 🔧 R-spåret – Återställning av funktioner efter webb-migreringen
+
+> **Bakgrund 2026-09-11:** Webb-migreringen på `main` (`7db86ef`) behöll domänlogiken
+> (skrivbordsappen, handlers, MariaDB, kryptering, HR-zoner) men webblagret exponerade bara
+> en bråkdel av den: 10 endpoints mot skrivbordsappens ~20 menyfunktioner. Allt som *hämtar*
+> data och alla produktivitetsfunktioner saknades. Det här spåret återställer dem — som webbapp.
+
+### [x] R-1: Check-in och synk fanns inte alls
+- **Fil:** [web_sync.py](web_sync.py), [server.py](server.py)
+- **Problem:** Ingen endpoint rörde Garmin, Fitbit, Withings eller Strava. Webbappen kunde bara visa data som redan låg i databasen — ny data gick bara att hämta genom att starta den gamla skrivbordsappen.
+- **Åtgärdat:** `POST /api/checkin` (alla källor eller en namngiven), `full=true` för hela historiken, `GET /api/sync/status` för progress. Dagantalen är skrivbordsappens (Garmin 30, Fitbit 7, Withings 365, Strava 30; full synk 3650/365/3650/3650).
+
+### [x] R-2: Garmin-inloggning och MFA saknades
+- **Fil:** [server.py](server.py), [web_workspace.py](web_workspace.py)
+- **Åtgärdat:** `POST /api/garmin/connect`, `POST /api/garmin/mfa`, `GET /api/status`. Tokens sparas per användare på servern, så en omladdning behåller anslutningen.
+
+### [x] R-3: Inställningar (AI-leverantör, API-nycklar, modeller) saknades
+- **Fil:** [server.py](server.py), [web_workspace.py](web_workspace.py), [web_store.py](web_store.py)
+- **Problem:** Det fanns ingen väg att ange en API-nyckel i webbgränssnittet, och chatt-endpointen skapade `AIClient` helt utan nyckel — AI:n kunde alltså inte fungera.
+- **Åtgärdat:** `GET/POST /api/settings` med skrivbordsappens hela konfigurationsyta, `GET /api/settings/models` för live-modellistor. Allt lagras krypterat per användare (AES-256-GCM med kontots DEK) i `sync_metadata`. Hemligheter skickas **aldrig** tillbaka till webbläsaren — bara flaggan `secrets_set` — och ett tomt fält betyder "behåll det sparade".
+
+### [x] R-4: OAuth för Fitbit, Strava och Withings saknades
+- **Fil:** [server.py](server.py)
+- **Åtgärdat:** `GET /api/connect/<tjänst>/url` → auktorisering → `GET /oauth/<tjänst>/callback` med engångs-`state`. En fast redirect-URL per tjänst i stället för skrivbordsappens tillfälliga `localhost`-server.
+
+### [x] R-5: Import av export-filer saknades
+- **Fil:** [server.py](server.py)
+- **Åtgärdat:** `POST /api/import/{fitbit,strava,withings}` tar emot filen som uppladdning och kör samma importerare som skrivbordsmenyn.
+
+### [x] R-6: Promptar, snabbfrågor, historik, sök och export saknades
+- **Fil:** [server.py](server.py), [web_workspace.py](web_workspace.py), [web_export.py](web_export.py)
+- **Åtgärdat:** Sparade promptar (CRUD), snabbfrågor (max 8, samma fyra standardfrågor), spara/ladda/döp om/ta bort chattar, sökning i nuvarande och sparade chattar, samt export till TXT/PDF/DOCX som nedladdning.
+
+### [x] R-7: Chatten tappade kontext, minne och svar
+- **Fil:** [web_chat.py](web_chat.py), [server.py](server.py), [static/app.js](static/app.js)
+- **Problem:** Tre fel samtidigt: kontexten var två rader text i stället för skrivbordsappens nyckelordsstyrda `format_data_for_context`, konversationsminnet fanns inte, och **klienten läste `parsed.content` medan servern strömmade `chunk`** — så inget svar visades över huvud taget.
+- **Åtgärdat:** `web_chat.process_message` är skrivbordsappens `_process_message` ord för ord (datumintervall, nyckelordsroutning, glidande minne på 10 meddelanden). SSE-strömningen behölls; klienten läser rätt fält, hanterar delade frames och visar serverns felmeddelande.
+
+### [x] R-8: Grafer och kort visade påhittad data
+- **Fil:** [static/app.js](static/app.js)
+- **Problem:** `generateMockSeries()` fyllde varje tom serie med en genererad kurva, och träningsvolym-grafen var **alltid** påhittad. Korten hade samma sak: vikten föll tillbaka på 98,3 kg, vikttrenden på "-1,2 kg", kalorierna på 2 848 kcal. Dessutom pekade koden på fält som inte finns (`highest_level`, `avg_stress_level`, `history.body_comp`, `history.daily_summary`), så Body Battery-, stress-, vikt- och vilopulsgraferna var tomma eller fejkade. Alla serier delade dessutom kaloriseriens datumaxel.
+- **Åtgärdat:** All mock-data borttagen. Varje graf ritar sina egna rader med sina egna datum, fältnamnen matchar databasen, träningsvolymen räknas från riktiga pass, pulszonerna kommer från `hr_zones_calc` via `GET /api/hr-zones`, och tom data visar "Ingen data ännu — kör en Check-in" i stället för en uppdiktad kurva.
+
+### [x] R-9: Profil och lösenordsbyte var trasiga
+- **Fil:** [server.py](server.py)
+- **Problem:** Frontend anropade `/api/user/profile` och `/api/user/password`; servern definierade `/api/profile/update` och `/api/profile/change_password`. Båda knapparna gav 404.
+- **Åtgärdat:** Båda sökvägarna serveras nu, och profiländringar uppdaterar arbetsytan så BMR och pulszoner räknas om.
+
+### [x] R-10: Kaloriförbränningen sparades aldrig från webben
+- **Fil:** [web_metrics.py](web_metrics.py), [server.py](server.py)
+- **Problem:** Dashboarden räknade ut dagens förbränning men skrev aldrig raden, så trendgrafen fylldes bara på när skrivbordsappen kördes.
+- **Åtgärdat:** Dagens värde sparas vid varje laddning, och `backfill_calorie_burn` fyller i avslutade dagar som saknas eller ligger kvar som halva dygn (`day_fraction < 1`). Efter varje check-in körs den med `overwrite=True`. Avdraget för träningssteg och Garmins BMR-projektion är skrivbordsappens.
+
+### [x] R-11: Appen kunde inte starta utan MariaDB
+- **Fil:** [web_dbcompat.py](web_dbcompat.py), [server.py](server.py), [garmin_db.py](garmin_db.py)
+- **Problem:** `garmin_db` har en SQLite-reserv, men `auth.py` talar bara pymysql (`%s`-platshållare och `with conn.cursor()`), så **inloggningen kraschade** när MariaDB inte gick att nå — hela appen låg nere med databasen. Dessutom saknade anslutningspoolen timeout, så varje anrop hängde i stället för att falla tillbaka.
+- **Åtgärdat:** Ett litet kompatibilitetslager ger sqlite3 den pymysql-yta `auth` använder (och skapar `users`-tabellen i SQLite-dialekt), `connect_timeout` gör att en onåbar databas faller tillbaka direkt i stället för att hänga, och arbetsytan återanvänder sin databas-handle i stället för att bygga en ny pool per anrop.
+
+### [x] R-12: Hårdkodat databaslösenord i källkoden
+- **Fil:** [garmin_db.py](garmin_db.py)
+- **Problem:** Lösenordet till MariaDB låg i klartext i koden (`password or "powerman"`) och skrevs dessutom automatiskt in i en ny `~/.healthchat/db.env`.
+- **Åtgärdat:** Lösenordet läses bara från miljön eller `db.env`; mallfilen skapas utan lösenord och med `chmod 600`.
+- **⚠️ Kvarstår för dig:** lösenordet har legat i git-historiken och **bör bytas** i MariaDB.
+
+### [ ] R-13: Vendora Chart.js lokalt
+- **Fil:** [static/index.html](static/index.html)
+- **Problem:** Graferna laddas från `cdn.jsdelivr.net`. Utan internet på klienten ritas inga grafer — vilket krockar med poängen att servern och databasen ska kunna stå isolerade.
+- **Att göra:** Lägg `chart.umd.min.js` i `static/vendor/` och peka dit. (Graferna faller nu mjukt tillbaka med ett meddelande i stället för att krascha hela dashboard-uppdateringen, men beroendet finns kvar.)
+
 ---
+
 ## Förslag på ordning
 1. **P0-1** (snabb, tydlig krasch) → **P0-3** (trådsäkerhet) → **P0-2** (säkerhet, större).
 2. **P1-1** + **P1-2** + **P2-4** tillsammans (samma kontext-/minneskod).

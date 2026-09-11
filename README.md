@@ -1,8 +1,42 @@
-# HealthChat Desktop v4.0.4
+# HealthChat v4.1.0
 
-**AI-Powered Insights for Your Garmin Connect Fitness Data**
+**AI-Powered Insights for Your Garmin Connect Fitness Data — in the browser**
 
-HealthChat Desktop is a Windows application that lets you interact with your Garmin Connect fitness data through natural language conversations. Ask questions, analyze trends, and get personalized insights using the power of AI.
+HealthChat is a web application: you reach it at a URL and log in, and it lets you
+interact with your Garmin, Fitbit, Withings and Strava data through natural
+language, alongside a dashboard of your trends. Every feature the Windows
+desktop build had is available in the browser.
+
+## Running the web app
+
+```bash
+pip install -r requirements.txt
+uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+Then open the URL, create an account, and fill in your Garmin credentials and an
+AI provider key under **Inställningar**.
+
+| Environment variable | Purpose |
+| --- | --- |
+| `MARIADB_HOST` / `MARIADB_PORT` / `MARIADB_USER` / `MARIADB_PASSWORD` / `MARIADB_DB` | Database connection. Set them in `~/.healthchat/db.env` (never in the source tree). Without a reachable MariaDB the app falls back to SQLite. |
+| `MARIADB_CONNECT_TIMEOUT` | Seconds before an unreachable database falls back to SQLite (default 5). |
+| `HEALTHCHAT_BASE_URL` | Public URL of the deployment. OAuth redirect URIs are built from it: `<BASE_URL>/oauth/<service>/callback`. |
+
+The desktop build (`HealthChatDesktop.py`) still runs against the same modules;
+`HealthChatDesktop-v4.0.4-legacy.zip` archives the v4.0.4 source.
+
+## What you can do in the browser
+
+- **Källor & Synk** — connect Garmin (with MFA), Fitbit, Withings and Strava;
+  run Check-in per source or for all of them; sync full history; import official
+  export files
+- **Hälsa / Träning / Senaste Pass** — the dashboard, trends, heart-rate zones
+  and activity log, all drawn from your own data
+- **Fråga Coachen** — the AI coach with the same data context and conversation
+  memory as the desktop build, plus saved prompts, quick questions, chat
+  history, search and PDF/DOCX/TXT export
+- **Profil & Konto** — profile measurements, password change, recovery key
 
 ## What's New in v4.0.4
 

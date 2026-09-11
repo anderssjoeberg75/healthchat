@@ -605,3 +605,58 @@ body {
   gap: 10px;
   justify-content: flex-end;
 }
+
+
+/* --- Dark theme (the desktop build's dark palette) ------------------------ */
+
+body.dark-theme {
+  background: #202020;
+  color: #E5E5E5;
+}
+
+body.dark-theme .hub-header,
+body.dark-theme .hub-navbar,
+body.dark-theme .summary-card,
+body.dark-theme .chart-card-box,
+body.dark-theme .table-card-box,
+body.dark-theme .ai-chat-card-box,
+body.dark-theme .modal-card {
+  background: #2D2D30;
+  border-color: #3E3E42;
+  color: #E5E5E5;
+}
+
+body.dark-theme .summary-subtext,
+body.dark-theme .summary-source,
+body.dark-theme .range-label,
+body.dark-theme .user-tag {
+  color: #A0A0A0;
+}
+
+body.dark-theme .data-table th,
+body.dark-theme .data-table td {
+  color: #E5E5E5;
+  border-color: #3E3E42;
+}
+
+body.dark-theme .btn-secondary,
+body.dark-theme .chip-btn,
+body.dark-theme .btn-range {
+  background: #3A3A3D;
+  color: #E5E5E5;
+  border-color: #4A4A4E;
+}
+
+body.dark-theme input,
+body.dark-theme select,
+body.dark-theme textarea,
+body.dark-theme .select-input {
+  background: #1F1F22;
+  color: #E5E5E5;
+  border-color: #3E3E42;
+}
+
+body.dark-theme .chat-msg-bubble {
+  background: #3A3A3D;
+  color: #E5E5E5;
+}
