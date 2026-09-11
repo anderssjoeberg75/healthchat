@@ -420,6 +420,39 @@ function generateMockSeries(baseVal, variance, count, seed = 1, days = 30) {
 }
 
 
+// --- DYNAMIC DATA MAPPING & CHART RENDERING ---
+
+function extractChartData(dataset, dateKey, valueKey, fallbackVal = 0) {
+  if (!dataset || dataset.length === 0) return null;
+  
+  const sorted = [...dataset].sort((a, b) => {
+    const da = String(a[dateKey] || a.start_time || '').slice(0, 10);
+    const db = String(b[dateKey] || b.start_time || '').slice(0, 10);
+    return da.localeCompare(db);
+  });
+
+  const labels = sorted.map(item => {
+    const dStr = String(item[dateKey] || item.start_time || '').slice(0, 10);
+    if (dStr.length >= 10) {
+      return dStr.slice(5); // e.g. "09-11"
+    }
+    return dStr || '--';
+  });
+
+  const data = sorted.map(item => {
+    let val;
+    if (typeof valueKey === 'function') {
+      val = valueKey(item);
+    } else {
+      val = item[valueKey];
+    }
+    return (val !== undefined && val !== null) ? Number(val) : fallbackVal;
+  });
+
+  return { labels, data, raw: sorted };
+}
+
+
 // --- 8 COROS-INSPIRED CHARTS (CHART.JS) ---
 
 function renderHealthCharts() {
@@ -427,26 +460,28 @@ function renderHealthCharts() {
   const history = cachedSummary.history || {};
   const days = currentDaysRange;
 
-  const dates = generateDatesForRange(days);
-  const count = dates.length;
+  const fallbackDates = generateDatesForRange(days);
+  const count = fallbackDates.length;
 
   // 1. Weight Chart (Blue line)
   const bodyComp = history.body_composition || [];
-  const weightData = (bodyComp.length > 0)
-    ? bodyComp.map(b => b.weight_kg)
-    : generateMockSeries(98.5, 1.2, count, 1, days);
+  const weightExt = extractChartData(bodyComp, 'date', 'weight_kg');
+  const weightLabels = weightExt ? weightExt.labels : fallbackDates;
+  const weightData = weightExt ? weightExt.data : generateMockSeries(98.5, 1.2, count, 1, days);
   createChart('chart-weight', 'line', {
-    labels: dates,
+    labels: weightLabels,
     datasets: [{ label: 'Vikt (kg)', data: weightData, borderColor: '#0078D4', backgroundColor: 'rgba(0,120,212,0.1)', tension: 0.3, fill: true }]
   });
 
   // 2. Calories Stacked Bar Chart (Orange resting, Blue active, Red workout)
   const cals = history.calorie_burn || [];
-  const restingData = cals.length > 0 ? cals.map(c => c.resting_burn || 0) : generateMockSeries(2150, 40, count, 2, days);
-  const activeData = cals.length > 0 ? cals.map(c => c.steps_burn || 0) : generateMockSeries(420, 90, count, 3, days);
-  const workoutData = cals.length > 0 ? cals.map(c => c.workout_burn || 0) : generateMockSeries(350, 200, count, 4, days);
+  const calExt = extractChartData(cals, 'date', item => item);
+  const calLabels = calExt ? calExt.labels : fallbackDates;
+  const restingData = calExt ? calExt.raw.map(c => Number(c.resting_burn || 0)) : generateMockSeries(2150, 40, count, 2, days);
+  const activeData = calExt ? calExt.raw.map(c => Number(c.steps_burn || 0)) : generateMockSeries(420, 90, count, 3, days);
+  const workoutData = calExt ? calExt.raw.map(c => Number(c.workout_burn || 0)) : generateMockSeries(350, 200, count, 4, days);
   createChart('chart-calories', 'bar', {
-    labels: dates,
+    labels: calLabels,
     datasets: [
       { label: 'Vilo-BMR', data: restingData, backgroundColor: '#F59E0B' },
       { label: 'Aktivitet', data: activeData, backgroundColor: '#0284C7' },
@@ -456,66 +491,93 @@ function renderHealthCharts() {
 
   // 3. RHR Chart (Blue line)
   const daily = history.daily_summary || [];
-  const rhrData = (daily.length > 0)
-    ? daily.map(d => d.resting_hr || 52)
-    : generateMockSeries(51, 3, count, 5, days);
+  const rhrExt = extractChartData(daily, 'date', 'resting_hr');
+  const rhrLabels = rhrExt ? rhrExt.labels : fallbackDates;
+  const rhrData = rhrExt ? rhrExt.data : generateMockSeries(51, 3, count, 5, days);
   createChart('chart-rhr', 'line', {
-    labels: dates,
+    labels: rhrLabels,
     datasets: [{ label: 'Vilo-puls (bpm)', data: rhrData, borderColor: '#0284C7', tension: 0.3 }]
   });
 
   // 4. HRV Chart (Rose/Pink line)
   const hrv = history.hrv || [];
-  const hrvData = hrv.length > 0 ? hrv.map(h => h.weekly_avg || h.last_night_avg || 68) : generateMockSeries(68, 6, count, 6, days);
+  const hrvExt = extractChartData(hrv, 'date', item => item.weekly_avg || item.last_night_avg || 68);
+  const hrvLabels = hrvExt ? hrvExt.labels : fallbackDates;
+  const hrvData = hrvExt ? hrvExt.data : generateMockSeries(68, 6, count, 6, days);
   createChart('chart-hrv', 'line', {
-    labels: dates,
+    labels: hrvLabels,
     datasets: [{ label: 'Vilo-HRV (ms)', data: hrvData, borderColor: '#EC4899', tension: 0.3 }]
   });
 
   // 5. Sleep Duration Bar Chart (Purple bars)
   const sleep = history.sleep || [];
-  const sleepData = sleep.length > 0 ? sleep.map(s => s.total_sleep_hours) : generateMockSeries(7.5, 0.8, count, 7, days);
+  const sleepExt = extractChartData(sleep, 'date', 'total_sleep_hours');
+  const sleepLabels = sleepExt ? sleepExt.labels : fallbackDates;
+  const sleepData = sleepExt ? sleepExt.data : generateMockSeries(7.5, 0.8, count, 7, days);
   createChart('chart-sleep', 'bar', {
-    labels: dates,
+    labels: sleepLabels,
     datasets: [{ label: 'Sömntid (timmar)', data: sleepData, backgroundColor: '#8B5CF6' }]
   });
 
   // 6. Sleep Score Line Chart (Green line)
-  const sleepScoreData = sleep.length > 0 ? sleep.map(s => s.sleep_score || 80) : generateMockSeries(83, 7, count, 8, days);
+  const sleepScoreExt = extractChartData(sleep, 'date', 'sleep_score');
+  const sleepScoreLabels = sleepScoreExt ? sleepScoreExt.labels : fallbackDates;
+  const sleepScoreData = sleepScoreExt ? sleepScoreExt.data : generateMockSeries(83, 7, count, 8, days);
   createChart('chart-sleep-score', 'line', {
-    labels: dates,
+    labels: sleepScoreLabels,
     datasets: [{ label: 'Sömnkvalitet (0-100)', data: sleepScoreData, borderColor: '#10B981', tension: 0.3 }]
   });
 
   // 7. Body Battery Line Chart (Purple line)
   const bb = history.body_battery || [];
-  const bbData = bb.length > 0 ? bb.map(b => b.highest_level) : generateMockSeries(86, 9, count, 9, days);
+  const bbExt = extractChartData(bb, 'date', 'highest_level');
+  const bbLabels = bbExt ? bbExt.labels : fallbackDates;
+  const bbData = bbExt ? bbExt.data : generateMockSeries(86, 9, count, 9, days);
   createChart('chart-bb', 'line', {
-    labels: dates,
+    labels: bbLabels,
     datasets: [{ label: 'Max Body Battery', data: bbData, borderColor: '#8B5CF6', tension: 0.3 }]
   });
 
   // 8. Stress Level Line Chart (Amber line)
   const stress = history.stress || [];
-  const stressData = stress.length > 0 ? stress.map(s => s.avg_stress_level) : generateMockSeries(25, 5, count, 10, days);
+  const stressExt = extractChartData(stress, 'date', 'avg_stress_level');
+  const stressLabels = stressExt ? stressExt.labels : fallbackDates;
+  const stressData = stressExt ? stressExt.data : generateMockSeries(25, 5, count, 10, days);
   createChart('chart-stress', 'line', {
-    labels: dates,
+    labels: stressLabels,
     datasets: [{ label: 'Snittstress', data: stressData, borderColor: '#F59E0B', tension: 0.3 }]
   });
 }
 
 function renderTrainingCharts() {
   const days = currentDaysRange;
-  const dates = generateDatesForRange(days);
-  const count = dates.length;
+  const fallbackDates = generateDatesForRange(days);
+  const count = fallbackDates.length;
 
   const activities = (cachedSummary && cachedSummary.history && cachedSummary.history.activities) || [];
-  const volumeData = generateMockSeries(4.5, 2.0, count, 11, days);
-
-  createChart('chart-training-volume', 'bar', {
-    labels: dates,
-    datasets: [{ label: 'Träningsvolym (timmar)', data: volumeData, backgroundColor: '#0284C7' }]
-  });
+  
+  if (activities.length > 0) {
+    const actByDate = {};
+    activities.forEach(a => {
+      const d = String(a.date || a.start_time || '').slice(0, 10);
+      if (d) {
+        const durHours = (a.duration_min || (a.duration_sec ? a.duration_sec / 60 : 0)) / 60.0;
+        actByDate[d] = (actByDate[d] || 0) + durHours;
+      }
+    });
+    const sortedDates = Object.keys(actByDate).sort();
+    const actLabels = sortedDates.map(d => d.slice(5));
+    const actData = sortedDates.map(d => Number(actByDate[d].toFixed(2)));
+    createChart('chart-training-volume', 'bar', {
+      labels: actLabels,
+      datasets: [{ label: 'Träningsvolym (timmar)', data: actData, backgroundColor: '#0284C7' }]
+    });
+  } else {
+    createChart('chart-training-volume', 'bar', {
+      labels: fallbackDates,
+      datasets: [{ label: 'Träningsvolym (timmar)', data: generateMockSeries(4.5, 2.0, count, 11, days), backgroundColor: '#0284C7' }]
+    });
+  }
 
   createChart('chart-hr-zones', 'bar', {
     labels: ['Z1 (Återhämtning)', 'Z2 (Aerob/MAF)', 'Z3 (Tempo)', 'Z4 (Tröskel)', 'Z5 (Anaerob)'],
