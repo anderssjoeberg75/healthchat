@@ -214,12 +214,18 @@ async function populateProfileInputs(profile) {
   const watEl = document.getElementById('prof-water');
   if (watEl && p.water_pct !== undefined && p.water_pct !== null && p.water_pct !== '') watEl.value = p.water_pct;
   const bmiEl = document.getElementById('prof-bmi');
-  let bmiVal = p.bmi;
-  if ((!bmiVal || parseFloat(bmiVal) === 0) && p.height_cm > 0 && p.weight_kg > 0) {
-    bmiVal = (p.weight_kg / ((p.height_cm / 100.0) ** 2)).toFixed(1);
-  }
-  if (bmiEl && bmiVal !== undefined && bmiVal !== null && bmiVal !== '') bmiEl.value = bmiVal;
+  const heightNum = parseFloat(document.getElementById('prof-height')?.value || p.height_cm || 0);
+  const weightNum = parseFloat(document.getElementById('prof-weight')?.value || p.weight_kg || 0);
 
+  let bmiVal = p.bmi;
+  if ((!bmiVal || parseFloat(bmiVal) === 0) && heightNum > 0 && weightNum > 0) {
+    bmiVal = (weightNum / ((heightNum / 100.0) ** 2)).toFixed(1);
+  }
+  if (bmiEl && bmiVal !== undefined && bmiVal !== null && bmiVal !== '') {
+    bmiEl.value = bmiVal;
+  }
+
+  updateLiveBmi();
   bindLiveBmiCalculator();
 }
 
@@ -238,10 +244,12 @@ function bindLiveBmiCalculator() {
   const wEl = document.getElementById('prof-weight');
   if (hEl && !hEl.dataset.bmiBound) {
     hEl.addEventListener('input', updateLiveBmi);
+    hEl.addEventListener('change', updateLiveBmi);
     hEl.dataset.bmiBound = 'true';
   }
   if (wEl && !wEl.dataset.bmiBound) {
     wEl.addEventListener('input', updateLiveBmi);
+    wEl.addEventListener('change', updateLiveBmi);
     wEl.dataset.bmiBound = 'true';
   }
 }

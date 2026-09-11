@@ -660,6 +660,15 @@ def update_profile(
         if req.bmi is not None:
             current_profile["bmi"] = req.bmi
 
+        if (not current_profile.get("bmi") or float(current_profile.get("bmi") or 0) == 0) and current_profile.get("height_cm") and current_profile.get("weight_kg"):
+            try:
+                h_m = float(current_profile["height_cm"]) / 100.0
+                w_k = float(current_profile["weight_kg"])
+                if h_m > 0 and w_k > 0:
+                    current_profile["bmi"] = round(w_k / (h_m ** 2), 1)
+            except Exception:
+                pass
+
             
         if conn:
             auth.update_user_profile(conn, session, current_profile)
