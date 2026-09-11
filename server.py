@@ -544,7 +544,13 @@ async def chat_stream(req: ChatRequest, session: UserSession = Depends(get_curre
 # --- PROFILE ENDPOINTS ---
 
 @app.post("/api/profile/update")
-def update_profile(req: ProfileUpdateRequest, session: UserSession = Depends(get_current_session)):
+@app.put("/api/user/profile")
+@app.post("/api/user/profile")
+def update_profile(
+    req: ProfileUpdateRequest,
+    healthchat_session: Optional[str] = Cookie(None),
+    session: UserSession = Depends(get_current_session)
+):
     db = bind_user_db(session)
     conn = get_db_conn(db)
     try:
@@ -558,7 +564,14 @@ def update_profile(req: ProfileUpdateRequest, session: UserSession = Depends(get
         if req.weight_kg is not None:
             current_profile["weight_kg"] = req.weight_kg
             
-        auth.update_user_profile(conn, session, current_profile)
+        if conn:
+            auth.update_user_profile(conn, session, current_profile)
+            if healthchat_session:
+                save_session_to_db(conn, healthchat_session, session)
+        else:
+            session.encrypted_profile = current_profile
+        if healthchat_session:
+            _active_sessions[healthchat_session] = session
         return {"status": "success", "profile": current_profile}
     finally:
         if conn:
@@ -566,11 +579,13 @@ def update_profile(req: ProfileUpdateRequest, session: UserSession = Depends(get
 
 
 @app.post("/api/profile/change_password")
+@app.post("/api/user/password")
 def change_password(req: ChangePasswordRequest, session: UserSession = Depends(get_current_session)):
     db = bind_user_db(session)
     conn = get_db_conn(db)
     try:
-        auth.change_user_password(conn, session.user_id, req.current_password, req.new_password)
+        if conn:
+            auth.change_user_password(conn, session.user_id, req.current_password, req.new_password)
         return {"status": "success", "message": "Lösenordet har ändrats!"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

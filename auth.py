@@ -432,17 +432,35 @@ def rotate_recovery_key(db_conn, user_id: int, current_password: str) -> str:
     return new_key
 
 
-def update_user_profile(db_conn, session: UserSession, new_profile_data: Dict[str, Any]):
-    """Update and persist user's encrypted personal profile."""
-    nonce, ciphertext = crypto.encrypt_payload(session.dek, new_profile_data)
+def update_user_profile(db_conn, session_or_user_id, *args):
+    """
+    Update and persist user's encrypted personal profile.
+    Accepts either:
+      update_user_profile(db_conn, session: UserSession, new_profile_data: dict)
+      or
+      update_user_profile(db_conn, user_id: int, dek: bytes/bytearray, new_profile_data: dict)
+    """
+    if isinstance(session_or_user_id, UserSession):
+        session = session_or_user_id
+        new_profile_data = args[0]
+        user_id = session.user_id
+        dek = session.dek
+    else:
+        user_id = session_or_user_id
+        dek = args[0]
+        new_profile_data = args[1]
+        session = None
+
+    nonce, ciphertext = crypto.encrypt_payload(dek, new_profile_data)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE users SET encrypted_profile = %s, profile_nonce = %s WHERE id = %s",
-            (ciphertext, nonce, session.user_id)
+            (ciphertext, nonce, user_id)
         )
         db_conn.commit()
-    session.encrypted_profile = new_profile_data
-    logger.info(f"Updated encrypted profile for user id {session.user_id}")
+    if session:
+        session.encrypted_profile = new_profile_data
+    logger.info(f"Updated encrypted profile for user id {user_id}")
 
 
 def delete_user_account(db_conn, user_id: int):

@@ -45,11 +45,7 @@ function onAuthSuccess() {
     if (avatarEl) avatarEl.innerText = initial;
     
     // Populate profile inputs
-    const p = currentUser.profile || {};
-    if (p.sex) document.getElementById('prof-sex').value = p.sex;
-    if (p.age) document.getElementById('prof-age').value = p.age;
-    if (p.height_cm) document.getElementById('prof-height').value = p.height_cm;
-    if (p.weight_kg) document.getElementById('prof-weight').value = p.weight_kg;
+    populateProfileInputs(currentUser.profile || {});
   }
 
   refreshDashboard();
@@ -181,7 +177,21 @@ function showTab(tabId) {
     renderHealthCharts();
   } else if (tabId === 'training') {
     renderTrainingCharts();
+  } else if (tabId === 'profile') {
+    populateProfileInputs();
   }
+}
+
+function populateProfileInputs(profile) {
+  const p = profile || (currentUser && currentUser.profile) || (cachedSummary && cachedSummary.profile) || {};
+  const sexEl = document.getElementById('prof-sex');
+  if (sexEl && p.sex) sexEl.value = p.sex;
+  const ageEl = document.getElementById('prof-age');
+  if (ageEl && p.age !== undefined && p.age !== null && p.age !== '') ageEl.value = p.age;
+  const hEl = document.getElementById('prof-height');
+  if (hEl && p.height_cm !== undefined && p.height_cm !== null && p.height_cm !== '') hEl.value = p.height_cm;
+  const wEl = document.getElementById('prof-weight');
+  if (wEl && p.weight_kg !== undefined && p.weight_kg !== null && p.weight_kg !== '') wEl.value = p.weight_kg;
 }
 
 function setDaysRange(days) {
@@ -884,24 +894,33 @@ function appendChatMessage(role, text) {
 async function handleUpdateProfile(event) {
   event.preventDefault();
   const sex = document.getElementById('prof-sex').value;
-  const age = parseInt(document.getElementById('prof-age').value);
-  const height_cm = parseFloat(document.getElementById('prof-height').value);
-  const weight_kg = parseFloat(document.getElementById('prof-weight').value);
+  const ageVal = document.getElementById('prof-age').value.trim();
+  const heightVal = document.getElementById('prof-height').value.trim();
+  const weightVal = document.getElementById('prof-weight').value.trim();
+
+  const age = ageVal ? parseInt(ageVal) : null;
+  const height_cm = heightVal ? parseFloat(heightVal.replace(',', '.')) : null;
+  const weight_kg = weightVal ? parseFloat(weightVal.replace(',', '.')) : null;
 
   try {
-    const res = await fetch('/api/user/profile', {
-      method: 'PUT',
+    const res = await fetch('/api/profile/update', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sex, age, height_cm, weight_kg })
     });
+    const data = await res.json();
     if (res.ok) {
-      alert('Profilen har uppdaterats!');
+      const updated = data.profile || { sex, age, height_cm, weight_kg };
+      if (currentUser) currentUser.profile = updated;
+      if (cachedSummary) cachedSummary.profile = updated;
+      populateProfileInputs(updated);
+      alert('Profilen har sparats klientside-krypterat i MariaDB!');
       refreshDashboard();
     } else {
-      alert('Kunde inte uppdatera profilen.');
+      alert(data.detail || 'Kunde inte uppdatera profilen.');
     }
   } catch (e) {
-    alert('Nätverksfel.');
+    alert('Nätverksfel vid sparande av profil.');
   }
 }
 
@@ -911,7 +930,7 @@ async function handleChangePassword(event) {
   const new_password = document.getElementById('pwd-new').value;
 
   try {
-    const res = await fetch('/api/user/password', {
+    const res = await fetch('/api/profile/change_password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ current_password, new_password })
@@ -925,6 +944,6 @@ async function handleChangePassword(event) {
       alert(data.detail || 'Kunde inte byta lösenord.');
     }
   } catch (e) {
-    alert('Nätverksfel.');
+    alert('Nätverksfel vid lösenordsbyte.');
   }
 }

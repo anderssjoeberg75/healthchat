@@ -63,6 +63,21 @@ def test_register_login_and_me_flow(monkeypatch):
     assert me_data["email"] == test_email
     assert me_data["profile"]["height_cm"] == 180.0
 
+    # Test update profile
+    update_res = client.post(
+        "/api/profile/update",
+        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0},
+        cookies=reg_res.cookies
+    )
+    assert update_res.status_code == 200
+    assert update_res.json()["profile"]["weight_kg"] == 68.0
+
+    # Verify updated profile via /api/auth/me
+    me_updated = client.get("/api/auth/me", cookies=reg_res.cookies)
+    assert me_updated.status_code == 200
+    assert me_updated.json()["profile"]["weight_kg"] == 68.0
+    assert me_updated.json()["profile"]["age"] == 30
+
     # Logout
     logout_res = client.post("/api/auth/logout", cookies=reg_res.cookies)
     assert logout_res.status_code == 200
@@ -70,3 +85,4 @@ def test_register_login_and_me_flow(monkeypatch):
     # Verify Unauthorized after logout
     after_me_res = client.get("/api/auth/me")
     assert after_me_res.status_code == 401
+
