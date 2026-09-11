@@ -25,6 +25,7 @@ from garmin_db import GarminDatabase
 import auth
 from auth import UserSession, mask_email
 import crypto
+import secret_store
 import ai_client
 from ai_client import AIClient
 import calorie_calc

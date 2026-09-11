@@ -4,6 +4,7 @@ Stores sensitive API keys and OAuth tokens securely in OS Keyring / Credential M
 Provides transparent migration out of plaintext config files.
 """
 
+import os
 import logging
 import keyring
 from typing import Optional, Dict, Any
@@ -33,13 +34,19 @@ SECRET_KEYS = (
 
 
 def get_secret(name: str) -> Optional[str]:
-    """Retrieve secret string from Keyring."""
+    """Retrieve secret string from Keyring, falling back to environment variables."""
     try:
         val = keyring.get_password(SERVICE_NAME, name)
-        return val if val else None
+        if val and str(val).strip():
+            return str(val).strip()
     except Exception as e:
-        logger.warning(f"Failed retrieving secret '{name}' from keyring: {e}")
-        return None
+        logger.debug(f"Keyring lookup failed for '{name}': {e}")
+    
+    env_val = os.environ.get(name.upper()) or os.environ.get(name)
+    if env_val and str(env_val).strip():
+        return str(env_val).strip()
+
+    return None
 
 
 def set_secret(name: str, value: Optional[str]) -> bool:
