@@ -4,7 +4,7 @@ A local desktop chatbot for querying Garmin Connect data.
 """
 
 # Application version
-APP_VERSION = "4.0.4"
+APP_VERSION = "4.1.0"
 
 import sys
 from typing import Dict, Any, List, Optional
@@ -19,11 +19,28 @@ from withings_handler import WithingsDataHandler
 from strava_handler import StravaHandler
 from ai_client import AIClient
 from charts_view import HealthChartsView
+import garmin_db
 from garmin_db import GarminDatabase
+import auth
+import crypto
 import logging
 from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
+_log_dir = Path.home() / ".healthchat"
+_log_dir.mkdir(exist_ok=True)
+_log_file = _log_dir / "healthchat.log"
+_handlers = [logging.StreamHandler()]
+try:
+    from logging.handlers import RotatingFileHandler
+    _handlers.append(RotatingFileHandler(_log_file, maxBytes=5*1024*1024, backupCount=2, encoding='utf-8'))
+except Exception:
+    pass
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=_handlers
+)
 logger = logging.getLogger(__name__)
 
 
@@ -142,7 +159,7 @@ class SettingsDialog(tk.Toplevel):
         
         # Calculate centered position BEFORE setting geometry
         width = 700
-        height = 700
+        height = 580
         x = parent.winfo_x() + (parent.winfo_width() // 2) - (width // 2)
         y = parent.winfo_y() + (parent.winfo_height() // 2) - (height // 2)
         
@@ -346,115 +363,6 @@ class SettingsDialog(tk.Toplevel):
         # Create API key fields for all providers
         self.create_api_key_fields()
         
-        # Garmin Credentials section
-        garmin_header = ttk.Label(main_frame,
-                                 text="Garmin Connect Credentials",
-                                 style='Settings.Header.TLabel')
-        garmin_header.grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 10))
-        current_row += 1
-        
-        ttk.Label(main_frame, text="Email:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        
-        self.email_var = tk.StringVar(value=self.current_config.get('garmin_email', ''))
-        email_entry = ttk.Entry(main_frame,
-                               textvariable=self.email_var,
-                               width=50,
-                               style='Settings.TEntry')
-        email_entry.grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-        
-        ttk.Label(main_frame, text="Password:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        
-        self.password_var = tk.StringVar(value=self.current_config.get('garmin_password', ''))
-        password_entry = ttk.Entry(main_frame,
-                                  textvariable=self.password_var,
-                                  width=50,
-                                  show="*",
-                                  style='Settings.TEntry')
-        password_entry.grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-        
-        # Withings API Credentials Section
-        withings_header = ttk.Label(main_frame,
-                                   text="Withings Health Mate API Credentials",
-                                   style='Settings.Header.TLabel')
-        withings_header.grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 10))
-        current_row += 1
-        
-        ttk.Label(main_frame, text="Client ID:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.withings_client_id_var = tk.StringVar(value=self.current_config.get('withings_client_id', ''))
-        ttk.Entry(main_frame, textvariable=self.withings_client_id_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Client Secret:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.withings_client_secret_var = tk.StringVar(value=self.current_config.get('withings_client_secret', ''))
-        ttk.Entry(main_frame, textvariable=self.withings_client_secret_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Refresh Token:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.withings_refresh_token_var = tk.StringVar(value=self.current_config.get('withings_refresh_token', ''))
-        ttk.Entry(main_frame, textvariable=self.withings_refresh_token_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        # Strava API Credentials Section
-        strava_header = ttk.Label(main_frame,
-                                   text="Strava API Credentials",
-                                   style='Settings.Header.TLabel')
-        strava_header.grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 10))
-        current_row += 1
-        
-        ttk.Label(main_frame, text="Client ID:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.strava_client_id_var = tk.StringVar(value=self.current_config.get('strava_client_id', ''))
-        ttk.Entry(main_frame, textvariable=self.strava_client_id_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Client Secret:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.strava_client_secret_var = tk.StringVar(value=self.current_config.get('strava_client_secret', ''))
-        ttk.Entry(main_frame, textvariable=self.strava_client_secret_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Refresh Token:", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.strava_refresh_token_var = tk.StringVar(value=self.current_config.get('strava_refresh_token', ''))
-        ttk.Entry(main_frame, textvariable=self.strava_refresh_token_var, width=50, show="*", style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        # Personal Profile Section (for daily calorie-burn estimate / BMR)
-        profile_header = ttk.Label(main_frame,
-                                   text="Personlig profil (för kaloriberäkning)",
-                                   style='Settings.Header.TLabel')
-        profile_header.grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 4))
-        current_row += 1
-
-        ttk.Label(main_frame,
-                  text="Används för att uppskatta din vilo-förbränning (BMR). Vikt hämtas normalt från\n"
-                       "dina mätningar – fyll bara i vikt här om du saknar en ansluten våg.",
-                  style='Settings.Help.TLabel').grid(row=current_row, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
-        current_row += 1
-
-        ttk.Label(main_frame, text="Kön (för BMR):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.user_sex_var = tk.StringVar(value=self.current_config.get('user_sex', 'male') or 'male')
-        sex_combo = ttk.Combobox(main_frame, textvariable=self.user_sex_var,
-                                 values=['male', 'female'], state='readonly', width=47)
-        sex_combo.grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Längd (cm):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.user_height_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_height_cm', '')))
-        ttk.Entry(main_frame, textvariable=self.user_height_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Ålder (år):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.user_age_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_age', '')))
-        ttk.Entry(main_frame, textvariable=self.user_age_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-
-        ttk.Label(main_frame, text="Vikt (kg):", style='Settings.TLabel').grid(row=current_row, column=0, sticky=tk.W, pady=8)
-        self.user_weight_var = tk.StringVar(value=self._fmt_profile_number(self.current_config.get('user_weight_kg', '')))
-        ttk.Entry(main_frame, textvariable=self.user_weight_var, width=50, style='Settings.TEntry').grid(row=current_row, column=1, sticky=(tk.W, tk.E), pady=8)
-        current_row += 1
-        ttk.Label(main_frame, text="(Uppdateras automatiskt vid synkning från Withings/Garmin)", font=('Segoe UI', 8, 'italic'), foreground=self.colors.get('text_secondary', '#6B7280')).grid(row=current_row, column=1, sticky=tk.W, pady=(0, 6))
-        current_row += 1
-
         # Buttons
         button_frame = ttk.Frame(main_frame, style='Settings.TFrame')
         button_frame.grid(row=current_row, column=0, columnspan=2, pady=(30, 0))
@@ -667,19 +575,6 @@ class SettingsDialog(tk.Toplevel):
 
         self.result = {
             'ai_provider': selected_provider,
-            'garmin_email': self.email_var.get(),
-            'garmin_password': self.password_var.get(),
-            'withings_client_id': getattr(self, 'withings_client_id_var', tk.StringVar()).get(),
-            'withings_client_secret': getattr(self, 'withings_client_secret_var', tk.StringVar()).get(),
-            'withings_refresh_token': getattr(self, 'withings_refresh_token_var', tk.StringVar()).get(),
-            'strava_client_id': getattr(self, 'strava_client_id_var', tk.StringVar()).get(),
-            'strava_client_secret': getattr(self, 'strava_client_secret_var', tk.StringVar()).get(),
-            'strava_refresh_token': getattr(self, 'strava_refresh_token_var', tk.StringVar()).get(),
-            # User profile (for calorie-burn estimate)
-            'user_sex': getattr(self, 'user_sex_var', tk.StringVar(value='male')).get() or 'male',
-            'user_height_cm': self._parse_profile_number(getattr(self, 'user_height_var', tk.StringVar()).get()),
-            'user_age': self._parse_profile_number(getattr(self, 'user_age_var', tk.StringVar()).get()),
-            'user_weight_kg': self._parse_profile_number(getattr(self, 'user_weight_var', tk.StringVar()).get()),
         }
         
         # Save ALL providers' keys (not just selected one)
@@ -1282,7 +1177,6 @@ class WithingsConnectDialog(tk.Toplevel):
             parent=self
         )
 
-    def save(self):
         self.result = {
             'client_id': self.client_id_var.get().strip(),
             'client_secret': self.client_secret_var.get().strip(),
@@ -1292,15 +1186,861 @@ class WithingsConnectDialog(tk.Toplevel):
         self.destroy()
 
 
+class GarminConnectDialog(tk.Toplevel):
+    """Dedicated modal dialog to connect Garmin Connect account directly (K-9)."""
+
+    def __init__(self, parent, email="", password="", colors=None, on_success_callback=None, db=None):
+        super().__init__(parent)
+        self.title("Anslut till Garmin Connect")
+        self.geometry("540x510")
+        self.resizable(False, False)
+        self.result = None
+        self.on_success_callback = on_success_callback
+        self.colors = colors or {'bg': '#F3F4F6', 'card_bg': '#FFFFFF', 'text': '#1F2937', 'accent': '#0078D4'}
+        self.db = db
+
+        if parent and parent.winfo_viewable():
+            self.transient(parent)
+        self.grab_set()
+        self.configure(bg=self.colors.get('bg', '#F3F4F6'))
+
+        main_frame = ttk.Frame(self, padding="20", style='Card.TFrame')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        main_frame.columnconfigure(1, weight=1)
+
+        # Header
+        ttk.Label(
+            main_frame,
+            text="⌚ Anslut till Garmin Connect",
+            font=('Segoe UI', 14, 'bold'),
+            foreground=self.colors.get('accent', '#0078D4')
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+
+        # Instructions
+        info_text = (
+            "Ange dina inloggningsuppgifter för Garmin Connect nedan.\n"
+            "När du klickar 'Anslut' loggar appen in säkert och sparar sessions-tokens i garmin_tokens/.\n"
+            "Dina lösenordsuppgifter överförs direkt via krypterad TLS till Garmin."
+        )
+        ttk.Label(
+            main_frame,
+            text=info_text,
+            wraplength=480,
+            font=('Segoe UI', 9)
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(0, 12))
+
+        # Fields
+        ttk.Label(main_frame, text="E-postadress:", font=('Segoe UI', 10, 'bold')).grid(row=2, column=0, sticky=tk.W, pady=8)
+        self.email_var = tk.StringVar(value=email)
+        ttk.Entry(main_frame, textvariable=self.email_var, width=38).grid(row=2, column=1, sticky=(tk.W, tk.E), pady=8)
+
+        ttk.Label(main_frame, text="Lösenord:", font=('Segoe UI', 10, 'bold')).grid(row=3, column=0, sticky=tk.W, pady=8)
+        self.password_var = tk.StringVar(value=password)
+        ttk.Entry(main_frame, textvariable=self.password_var, width=38, show="*").grid(row=3, column=1, sticky=(tk.W, tk.E), pady=8)
+
+        self.save_creds_var = tk.BooleanVar(value=True)
+        save_cb = ttk.Checkbutton(main_frame, text="Spara inloggningsuppgifter lokalt", variable=self.save_creds_var)
+        save_cb.grid(row=4, column=1, sticky=tk.W, pady=(0, 10))
+
+        # MFA Frame (hidden by default)
+        self.mfa_frame = ttk.Frame(main_frame)
+        self.mfa_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        self.mfa_frame.columnconfigure(1, weight=1)
+        self.mfa_frame.grid_remove()
+
+        ttk.Label(self.mfa_frame, text="🔐 MFA-kod (6 siffror):", font=('Segoe UI', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.mfa_var = tk.StringVar()
+        ttk.Entry(self.mfa_frame, textvariable=self.mfa_var, width=15).grid(row=0, column=1, sticky=tk.W)
+
+        # Status Label
+        self.status_var = tk.StringVar(value="")
+        self.status_lbl = ttk.Label(main_frame, textvariable=self.status_var, font=('Segoe UI', 9), wraplength=480)
+        self.status_lbl.grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(8, 12))
+
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=7, column=0, columnspan=2, pady=(10, 0))
+
+        self.connect_btn = ttk.Button(btn_frame, text="▶ Anslut / Verifiera", command=self._start_connect)
+        self.connect_btn.grid(row=0, column=0, padx=5)
+
+        self.close_btn = ttk.Button(btn_frame, text="Stäng", command=self.destroy)
+        self.close_btn.grid(row=0, column=1, padx=5)
+
+    def _start_connect(self):
+        email = self.email_var.get().strip()
+        pwd = self.password_var.get().strip()
+        if not email or not pwd:
+            self.status_var.set("❌ Ange både e-post och lösenord.")
+            return
+
+        self.connect_btn.config(state=tk.DISABLED)
+        self.status_var.set("⏳ Ansluter till Garmin Connect...")
+
+        def _worker():
+            try:
+                mfa_code = self.mfa_var.get().strip() if self.mfa_frame.winfo_ismapped() else None
+                from garmin_handler import GarminDataHandler
+                handler = GarminDataHandler(email, pwd, db=self.db)
+                if mfa_code:
+                    res = handler.authenticate(mfa_code=mfa_code)
+                else:
+                    res = handler.authenticate()
+
+                if res.get("success"):
+                    self.result = {
+                        "email": email,
+                        "password": pwd if self.save_creds_var.get() else "",
+                        "save_creds": self.save_creds_var.get(),
+                        "handler": handler
+                    }
+                    self.after(0, self._on_success)
+                elif res.get("mfa_required"):
+                    self.after(0, self._on_mfa_required)
+                else:
+                    err = res.get("error", "Kunde inte autentisera mot Garmin.")
+                    self.after(0, lambda: self._on_error(err))
+            except Exception as e:
+                self.after(0, lambda: self._on_error(str(e)))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_success(self):
+        self.status_var.set("✅ Inloggning lyckades! Session och tokens sparade.")
+        self.connect_btn.config(state=tk.NORMAL)
+        if self.on_success_callback and self.result:
+            self.on_success_callback(self.result)
+        self.after(1200, self.destroy)
+
+    def _on_mfa_required(self):
+        self.mfa_frame.grid()
+        self.status_var.set("🔐 Tvåfaktorsautentisering krävs. Ange koden från Garmin och klicka 'Anslut' igen.")
+        self.connect_btn.config(state=tk.NORMAL, text="Skicka MFA-kod")
+
+    def _on_error(self, err_msg):
+        self.status_var.set(f"❌ Fel: {err_msg}")
+        self.connect_btn.config(state=tk.NORMAL)
+
+
+class RecoveryKeyModal(tk.Toplevel):
+    """
+    Mandatory security modal shown after registration or recovery (K-10).
+    Requires user confirmation that recovery key is safely saved before proceeding.
+    """
+    def __init__(self, parent, email: str, recovery_key: str, on_confirmed=None):
+        super().__init__(parent)
+        self.title("⚠️ VIKTIGT: Spara din återställningsnyckel")
+        self.geometry("630x540")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self.email = email
+        self.recovery_key = recovery_key
+        self.on_confirmed = on_confirmed
+
+        self.configure(bg='#FFF7ED')
+
+        frame = ttk.Frame(self, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        frame.columnconfigure(0, weight=1)
+
+        # Warning Title
+        ttk.Label(
+            frame,
+            text="⚠️ VIKTIGT SÄKERHETSMEDDELANDE",
+            font=('Segoe UI', 13, 'bold'),
+            foreground='#C2410C'
+        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+
+        warning_text = (
+            "HealthChat använder klientside-kryptering med AES-256-GCM.\n"
+            "Ditt lösenord används för att kryptera din unika krypteringsnyckel (DEK).\n\n"
+            "Om du glömmer ditt lösenord kan INGEN (inte ens serverns administratör eller utvecklarna) "
+            "återställa din hälsodata utan denna 256-bitars återställningsnyckel!\n\n"
+            "Spara nyckeln på en säker plats NU (t.ex. i en lösenordshanterare eller spara som fil)."
+        )
+        ttk.Label(
+            frame,
+            text=warning_text,
+            wraplength=560,
+            font=('Segoe UI', 9)
+        ).grid(row=1, column=0, sticky=tk.W, pady=(0, 12))
+
+        # Recovery Key Box
+        key_box = tk.Text(
+            frame,
+            height=3,
+            font=('Courier New', 11, 'bold'),
+            bg='#FEF3C7',
+            fg='#92400E',
+            relief='solid',
+            borderwidth=1,
+            wrap=tk.WORD
+        )
+        key_box.insert('1.0', self.recovery_key)
+        key_box.config(state=tk.DISABLED)
+        key_box.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Copy & Save Buttons Frame
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=3, column=0, sticky=tk.W, pady=(0, 15))
+
+        self.copy_btn = ttk.Button(btn_frame, text="📋 Kopiera till urklipp", command=self._copy_key)
+        self.copy_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.save_btn = ttk.Button(btn_frame, text="💾 Spara till fil...", command=self._save_to_file)
+        self.save_btn.pack(side=tk.LEFT)
+
+        self.copy_status_var = tk.StringVar(value="")
+        ttk.Label(frame, textvariable=self.copy_status_var, font=('Segoe UI', 9, 'italic'), foreground='#16A34A').grid(
+            row=4, column=0, sticky=tk.W, pady=(0, 10)
+        )
+
+        # Checkbox Confirmation
+        self.confirmed_var = tk.BooleanVar(value=False)
+        self.cb = ttk.Checkbutton(
+            frame,
+            text="Jag bekräftar att jag har sparat min återställningsnyckel på en säker plats.",
+            variable=self.confirmed_var,
+            command=self._on_check_toggle
+        )
+        self.cb.grid(row=5, column=0, sticky=tk.W, pady=(0, 15))
+
+        # Continue Button (disabled until checkbox is ticked)
+        self.continue_btn = ttk.Button(
+            frame,
+            text="Jag förstår – Slutför och fortsätt",
+            command=self._proceed,
+            state=tk.DISABLED
+        )
+        self.continue_btn.grid(row=6, column=0)
+
+        # Center modal on screen and force visible
+        self.update_idletasks()
+        width = 630
+        height = 540
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = max(10, (screen_width - width) // 2)
+        y = max(10, (screen_height - height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.deiconify()
+        self.state('normal')
+        self.attributes('-topmost', True)
+        self.after(100, lambda: self.attributes('-topmost', False))
+        self.lift()
+        self.focus_force()
+
+    def _copy_key(self):
+        self.clipboard_clear()
+        self.clipboard_append(self.recovery_key)
+        self.copy_status_var.set("✓ Återställningsnyckeln har kopierats till urklipp!")
+
+    def _save_to_file(self):
+        from tkinter import filedialog
+        default_name = f"recovery_key_{self.email}.txt"
+        file_path = filedialog.asksaveasfilename(
+            parent=self,
+            defaultextension=".txt",
+            initialfile=default_name,
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if file_path:
+            try:
+                p = Path(file_path)
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(f"HealthChat Återställningsnyckel\n")
+                    f.write(f"E-post: {self.email}\n")
+                    f.write(f"Datum: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Återställningsnyckel:\n{self.recovery_key}\n\n")
+                    f.write("FÖRVARA DETTA DOKUMENT SÄKERT. Den behövs om du glömmer ditt lösenord.\n")
+
+                try:
+                    os.chmod(p, 0o600)
+                except Exception:
+                    pass
+
+                self.copy_status_var.set(f"✓ Sparad till {p.name} (skydda filen från obehöriga!)")
+            except Exception as e:
+                messagebox.showerror("Fel", f"Kunde inte spara filen: {e}", parent=self)
+
+    def _on_check_toggle(self):
+        if self.confirmed_var.get():
+            self.continue_btn.config(state=tk.NORMAL)
+        else:
+            self.continue_btn.config(state=tk.DISABLED)
+
+    def _proceed(self):
+        self.destroy()
+        if self.on_confirmed:
+            self.on_confirmed()
+
+
+class LoginDialog(tk.Toplevel):
+    """
+    Main authentication window for HealthChat Desktop (K-2, K-4, K-10).
+    Supports Login, Account Registration, and Recovery via 256-bit Recovery Key.
+    """
+    def __init__(self, parent, colors=None, default_email: Optional[str] = None):
+        super().__init__(parent)
+        self.title("HealthChat Desktop – Inloggning")
+        self.geometry("480x620")
+        self.resizable(False, False)
+        self.session = None
+        self.parent = parent
+        self.default_email = default_email
+        self.colors = colors or {'bg': '#F3F4F6', 'card_bg': '#FFFFFF', 'text': '#1F2937', 'accent': '#0078D4'}
+
+        if parent and parent.winfo_viewable():
+            self.transient(parent)
+        self.grab_set()
+        self.configure(bg=self.colors.get('bg', '#F3F4F6'))
+
+        # Header Frame
+        header_frame = tk.Frame(self, bg=self.colors.get('accent', '#0078D4'), height=80)
+        header_frame.pack(fill=tk.X)
+        header_frame.pack_propagate(False)
+
+        ttk.Label(
+            header_frame,
+            text="🔒 HealthChat Desktop",
+            font=('Segoe UI', 16, 'bold'),
+            background=self.colors.get('accent', '#0078D4'),
+            foreground='#FFFFFF'
+        ).pack(side=tk.LEFT, padx=20, pady=15)
+
+        ttk.Label(
+            header_frame,
+            text="End-to-End Krypterad Hälsoanalys",
+            font=('Segoe UI', 9),
+            background=self.colors.get('accent', '#0078D4'),
+            foreground='#E0F2FE'
+        ).pack(side=tk.LEFT, pady=18)
+
+        # Content Card
+        self.card = ttk.Frame(self, padding="20", style='Card.TFrame')
+        self.card.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.card.columnconfigure(0, weight=1)
+
+        # Modes: 'login', 'register', 'recover'
+        self.current_mode = 'login'
+        self.build_login_view()
+
+        # Center dialog on screen and force visible
+        self.update_idletasks()
+        width = 480
+        height = 620
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = max(10, (screen_width - width) // 2)
+        y = max(10, (screen_height - height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.deiconify()
+        self.state('normal')
+        self.attributes('-topmost', True)
+        self.after(100, lambda: self.attributes('-topmost', False))
+        self.lift()
+        self.focus_force()
+
+    def _clear_card(self):
+        for widget in self.card.winfo_children():
+            widget.destroy()
+
+    def build_login_view(self):
+        self._clear_card()
+        self.current_mode = 'login'
+
+        ttk.Label(self.card, text="Logga in på ditt konto", font=('Segoe UI', 13, 'bold')).pack(anchor=tk.W, pady=(0, 15))
+
+        ttk.Label(self.card, text="E-postadress:", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(5, 2))
+        initial_email = getattr(self, 'default_email', '') or ""
+        self.email_var = tk.StringVar(value=initial_email)
+        email_ent = ttk.Entry(self.card, textvariable=self.email_var, width=40)
+        email_ent.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(self.card, text="Lösenord:", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(5, 2))
+        self.password_var = tk.StringVar(value="")
+        pwd_ent = ttk.Entry(self.card, textvariable=self.password_var, width=40, show="*")
+        pwd_ent.pack(fill=tk.X, pady=(0, 10))
+        pwd_ent.bind("<Return>", lambda e: self._do_login())
+
+        if initial_email:
+            pwd_ent.focus()
+        else:
+            email_ent.focus()
+
+        self.remember_me_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            self.card,
+            text="Kom ihåg mig på denna dator (Windows Credential Manager)",
+            variable=self.remember_me_var
+        ).pack(anchor=tk.W, pady=(0, 15))
+
+        self.status_var = tk.StringVar(value="")
+        self.status_lbl = ttk.Label(self.card, textvariable=self.status_var, font=('Segoe UI', 9), wraplength=400)
+        self.status_lbl.pack(fill=tk.X, pady=(0, 10))
+
+        self.login_btn = ttk.Button(self.card, text="Logga in", command=self._do_login)
+        self.login_btn.pack(fill=tk.X, pady=(0, 15))
+
+        # Links
+        link_frame = ttk.Frame(self.card)
+        link_frame.pack(fill=tk.X)
+
+        reg_link = tk.Label(link_frame, text="Skapa nytt konto", font=('Segoe UI', 9, 'underline'), fg='#0078D4', cursor="hand2")
+        reg_link.pack(side=tk.LEFT)
+        reg_link.bind("<Button-1>", lambda e: self.build_register_view())
+
+        rec_link = tk.Label(link_frame, text="Glömt lösenord?", font=('Segoe UI', 9, 'underline'), fg='#0078D4', cursor="hand2")
+        rec_link.pack(side=tk.RIGHT)
+        rec_link.bind("<Button-1>", lambda e: self.build_recover_view())
+
+    def build_register_view(self):
+        self._clear_card()
+        self.current_mode = 'register'
+
+        ttk.Label(self.card, text="Skapa nytt krypterat konto", font=('Segoe UI', 13, 'bold')).pack(anchor=tk.W, pady=(0, 12))
+
+        ttk.Label(self.card, text="E-postadress:", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(4, 2))
+        self.reg_email_var = tk.StringVar(value="")
+        reg_email_ent = ttk.Entry(self.card, textvariable=self.reg_email_var, width=40)
+        reg_email_ent.pack(fill=tk.X, pady=(0, 8))
+        reg_email_ent.focus()
+
+        ttk.Label(self.card, text="Lösenord (minst 8 tecken):", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(4, 2))
+        self.reg_pwd_var = tk.StringVar(value="")
+        ttk.Entry(self.card, textvariable=self.reg_pwd_var, width=40, show="*").pack(fill=tk.X, pady=(0, 8))
+
+        ttk.Label(self.card, text="Bekräfta lösenord:", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(4, 2))
+        self.reg_confirm_var = tk.StringVar(value="")
+        ttk.Entry(self.card, textvariable=self.reg_confirm_var, width=40, show="*").pack(fill=tk.X, pady=(0, 12))
+
+        self.reg_status_var = tk.StringVar(value="")
+        ttk.Label(self.card, textvariable=self.reg_status_var, font=('Segoe UI', 9), wraplength=400).pack(fill=tk.X, pady=(0, 10))
+
+        self.reg_btn = ttk.Button(self.card, text="Registrera konto", command=self._do_register)
+        self.reg_btn.pack(fill=tk.X, pady=(0, 12))
+
+        back_link = tk.Label(self.card, text="← Tillbaka till inloggning", font=('Segoe UI', 9, 'underline'), fg='#0078D4', cursor="hand2")
+        back_link.pack(anchor=tk.W)
+        back_link.bind("<Button-1>", lambda e: self.build_login_view())
+
+    def build_recover_view(self):
+        self._clear_card()
+        self.current_mode = 'recover'
+
+        ttk.Label(self.card, text="Återställ konto med nyckel", font=('Segoe UI', 13, 'bold')).pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Label(self.card, text="E-postadress:", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(3, 2))
+        self.rec_email_var = tk.StringVar(value="")
+        rec_email_ent = ttk.Entry(self.card, textvariable=self.rec_email_var, width=40)
+        rec_email_ent.pack(fill=tk.X, pady=(0, 6))
+        rec_email_ent.focus()
+
+        ttk.Label(self.card, text="Återställningsnyckel (XXXXX-XXXXX-...):", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(3, 2))
+        self.rec_key_var = tk.StringVar(value="")
+        ttk.Entry(self.card, textvariable=self.rec_key_var, width=40).pack(fill=tk.X, pady=(0, 6))
+
+        ttk.Label(self.card, text="Nytt lösenord (minst 8 tecken):", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(3, 2))
+        self.rec_pwd_var = tk.StringVar(value="")
+        ttk.Entry(self.card, textvariable=self.rec_pwd_var, width=40, show="*").pack(fill=tk.X, pady=(0, 6))
+
+        ttk.Label(self.card, text="Bekräfta nytt lösenord:", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W, pady=(3, 2))
+        self.rec_confirm_var = tk.StringVar(value="")
+        ttk.Entry(self.card, textvariable=self.rec_confirm_var, width=40, show="*").pack(fill=tk.X, pady=(0, 10))
+
+        self.rec_status_var = tk.StringVar(value="")
+        ttk.Label(self.card, textvariable=self.rec_status_var, font=('Segoe UI', 9), wraplength=400).pack(fill=tk.X, pady=(0, 10))
+
+        self.rec_btn = ttk.Button(self.card, text="Återställ och sätt nytt lösenord", command=self._do_recover)
+        self.rec_btn.pack(fill=tk.X, pady=(0, 12))
+
+        back_link = tk.Label(self.card, text="← Tillbaka till inloggning", font=('Segoe UI', 9, 'underline'), fg='#0078D4', cursor="hand2")
+        back_link.pack(anchor=tk.W)
+        back_link.bind("<Button-1>", lambda e: self.build_login_view())
+
+    def _do_login(self):
+        email = self.email_var.get().strip()
+        pwd = self.password_var.get()
+        if not email or not pwd:
+            self.status_var.set("❌ Ange både e-post och lösenord.")
+            return
+
+        self.login_btn.config(state=tk.DISABLED)
+        self.status_var.set("⏳ Autentiserar och härleder krypteringsnyckel...")
+
+        def _worker():
+            try:
+                conn = garmin_db.get_mariadb_connection()
+                try:
+                    sess = auth.authenticate_user(conn, email, pwd)
+                    if self.remember_me_var.get():
+                        auth.save_remembered_session(email, sess.dek)
+                    self.session = sess
+                    self.after(0, self.destroy)
+                finally:
+                    conn.close()
+            except Exception as e:
+                err_msg = str(e)
+                self.after(0, lambda msg=err_msg: self._on_login_failed(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_login_failed(self, err_msg):
+        self.status_var.set(f"❌ {err_msg}")
+        self.login_btn.config(state=tk.NORMAL)
+
+    def _do_register(self):
+        email = self.reg_email_var.get().strip()
+        pwd = self.reg_pwd_var.get()
+        confirm = self.reg_confirm_var.get()
+
+        if not email or not pwd:
+            self.reg_status_var.set("❌ Fyll i alla fält.")
+            return
+        if pwd != confirm:
+            self.reg_status_var.set("❌ Lösenorden matchar inte.")
+            return
+        if len(pwd) < 8:
+            self.reg_status_var.set("❌ Lösenordet måste vara minst 8 tecken långt.")
+            return
+
+        self.reg_btn.config(state=tk.DISABLED)
+        self.reg_status_var.set("⏳ Skapar användare och genererar 256-bit nycklar...")
+
+        def _worker():
+            try:
+                conn = garmin_db.get_mariadb_connection()
+                try:
+                    user_id, recovery_key, sess = auth.register_user(conn, email, pwd)
+                    self.after(0, lambda: self._on_register_success(email, recovery_key, sess))
+                finally:
+                    conn.close()
+            except Exception as e:
+                err_msg = str(e)
+                self.after(0, lambda msg=err_msg: self._on_register_failed(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_register_success(self, email, recovery_key, sess):
+        def _confirmed():
+            auth.save_remembered_session(email, sess.dek)
+            self.session = sess
+            self.destroy()
+
+        RecoveryKeyModal(self, email, recovery_key, on_confirmed=_confirmed)
+
+    def _on_register_failed(self, err_msg):
+        self.reg_status_var.set(f"❌ {err_msg}")
+        self.reg_btn.config(state=tk.NORMAL)
+
+    def _do_recover(self):
+        email = self.rec_email_var.get().strip()
+        rec_key = self.rec_key_var.get().strip()
+        pwd = self.rec_pwd_var.get()
+        confirm = self.rec_confirm_var.get()
+
+        if not email or not rec_key or not pwd:
+            self.rec_status_var.set("❌ Fyll i alla fält.")
+            return
+        if pwd != confirm:
+            self.rec_status_var.set("❌ Lösenorden matchar inte.")
+            return
+        if len(pwd) < 8:
+            self.rec_status_var.set("❌ Det nya lösenordet måste vara minst 8 tecken.")
+            return
+
+        self.rec_btn.config(state=tk.DISABLED)
+        self.rec_status_var.set("⏳ Återställer DEK och omkrypterar...")
+
+        def _worker():
+            try:
+                conn = garmin_db.get_mariadb_connection()
+                try:
+                    new_rec_key, sess = auth.recover_account(conn, email, rec_key, pwd)
+                    self.after(0, lambda: self._on_recover_success(email, new_rec_key, sess))
+                finally:
+                    conn.close()
+            except Exception as e:
+                err_msg = str(e)
+                self.after(0, lambda msg=err_msg: self._on_recover_failed(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_recover_success(self, email, new_rec_key, sess):
+        def _confirmed():
+            auth.save_remembered_session(email, sess.dek)
+            self.session = sess
+            self.destroy()
+
+        RecoveryKeyModal(self, email, new_rec_key, on_confirmed=_confirmed)
+
+    def _on_recover_failed(self, err_msg):
+        self.rec_status_var.set(f"❌ {err_msg}")
+        self.rec_btn.config(state=tk.NORMAL)
+
+
+class ProfileDialog(tk.Toplevel):
+    """
+    User Profile & Account Dialog (K-5).
+    Allows managing personal metrics, password change (DEK re-wrap),
+    recovery key rotation, and permanent account deletion.
+    """
+    def __init__(self, parent, user_session: auth.UserSession, current_profile=None, on_profile_saved=None, on_logout=None, colors=None):
+        super().__init__(parent)
+        self.title("👤 Min Profil & Konto")
+        self.geometry("580x680")
+        self.resizable(False, False)
+        self.user_session = user_session
+        self.on_profile_saved = on_profile_saved
+        self.on_logout = on_logout
+        self.colors = colors or {'bg': '#F3F4F6', 'card_bg': '#FFFFFF', 'text': '#1F2937', 'accent': '#0078D4'}
+
+        if parent and parent.winfo_viewable():
+            self.transient(parent)
+        self.grab_set()
+        self.configure(bg=self.colors.get('bg', '#F3F4F6'))
+
+        # Scrollable Frame
+        canvas = tk.Canvas(self, bg=self.colors.get('bg', '#F3F4F6'), highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        main_frame = ttk.Frame(scrollable_frame, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame.columnconfigure(1, weight=1)
+
+        # Header
+        ttk.Label(
+            main_frame,
+            text=f"👤 Min Profil ({self.user_session.email})",
+            font=('Segoe UI', 14, 'bold'),
+            foreground=self.colors.get('accent', '#0078D4')
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 15))
+
+        prof = current_profile or self.user_session.encrypted_profile or {}
+
+        # 1. Personal Metrics Section
+        ttk.Label(main_frame, text="Personliga Mått & BMR", font=('Segoe UI', 11, 'bold')).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
+        ttk.Label(main_frame, text="Dessa uppgifter sparas klientside-krypterat i MariaDB och används för kaloriberäkning.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
+
+        ttk.Label(main_frame, text="Kön:", font=('Segoe UI', 9, 'bold')).grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.sex_var = tk.StringVar(value=prof.get('sex', 'male') or 'male')
+        sex_cb = ttk.Combobox(main_frame, textvariable=self.sex_var, values=['male', 'female'], state='readonly', width=35)
+        sex_cb.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Längd (cm):", font=('Segoe UI', 9, 'bold')).grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.height_var = tk.StringVar(value=str(prof.get('height_cm', '')) if prof.get('height_cm') else '')
+        ttk.Entry(main_frame, textvariable=self.height_var, width=35).grid(row=4, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Ålder (år):", font=('Segoe UI', 9, 'bold')).grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.age_var = tk.StringVar(value=str(prof.get('age', '')) if prof.get('age') else '')
+        ttk.Entry(main_frame, textvariable=self.age_var, width=35).grid(row=5, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Vikt (kg):", font=('Segoe UI', 9, 'bold')).grid(row=6, column=0, sticky=tk.W, pady=5)
+        self.weight_var = tk.StringVar(value=str(prof.get('weight_kg', '')) if prof.get('weight_kg') else '')
+        ttk.Entry(main_frame, textvariable=self.weight_var, width=35).grid(row=6, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Vilopuls (bpm, valfri):", font=('Segoe UI', 9, 'bold')).grid(row=7, column=0, sticky=tk.W, pady=5)
+        self.resting_hr_var = tk.StringVar(value=str(prof.get('resting_hr', '')) if prof.get('resting_hr') else '')
+        ttk.Entry(main_frame, textvariable=self.resting_hr_var, width=35).grid(row=7, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(main_frame, text="Maxpuls (bpm, valfri):", font=('Segoe UI', 9, 'bold')).grid(row=8, column=0, sticky=tk.W, pady=5)
+        self.max_hr_var = tk.StringVar(value=str(prof.get('max_hr', '')) if prof.get('max_hr') else '')
+        ttk.Entry(main_frame, textvariable=self.max_hr_var, width=35).grid(row=8, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        self.prof_status_var = tk.StringVar(value="")
+        ttk.Label(main_frame, textvariable=self.prof_status_var, font=('Segoe UI', 8, 'italic'), foreground='#16A34A').grid(row=9, column=1, sticky=tk.W, pady=(2, 5))
+
+        ttk.Button(main_frame, text="💾 Spara personliga mått", command=self._save_profile).grid(row=10, column=1, sticky=tk.W, pady=(0, 15))
+
+        # 2. Change Password Section
+        ttk.Separator(main_frame, orient='horizontal').grid(row=11, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        ttk.Label(main_frame, text="Byt Lösenord (Re-wrap DEK)", font=('Segoe UI', 11, 'bold')).grid(row=12, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
+        ttk.Label(main_frame, text="Krypteringsnyckeln (DEK) packas om med ditt nya lösenord. Hälsodata behöver ej krypteras om.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=13, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+
+        ttk.Label(main_frame, text="Nuvarande lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=14, column=0, sticky=tk.W, pady=4)
+        self.curr_pwd_var = tk.StringVar(value="")
+        ttk.Label(main_frame, text="Nytt lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=13, column=0, sticky=tk.W, pady=4)
+        self.new_pwd_var = tk.StringVar(value="")
+        ttk.Entry(main_frame, textvariable=self.new_pwd_var, width=35, show="*").grid(row=13, column=1, sticky=(tk.W, tk.E), pady=4)
+
+        ttk.Label(main_frame, text="Bekräfta lösenord:", font=('Segoe UI', 9, 'bold')).grid(row=14, column=0, sticky=tk.W, pady=4)
+        self.new_pwd_conf_var = tk.StringVar(value="")
+        ttk.Entry(main_frame, textvariable=self.new_pwd_conf_var, width=35, show="*").grid(row=14, column=1, sticky=(tk.W, tk.E), pady=4)
+
+        self.pwd_status_var = tk.StringVar(value="")
+        ttk.Label(main_frame, textvariable=self.pwd_status_var, font=('Segoe UI', 8, 'italic'), foreground='#16A34A').grid(row=15, column=1, sticky=tk.W, pady=(2, 5))
+
+        ttk.Button(main_frame, text="🔑 Uppdatera lösenord", command=self._change_password).grid(row=16, column=1, sticky=tk.W, pady=(0, 15))
+
+        # 3. Rotate Recovery Key
+        ttk.Separator(main_frame, orient='horizontal').grid(row=17, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        ttk.Label(main_frame, text="Återställningsnyckel", font=('Segoe UI', 11, 'bold')).grid(row=18, column=0, columnspan=2, sticky=tk.W, pady=(5, 5))
+        ttk.Label(main_frame, text="Om du misstänker att din återställningsnyckel har komprometterats kan du generera en ny.", font=('Segoe UI', 8, 'italic'), foreground='#4B5563').grid(row=19, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+
+        ttk.Button(main_frame, text="🔄 Skapa ny återställningsnyckel", command=self._rotate_recovery_key).grid(row=20, column=1, sticky=tk.W, pady=(0, 15))
+
+        # 4. Danger Zone - Delete Account
+        ttk.Separator(main_frame, orient='horizontal').grid(row=21, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        danger_frame = tk.Frame(main_frame, bg='#FEF2F2', relief='solid', bd=1, padx=12, pady=12)
+        danger_frame.grid(row=22, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 10))
+
+        ttk.Label(danger_frame, text="⚠️ Farlig zon: Radera konto", font=('Segoe UI', 10, 'bold'), foreground='#991B1B').pack(anchor=tk.W, pady=(0, 4))
+        ttk.Label(
+            danger_frame,
+            text="Om du raderar ditt konto tas all din krypterade hälsodata permanent bort från MariaDB-servern. Denna åtgärd kan INTE ångras!",
+            wraplength=480,
+            font=('Segoe UI', 8),
+            foreground='#7F1D1D'
+        ).pack(anchor=tk.W, pady=(0, 8))
+
+        del_btn = tk.Button(
+            danger_frame,
+            text="🗑️ Radera konto och all hälsodata",
+            bg='#DC2626',
+            fg='#FFFFFF',
+            activebackground='#B91C1C',
+            activeforeground='#FFFFFF',
+            font=('Segoe UI', 9, 'bold'),
+            command=self._delete_account
+        )
+        del_btn.pack(anchor=tk.W)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def _save_profile(self):
+        try:
+            h = float(self.height_var.get().replace(',', '.').strip()) if self.height_var.get().strip() else 0.0
+            a = float(self.age_var.get().replace(',', '.').strip()) if self.age_var.get().strip() else 0.0
+            w = float(self.weight_var.get().replace(',', '.').strip()) if self.weight_var.get().strip() else 0.0
+            r_hr = float(self.resting_hr_var.get().replace(',', '.').strip()) if self.resting_hr_var.get().strip() else 0.0
+            m_hr = float(self.max_hr_var.get().replace(',', '.').strip()) if self.max_hr_var.get().strip() else 0.0
+        except ValueError:
+            self.prof_status_var.set("❌ Kontrollera sifferformat för mått.")
+            return
+
+        p_data = {
+            'sex': self.sex_var.get(),
+            'height_cm': h,
+            'age': a,
+            'weight_kg': w,
+            'resting_hr': r_hr,
+            'max_hr': m_hr
+        }
+
+        try:
+            conn = garmin_db.get_mariadb_connection()
+            try:
+                auth.update_user_profile(conn, self.user_session.user_id, self.user_session.dek, p_data)
+                self.user_session.encrypted_profile = p_data
+                self.prof_status_var.set("✓ Sparat krypterat i MariaDB!")
+                if self.on_profile_saved:
+                    self.on_profile_saved(p_data)
+            finally:
+                conn.close()
+        except Exception as e:
+            self.prof_status_var.set(f"❌ Fel vid sparande: {e}")
+
+    def _change_password(self):
+        curr = self.curr_pwd_var.get()
+        new_p = self.new_pwd_var.get()
+        conf = self.new_pwd_conf_var.get()
+
+        if not curr or not new_p:
+            self.pwd_status_var.set("❌ Fyll i lösenordsfälten.")
+            return
+        if new_p != conf:
+            self.pwd_status_var.set("❌ Nya lösenorden matchar inte.")
+            return
+        if len(new_p) < 8:
+            self.pwd_status_var.set("❌ Det nya lösenordet måste vara minst 8 tecken.")
+            return
+
+        try:
+            conn = garmin_db.get_mariadb_connection()
+            try:
+                auth.change_user_password(conn, self.user_session.user_id, curr, new_p)
+                self.pwd_status_var.set("✓ Lösenordet har uppdaterats!")
+                self.curr_pwd_var.set("")
+                self.new_pwd_var.set("")
+                self.new_pwd_conf_var.set("")
+            finally:
+                conn.close()
+        except Exception as e:
+            self.pwd_status_var.set(f"❌ Fel: {e}")
+
+    def _rotate_recovery_key(self):
+        if not messagebox.askyesno(
+            "Rotera återställningsnyckel",
+            "Vill du generera en ny återställningsnyckel?\nDen gamla nyckeln kommer att ogiltigförklaras.",
+            parent=self
+        ):
+            return
+
+        try:
+            conn = garmin_db.get_mariadb_connection()
+            try:
+                new_key = auth.rotate_recovery_key(conn, self.user_session.user_id, self.user_session.dek)
+                RecoveryKeyModal(self, self.user_session.email, new_key)
+            finally:
+                conn.close()
+        except Exception as e:
+            messagebox.showerror("Fel", f"Kunde inte rotera nyckel: {e}", parent=self)
+
+    def _delete_account(self):
+        first_confirm = messagebox.askyesno(
+            "⚠️ VARNING: Radera konto",
+            "Är du helt säker på att du vill radera ditt konto?\n\n"
+            "All din krypterade hälsodata och profil i MariaDB tas bort permanent!",
+            parent=self,
+            icon='warning'
+        )
+        if not first_confirm:
+            return
+
+        second_confirm = messagebox.askyesno(
+            "🛑 Sista bekräftelsen",
+            "Detta är din sista chans att ångra dig. Data kan inte återskapas!\n\nVill du fortsätta raderingen?",
+            parent=self,
+            icon='error'
+        )
+        if not second_confirm:
+            return
+
+        try:
+            conn = garmin_db.get_mariadb_connection()
+            try:
+                auth.delete_user_account(conn, self.user_session.user_id, self.user_session.email)
+            finally:
+                conn.close()
+            messagebox.showinfo("Konto raderat", "Ditt konto och all data har raderats permanent.", parent=self)
+            self.destroy()
+            if self.on_logout:
+                self.on_logout()
+        except Exception as e:
+            messagebox.showerror("Fel vid radering", f"Kunde inte radera kontot: {e}", parent=self)
+
+
 class HealthChatApp:
     """Main application class for HealthChat desktop app"""
     
-    def __init__(self, root):
+    def __init__(self, root, user_session: Optional[auth.UserSession] = None):
         """Initialize the application"""
         self.root = root
-        self.root.title("HealthChat")
+        self.user_session = user_session
+        self.root.title(f"HealthChat - {user_session.email}" if user_session else "HealthChat")
         self.root.geometry("1650x950")  # Expanded for side-by-side charts & chat view
-        self.db = GarminDatabase()
+        if user_session:
+            self.db = GarminDatabase(user_id=user_session.user_id, dek=user_session.dek)
+        else:
+            self.db = GarminDatabase()
         
         # Set window icon (works in both script and exe)
         try:
@@ -1516,6 +2256,7 @@ class HealthChatApp:
                     
                     # Window state (position and size)
                     window_state = config.get('window_state', {})
+                    self.last_window_state = window_state.copy() if isinstance(window_state, dict) else {}
                     if window_state:
                         try:
                             width = max(window_state.get('width', 1650), 1650)
@@ -1659,15 +2400,20 @@ class HealthChatApp:
             logger.debug(f"Could not sync profile weight from DB: {e}")
 
     def on_closing(self):
-        """Handle window close event - save state and exit"""
+        """Handle window close event - save state and exit cleanly"""
         try:
             # Save current configuration including window state
             self.save_config()
         except Exception as e:
             logger.error(f"Error saving config on close: {e}")
         finally:
-            # Close the application
-            self.root.destroy()
+            # Close the application and ensure all background threads terminate
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            import os
+            os._exit(0)
             
     def prompt_for_credentials(self):
         """Prompt user to enter credentials on first run"""
@@ -1796,7 +2542,12 @@ class HealthChatApp:
                        font=('Segoe UI', 11, 'bold'))
         
         style.configure('TLabel',
-                       background=self.colors['bg'],
+                       background=self.colors['card_bg'],
+                       foreground=self.colors['text'],
+                       font=('Segoe UI', 10))
+        
+        style.configure('Card.TLabel',
+                       background=self.colors['card_bg'],
                        foreground=self.colors['text'],
                        font=('Segoe UI', 10))
         
@@ -1866,16 +2617,19 @@ class HealthChatApp:
         file_menu.add_command(label="📥 Kör Check-in (Alla Källor)", command=self.perform_unified_checkin)
         file_menu.add_command(label="🔄 Synka Full Historik (Alla Källor)", command=self.perform_full_historical_sync)
         file_menu.add_separator()
+        file_menu.add_command(label="👤 Min Profil & Konto…", command=self.open_user_profile)
         file_menu.add_command(label="💾 Spara Chat...", command=self.save_chat_history)
         file_menu.add_command(label="📄 Exportera Rapport...", command=self.export_conversation_report)
         file_menu.add_separator()
         file_menu.add_command(label="⚙️ Inställningar", command=self.open_settings)
         file_menu.add_separator()
-        file_menu.add_command(label="🚪 Avsluta", command=self.root.quit)
+        file_menu.add_command(label="🚪 Logga ut", command=self.logout)
+        file_menu.add_command(label="❌ Avsluta", command=self.root.quit)
         menubar.add_cascade(label="Arkiv", menu=file_menu)
         
         # 2. Garmin Menu
         garmin_menu = tk.Menu(menubar, tearoff=0)
+        garmin_menu.add_command(label="⚙️ Garmin-inloggning…", command=self.open_garmin_connect_dialog)
         garmin_menu.add_command(label="▶ Anslut till Garmin Connect", command=self.connect_to_garmin)
         garmin_menu.add_command(label="📥 Kör Check-in (Garmin)", command=self.perform_garmin_checkin)
         garmin_menu.add_command(label="🔄 Full Synk (365 Dagar)", command=self.perform_full_historical_sync)
@@ -2570,7 +3324,8 @@ class HealthChatApp:
             colors=self.colors,
             on_toggle_chat=self.toggle_chat_pane,
             on_checkin=self.perform_unified_checkin,
-            profile=self.get_user_profile()
+            profile=self.get_user_profile(),
+            ai_client_getter=lambda: getattr(self, 'ai_client', None)
         )
         self.charts_view.pack(fill=tk.BOTH, expand=True)
         
@@ -3137,7 +3892,67 @@ class HealthChatApp:
                     self.add_message("System", f"Settings updated! Now using: {provider_name}", 'system')
                 except Exception as e:
                     self.add_message("System", f"Error updating AI client: {e}", 'system')
-                    
+
+    def open_garmin_connect_dialog(self):
+        """Open dedicated GarminConnectDialog (K-9)."""
+        dlg = GarminConnectDialog(
+            self.root,
+            email=self.garmin_email or '',
+            password=self.garmin_password or '',
+            colors=self.colors,
+            db=self.db,
+            on_success_callback=self._on_garmin_dialog_connected
+        )
+        self.root.wait_window(dlg)
+
+    def _on_garmin_dialog_connected(self, res):
+        """Callback when GarminConnectDialog successfully connects."""
+        self.garmin_email = res['email']
+        if res.get('save_creds'):
+            self.garmin_password = res['password']
+        self.garmin_handler = res['handler']
+        self.authenticated = True
+        self.mfa_required = False
+        self.save_config()
+        self.update_status(f"Ansluten till Garmin Connect ({self.garmin_email})", False)
+        self._sync_today_garmin_summary()
+
+    def open_user_profile(self):
+        """Open User Profile & Account Dialog (K-5)."""
+        if not hasattr(self, 'user_session') or not self.user_session:
+            messagebox.showinfo("Profil", "Ingen aktiv krypterad användarsession.", parent=self.root)
+            return
+
+        def _on_prof_saved(p_data):
+            self.user_sex = p_data.get('sex', 'male')
+            self.user_height_cm = p_data.get('height_cm', 0.0)
+            self.user_age = p_data.get('age', 0)
+            self.user_weight_kg = p_data.get('weight_kg', 0.0)
+            self.save_config()
+            try:
+                if hasattr(self, 'charts_view') and self.charts_view:
+                    self.charts_view.set_profile(self.get_user_profile())
+            except Exception:
+                pass
+
+        dlg = ProfileDialog(
+            self.root,
+            user_session=self.user_session,
+            current_profile=self.get_user_profile(),
+            on_profile_saved=_on_prof_saved,
+            on_logout=self.logout,
+            colors=self.colors
+        )
+        self.root.wait_window(dlg)
+
+    def logout(self):
+        """Log out user and restart or close app."""
+        if messagebox.askyesno("Logga ut", "Vill du logga ut från HealthChat Desktop?", parent=self.root):
+            if hasattr(self, 'user_session') and self.user_session:
+                auth.logout_user(self.user_session.email)
+            messagebox.showinfo("Utloggad", "Du har loggats ut. Programmet avslutas.", parent=self.root)
+            self.root.quit()
+
     def initialize_ai_client(self):
         """Initialize AI client based on selected provider"""
         try:
@@ -3314,8 +4129,8 @@ class HealthChatApp:
                 self.root.after(0, lambda: self._on_auth_failure("Failed to initialize AI client. Please check your settings."))
                 return
             
-            # Initialize Garmin handler with stored credentials
-            self.garmin_handler = GarminDataHandler(self.garmin_email, self.garmin_password)
+            # Initialize Garmin handler with stored credentials and encrypted database
+            self.garmin_handler = GarminDataHandler(self.garmin_email, self.garmin_password, db=self.db)
             result = self.garmin_handler.authenticate()
             
             if result.get('success'):
@@ -4009,7 +4824,12 @@ class HealthChatApp:
                        font=('Segoe UI', 11, 'bold'))
         
         style.configure('TLabel',
-                       background=self.colors['bg'],
+                       background=self.colors['card_bg'],
+                       foreground=self.colors['text'],
+                       font=('Segoe UI', 10))
+        
+        style.configure('Card.TLabel',
+                       background=self.colors['card_bg'],
                        foreground=self.colors['text'],
                        font=('Segoe UI', 10))
         
@@ -5611,6 +6431,62 @@ class ChatHistoryViewer(tk.Toplevel):
             messagebox.showerror("Error", f"Failed to open folder: {e}", parent=self)
 
 
+def bring_existing_instance_to_front():
+    """Find visible HealthChat window and bring it to foreground."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        
+        found_hwnd = [0]
+        def enum_proc(hwnd, lparam):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value
+                    if title.startswith("HealthChat"):
+                        found_hwnd[0] = hwnd
+                        return False
+            return True
+
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows(EnumWindowsProc(enum_proc), 0)
+        
+        if found_hwnd[0]:
+            user32.ShowWindow(found_hwnd[0], 9)  # SW_RESTORE
+            user32.SetForegroundWindow(found_hwnd[0])
+            return True
+    except Exception as e:
+        logger.warning(f"Error bringing existing instance to front: {e}")
+    return False
+
+
+def cleanup_stale_instances():
+    """Terminate stale background HealthChat processes that have no window."""
+    if sys.platform != 'win32':
+        return
+    try:
+        import os, subprocess, time
+        my_pid = os.getpid()
+        cmd = 'Get-Process -Name HealthChatDesktop, pythonw -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id'
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True)
+        if res.stdout:
+            for line in res.stdout.strip().splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pid = int(line)
+                    if pid != my_pid:
+                        logger.info(f"Terminating stale background process PID {pid}")
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+        time.sleep(0.5)
+    except Exception as e:
+        logger.warning(f"Error cleaning up stale instances: {e}")
+
+
 def ensure_single_instance(mutex_name="HealthChatDesktop_SingleInstance_Mutex"):
     """Ensure only one instance of the application runs at a time on Windows."""
     if sys.platform == 'win32':
@@ -5637,12 +6513,21 @@ def main():
     # Single-instance enforcement
     is_single_instance, _mutex = ensure_single_instance()
     if not is_single_instance:
-        print("Another instance of HealthChat Desktop is already running. Exiting.")
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showinfo("HealthChat Desktop", "HealthChat Desktop körs redan!")
-        root.destroy()
-        sys.exit(0)
+        brought_to_front = bring_existing_instance_to_front()
+        if brought_to_front:
+            logger.info("Existing instance found and brought to front. Exiting.")
+            sys.exit(0)
+        else:
+            logger.warning("Mutex exists but no visible window found. Cleaning up stale instances.")
+            cleanup_stale_instances()
+            is_single_instance, _mutex = ensure_single_instance()
+            if not is_single_instance:
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                messagebox.showinfo("HealthChat Desktop", "HealthChat Desktop körs redan!")
+                root.destroy()
+                sys.exit(0)
 
     print("\n" + "="*60)
     print("HealthChat - Desktop Application")
@@ -5659,25 +6544,103 @@ def main():
     splash = SplashScreen(root)
     
     def load_app():
-        """Load the main application"""
+        """Load the main application with MariaDB authentication (K-2, K-4)"""
         try:
-            splash.update_status("Initializing...")
+            splash.update_status("Ansluter till krypterad databas...")
             root.update()
             
-            # Create main app
-            splash.update_status("Loading configuration...")
-            app = HealthChatApp(root)
+            last_email = "anders@andrix.se"
+            try:
+                config_path = Path.home() / ".healthchat" / "config.json"
+                if config_path.exists():
+                    try:
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                            last_email = cfg.get("last_email") or cfg.get("garmin_email") or last_email
+                    except Exception:
+                        pass
+            except Exception as dbe:
+                logger.warning(f"Could not read config: {dbe}")
+
+            # Always require explicit user login on app startup
+            try:
+                splash.close()
+            except Exception:
+                pass
+
+            login_dlg = LoginDialog(root, default_email=last_email)
+            root.wait_window(login_dlg)
+            user_session = login_dlg.session
+            if not user_session:
+                # User closed login dialog without authenticating
+                root.destroy()
+                import os
+                os._exit(0)
+                # Save last logged in email
+                try:
+                    config_path = Path.home() / ".healthchat" / "config.json"
+                    config_path.parent.mkdir(exist_ok=True)
+                    cfg = {}
+                    if config_path.exists():
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                    cfg["last_email"] = user_session.email
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        json.dump(cfg, f, indent=2)
+                except Exception:
+                    pass
+            else:
+                try:
+                    if splash.winfo_exists():
+                        splash.update_status(f"Inloggad som {user_session.email}...")
+                        root.update()
+                except Exception:
+                    pass
+
+            # Create main app with authenticated session
+            try:
+                if splash.winfo_exists():
+                    splash.update_status("Laddar hälsodata...")
+            except Exception:
+                pass
+            app = HealthChatApp(root, user_session=user_session)
             
             # Close splash and show main window
-            splash.update_status("Ready!")
-            root.after(500, lambda: (splash.close(), root.deiconify()))
+            try:
+                if splash.winfo_exists():
+                    splash.close()
+            except Exception:
+                pass
+            root.deiconify()
+            root.state('normal')
+            root.attributes('-topmost', True)
+            root.update()
+            root.attributes('-topmost', False)
+            root.lift()
+            root.focus_force()
+            if sys.platform == 'win32':
+                try:
+                    import ctypes
+                    hwnd = int(root.frame(), 16) if hasattr(root, 'frame') else 0
+                    if hwnd:
+                        ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
             
         except Exception as e:
-            splash.close()
+            logger.error(f"Startup error: {e}", exc_info=True)
+            try:
+                if splash.winfo_exists():
+                    splash.close()
+            except Exception:
+                pass
             root.deiconify()
             messagebox.showerror("Startup Error", 
                                f"Failed to start application:\n\n{e}")
             root.destroy()
+            import os
+            os._exit(1)
     
     # Load app after splash is shown
     root.after(100, load_app)

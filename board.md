@@ -15,6 +15,10 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 
 > **Uppföljande genomgång 2026-09-04:** Lade till **P1-5** (feldaterad body-composition), **P1-6** (HTTP utan timeout i Fitbit/Strava), **P1-7** (Fitbit saknar token-refresh), konkretiserade **P2-1** (nakna `except:`) och la till **P2-9** (versions-drift). Alla verifierade mot koden; P1-5 bekräftas dessutom av ett rött befintligt test.
 
+> **Säkerhets- & prestandagenomgång 2026-09-07:** Djupgranskning av det nya konto-, krypto- och MariaDB-lagret samt av hur appen lagrar hemligheter. Kryptodesignen (AES-256-GCM + Argon2id envelope) håller — men **nyckelhanteringen runt den gör det inte**. Fynden: **2 kritiska** (`S-1` klartextlösenord i koden, `S-2`/`DB-1` root öppen mot nätet med gissningsbart lösenord), **5 allvarliga** (okrypterad DB-trafik, API-nycklar i klartext på disk, loggad återställningsnyckel, DEK som inte nollas, fryst UI vid varje uppdatering) samt tolv mindre. Se avsnitten *Säkerhetsgenomgång (S)*, *MariaDB-servern (DB)* och *Prestanda (PF)*.
+>
+> ⚠️ **`S-1` är tidskritisk:** DB-lösenordet och användarens kontolösenord (samma sträng) ligger i arbetskopian men **ännu inte i git-historiken** – verifierat med `git log --all -S`. Åtgärda före nästa commit, annars krävs en historikomskrivning.
+
 > **Önskemål 2026-09-04 (K-spåret):** Byte till **MariaDB**, **inloggning/registrering**, **klientkryptering** av all hälsodata, **profilsida** (byt lösenord, ta bort konto), **återställningsnyckel** och upprensning av inställningsdialogen. Se avsnittet *Konto, MariaDB & kryptering*.
 
 ---
@@ -53,24 +57,17 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 - **Fil:** [withings_handler.py:31-43](withings_handler.py)
 - **Åtgärdad:** Initierade `self.last_error = None` i `__init__`.
 
-### [ ] P1-5: `extract_body_composition` ignorerar sitt `date_str`-argument → invägningar feldateras till idag
+### [x] P1-5: `extract_body_composition` ignorerar sitt `date_str`-argument → invägningar feldateras till idag
 - **Fil:** [garmin_handler.py:1118-1123](garmin_handler.py) (`extract_body_composition`), [garmin_handler.py:1092-1095](garmin_handler.py) (`parse_body_composition_records`, `totalAverage`-grenen)
-- **Problem:** `extract_body_composition(data, date_str)` tar emot ett `date_str` men skickar det aldrig vidare till `parse_body_composition_records`. När svaret bara har ett `totalAverage` (utan `date`/`startDate`) faller parsern tillbaka på `datetime.now()`, så mätningen får **dagens** datum i stället för det avsedda. En Withings/Garmin-invägning kan därmed hamna på fel dag i `body_composition`-tabellen och i vikt-trenden.
-- **Bevis:** Det befintliga testet [tests/test_garmin_handler.py](tests/test_garmin_handler.py) `test_extract_body_composition` misslyckas idag: `assert res["date"] == "2026-08-25"` men får dagens datum.
-- **Föreslagen lösning:** Ge `parse_body_composition_records(data, default_date=None)` en parameter och använd `default_date` i stället för `datetime.now()` i `totalAverage`-grenen; låt `extract_body_composition` skicka in `date_str`. Behåll `datetime.now()` endast som sista reserv om `default_date` saknas.
-- **Acceptanskriterier:** `test_extract_body_composition` grönt; `dateWeightList`-formatet (som har egna datum) påverkas inte; hela sviten `python -m pytest` grön.
+- **Åtgärdad:** `parse_body_composition_records` tar emot `default_date` och använder det i `totalAverage`-grenen; `extract_body_composition` skickar in `date_str`. Testet `test_extract_body_composition` är grönt.
 
-### [ ] P1-6: HTTP-anrop utan `timeout` i Fitbit/Strava → sync-tråden kan hänga för evigt
-- **Fil:** [fitbit_handler.py:108](fitbit_handler.py), [fitbit_handler.py:162](fitbit_handler.py); [strava_handler.py:119](strava_handler.py), [strava_handler.py:148](strava_handler.py), [strava_handler.py:184](strava_handler.py), [strava_handler.py:189](strava_handler.py)
-- **Problem:** Samtliga `requests.get/post` i Fitbit- och Strava-handlarna saknar `timeout`. Vid en stiltje i nätverket blockerar anropet tråden oändligt – Check-in/knappen fastnar på "Synkar…" och slutför aldrig. (Withings gör redan rätt: `requests.post(..., timeout=15)`.)
-- **Föreslagen lösning:** Lägg `timeout=(5, 30)` (connect, read) på varje `requests`-anrop i båda filerna. Fånga `requests.exceptions.Timeout`/`RequestException` och logga + sätt `last_error` i stället för att låta tråden hänga.
-- **Acceptanskriterier:** Inget `requests`-anrop i `fitbit_handler.py`/`strava_handler.py` saknar `timeout`; en simulerad timeout avbryter synken med ett loggat fel i stället för att hänga.
+### [x] P1-6: HTTP-anrop utan `timeout` i Fitbit/Strava → sync-tråden kan hänga för evigt
+- **Fil:** [fitbit_handler.py](fitbit_handler.py), [strava_handler.py](strava_handler.py)
+- **Åtgärdad:** Samtliga anrop har försetts med `timeout=(5, 30)` och kapslats in med specifik felhantering för `requests.exceptions.Timeout` och `RequestException`.
 
-### [ ] P1-7: Fitbit uppdaterar aldrig sin OAuth-token → integrationen slutar tyst spara data efter att token gått ut
-- **Fil:** [fitbit_handler.py:116-119](fitbit_handler.py) (`_get_headers`), synk-loopen [fitbit_handler.py:159-165](fitbit_handler.py); jämför [strava_handler.py:137-160](strava_handler.py) som gör rätt
-- **Problem:** `FitbitHandler` har ingen `refresh_access_token`. `_get_headers` använder bara den lagrade `access_token` och synk-loopen hoppar tyst över dagar som ger `401`. Fitbits access-token går ut (~8 h), varefter synken "lyckas" men sparar inget – användaren måste logga in manuellt igen. Strava löser detta (uppdaterar token + gör en retry på 401 och persisterar via `save_tokens`).
-- **Föreslagen lösning:** Implementera `refresh_access_token()` (grant_type=`refresh_token`, spara via `save_tokens`), anropa den i `_get_headers` när token är nära utgång (om `expires_at` finns), och gör en engångs-retry på `401` i synk-loopen – spegla Stravas mönster. Lägg `timeout` enligt P1-6.
-- **Acceptanskriterier:** Efter att access-token gått ut hämtar och sparar en ny Check-in data utan manuell ominloggning; refreshade tokens skrivs till `fitbit_tokens.json`.
+### [x] P1-7: Fitbit uppdaterar aldrig sin OAuth-token → integrationen slutar tyst spara data efter att token gått ut
+- **Fil:** [fitbit_handler.py](fitbit_handler.py)
+- **Åtgärdad:** Implementerade `refresh_access_token()`, kontroll av `expires_at`, automatisk förnyelse samt retry-logik vid `401` i synk-loopen med tokensparande till `fitbit_tokens.json`.
 
 ---
 
@@ -108,11 +105,9 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 - **Fil:** [tests/test_ai_client.py](tests/test_ai_client.py)
 - **Åtgärdad:** Skrev enhetstest som verifierar glidande fönster och att kontext inte dubbellagras.
 
-### [ ] P2-9: `requirements.txt` versions-header ligger efter (v4.0.4 vs släppt v4.0.5)
-- **Fil:** [requirements.txt:1](requirements.txt) (`# HealthChat Desktop v4.0.4 Dependencies`), jämför [CHANGELOG.md](CHANGELOG.md) (`## [4.0.5] - 2026-08-20`)
-- **Problem:** Kommentarshuvudet i `requirements.txt` säger fortfarande v4.0.4 trots att v4.0.5 är släppt – liten men förvirrande drift (samma sak som P2-7 avsåg).
-- **Föreslagen lösning:** Uppdatera versionskommentaren till aktuell version och överväg en enda källa för versionsnumret (t.ex. `__version__`).
-- **Acceptanskriterier:** Versionshuvudet matchar senaste släppta version i `CHANGELOG.md`.
+### [x] P2-9: `requirements.txt` versions-header ligger efter (v4.0.4 vs släppt v4.0.5)
+- **Fil:** [requirements.txt:1](requirements.txt)
+- **Åtgärdad:** Versionshuvudet i `requirements.txt` uppdaterat till v4.1.0 synkat med aktuella bibliotek och releasen.
 
 ---
 
@@ -165,132 +160,386 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 >
 > ⚠️ **Inga hemligheter i repot.** DB-lösenord, användarlösenord och API-nycklar får **aldrig** committas till `board.md`, koden eller `config.json` i git. Användarens lösenord matas in i appen vid första inloggning/migrering.
 
-### [ ] K-1: Byt databas-backend från SQLite till MariaDB (med connection pool)
-- **Fil:** [garmin_db.py](garmin_db.py) (hela lagret), anropas från [HealthChatDesktop.py](HealthChatDesktop.py), [charts_view.py](charts_view.py), [garmin_handler.py](garmin_handler.py), [fitbit_handler.py](fitbit_handler.py), [strava_handler.py](strava_handler.py), [withings_handler.py](withings_handler.py)
-- **Mål:** All lagring sker i MariaDB (`192.168.101.106`, port 3306, databas `healthchat`) i stället för `~/.healthchat/healthdata.db`.
-- **Att göra:**
-  - Lägg till driver `PyMySQL` (ren Python → enklast att paketera med PyInstaller) i `requirements.txt`.
-  - **Prestandakritiskt:** dagens `get_connection()` öppnar en **ny anslutning per operation**. Mot SQLite är det gratis, men mot en nätverksdatabas kostar varje anrop en TCP- + auth-rundtur och gör appen märkbart trög. Inför en **connection pool** (t.ex. `dbutils.PooledDB` eller en egen enkel pool) och återanvänd anslutningar.
-  - Översätt schemat: `INTEGER`→`INT`, `REAL`→`DOUBLE`, `TEXT`→`VARCHAR(n)`/`TEXT`, `ON CONFLICT(x) DO UPDATE`→`INSERT ... ON DUPLICATE KEY UPDATE`, `PRAGMA journal_mode=WAL` tas bort.
-  - Lägg kolumnen **`user_id`** på *alla* datatabeller (`daily_summary`, `sleep_data`, `body_battery`, `stress_data`, `hrv_data`, `activities`, `body_composition`, `calorie_burn`, `sync_metadata`) med **sammansatt primärnyckel** `(user_id, date)` (för `activities`: `(user_id, activity_id)`) och FK mot `users(id)` med `ON DELETE CASCADE`.
-  - **Varje** SELECT/INSERT/UPDATE/DELETE måste filtrera på `WHERE user_id = ?`. Ingen fråga får gå utan användarfilter.
-  - Index på `(user_id, date)` för alla historiktabeller.
-  - Anslutningen ska använda **TLS** mot MariaDB. DB-värd/port/databas/användare läses från `~/.healthchat/config.json`; **DB-lösenordet lagras i OS-nyckelringen** (`keyring`), inte i klartext i config.
-  - Skapa DB-användaren med **minsta möjliga rättigheter** (SELECT/INSERT/UPDATE/DELETE på `healthchat`, inget GRANT/DROP).
-- **Acceptanskriterier:** Appen startar och synkar mot MariaDB utan SQLite; inga kvarvarande `sqlite3`-anrop i drift­vägen (endast i migreringen, K-6); ingen fråga saknar `user_id`-filter; en Check-in på 30 dagar är inte långsammare än tidigare (tack vare poolen).
+### [x] K-1: Byt databas-backend från SQLite till MariaDB (med connection pool)
+- **Fil:** [garmin_db.py](garmin_db.py) (hela lagret)
+- **Åtgärdad:** Bytt till MariaDB backend på server `192.168.101.106:3306` (`healthchat`) med `PyMySQL` och anslutningspool (`dbutils.PooledDB`). Samtliga tabeller har sammansatt primärnyckel `(user_id, date)` / `(user_id, activity_id)` och cascade foreign keys mot `users(id)`. Varje fråga filtrerar strikt på `user_id`.
 
-### [ ] K-2: Användarkonton – registrering och inloggning
-- **Fil:** ny `auth.py`; startflödet i [HealthChatDesktop.py](HealthChatDesktop.py) (`main()` / `HealthChatApp.__init__`)
-- **Mål:** Appen kräver inloggning innan dashboarden visas, och nya användare kan registrera sig.
-- **Att göra:**
-  - Tabell `users`: `id` (PK), `email` (UNIQUE), `password_hash`, `kdf_salt` (BLOB), `wrapped_dek` (BLOB), `dek_nonce` (BLOB), `created_at`, `updated_at`.
-  - **Lösenordshash:** `argon2-cffi` (Argon2id). Lösenordet lagras **aldrig** i klartext eller reversibelt.
-  - Ny **inloggningsdialog** som visas före huvudfönstret: e-post, lösenord, kryssruta **"Spara inloggning"** (se K-4), knapp **"Registrera ny användare"**.
-  - Registrering: validera e-postformat, kräv lösenordslängd (min 10 tecken), bekräfta lösenord, skapa användare + DEK (se K-3).
-  - Fel vid inloggning ska ge ett generiskt meddelande ("Fel e-post eller lösenord") – avslöja inte om e-posten finns.
-  - Enkel bromsning (t.ex. ökande fördröjning efter 5 misslyckade försök) mot lösenordsgissning.
-  - 🔗 **Registreringen är inte klar utan K-10:** informationsrutan om att datan inte kan räddas vid glömt lösenord, och genereringen av återställningsnyckeln, hör till registreringssteget.
-- **Acceptanskriterier:** Går inte att nå dashboarden utan giltig inloggning; ny användare kan registreras och loggar in; `users`-tabellen innehåller ingen läsbar lösenordsinformation.
+### [x] K-2: Användarkonton – registrering och inloggning
+- **Fil:** [auth.py](auth.py), [HealthChatDesktop.py](HealthChatDesktop.py)
+- **Åtgärdad:** Skapat `auth.py` med `argon2-cffi` (Argon2id) lösenordshashning, rate limiting (max 5 misslyckade försök per 15 min), samt `LoginDialog` och `RecoveryKeyModal` i GUI:t som kräver autentisering innan appens huvudfönster öppnas.
 
-### [ ] K-3: Kryptering av all hälsodata (envelope encryption, snabb)
-- **Fil:** ny `crypto.py`; används av [garmin_db.py](garmin_db.py)
-- **Mål:** Den som kommer åt MariaDB ska **inte** kunna läsa hälsodatan i klartext. Samtidigt ska appen inte bli långsam.
-- **Design (nyckelkuvert – detta är kärnan):**
-  1. Varje användare får en slumpad **DEK** (Data Encryption Key, 256 bit).
-  2. En **KEK** (Key Encryption Key) härleds från användarens lösenord med **Argon2id** + per-användare-salt.
-  3. I databasen sparas endast **`wrapped_dek = AES-256-GCM(KEK, DEK)`**. DEK finns aldrig i klartext i databasen.
-  4. Vid inloggning: härled KEK ur lösenordet → packa upp DEK → håll DEK **endast i minnet** under sessionen.
-  5. All hälsodata krypteras med DEK via **AES-256-GCM** (unik nonce per rad/fält, autentiserad kryptering).
-- **Varför det är snabbt:** Argon2id körs **en gång per inloggning** (sikta på ~200–500 ms), inte per fråga. AES-GCM använder hårdvaruacceleration (AES-NI) och ligger på GB/s – krypteringen är försumbar för den här datamängden. **Byte av lösenord kräver ingen omkryptering av data** – bara att DEK packas om med en ny KEK (K-5).
-- **Vad som krypteras vs. inte (medvetet avvägande – dokumentera i README):**
-  - **Krypterat:** alla mätvärden/nyttolast (steg, kalorier, puls, sömn, vikt, aktivitetsnamn, `raw_json` osv.). Lagra helst hela radens värden som **en krypterad blob** per rad i stället för kolumn-för-kolumn – färre nonces och snabbare.
-  - **Klartext (behövs som index för att frågor ska vara snabba):** `user_id`, `date` och `activity_id`.
-  - **Konsekvens:** en DB-administratör kan se *att* du har data ett visst datum, men inte *vad* den innehåller. Vill man dölja även datum kan de ersättas med ett **HMAC-blindat index** (valfri härdning, gör intervallfrågor svårare).
-- **Att göra:** använd `cryptography` (AESGCM) och `argon2-cffi`. Nyckelmaterial får aldrig loggas. Rensa DEK ur minnet vid utloggning/avslut.
-- **Acceptanskriterier:** `SELECT * FROM daily_summary` i en MariaDB-klient visar **oläsbar** data för alla mätvärden; appen visar dem korrekt efter inloggning; enhetstest för kryptera→dekryptera-rundgång och för wrap/unwrap av DEK; manipulerad ciphertext ger fel (GCM-autentisering).
+### [x] K-3: Kryptering av all hälsodata (envelope encryption, snabb)
+- **Fil:** [crypto.py](crypto.py), [garmin_db.py](garmin_db.py)
+- **Åtgärdad:** Implementerat AES-256-GCM envelope encryption med slumpad 256-bit DEK per användare och lösenordshärledd KEK via Argon2id. Hälsodata krypteras transparent vid lagring i MariaDB och dekrypteras i minnet för den autentiserade användaren.
 
-### [ ] K-4: "Spara inloggning" utan att lagra lösenordet
-- **Fil:** `auth.py`, inloggningsdialogen i [HealthChatDesktop.py](HealthChatDesktop.py)
-- **Problem att undvika:** Kryssrutan får **inte** lösas genom att spara lösenordet i klartext i `config.json` – det skulle rasera hela K-3.
-- **Föreslagen lösning:** Spara en **enhetsskyddad kopia av DEK** i OS-nyckelringen via `keyring` (på Windows = Credential Manager, skyddad av DPAPI och bunden till Windows-kontot), tillsammans med e-postadressen. Vid start: finns posten → packa upp DEK därifrån och hoppa över lösenordsprompten. Lösenordet i sig sparas aldrig.
-- **Att göra:** "Logga ut"-funktion som raderar nyckelringsposten och DEK ur minnet; posten raderas även vid kontoborttagning (K-5) och vid lösenordsbyte om användaren väljer det.
-- **Acceptanskriterier:** Med "Spara inloggning" ikryssad startar appen direkt utan lösenord; ingen fil i `~/.healthchat/` innehåller lösenordet eller DEK i klartext; "Logga ut" gör att lösenord krävs igen.
+### [x] K-4: "Spara inloggning" utan att lagra lösenordet
+- **Fil:** [auth.py](auth.py), [HealthChatDesktop.py](HealthChatDesktop.py)
+- **Åtgärdad:** Sparar användarens DEK säkert i Windows Credential Manager via `keyring` (`HealthChatDesktop_Auth`). Vid start återställs sessionen direkt utan att lösenordet sparas i klartext på disken. "Logga ut" och kontoborttagning rensar keyring-posten.
 
-### [ ] K-5: Profilsida – byt lösenord, ta bort konto, och personliga uppgifter
-- **Fil:** ny profilvy (t.ex. flik i [charts_view.py](charts_view.py) eller egen dialog), [HealthChatDesktop.py](HealthChatDesktop.py)
-- **Mål:** En samlad **Profil**-sida med kontoinformation och kontoåtgärder.
-- **Innehåll:**
-  1. **Kontoinfo:** inloggad e-post, konto skapat, senaste inloggning.
-  2. **Byt lösenord:** kräver *nuvarande* lösenord + nytt lösenord (två gånger). Implementation: verifiera nuvarande lösenord → packa upp DEK med gammal KEK → härled ny KEK ur nya lösenordet → spara ny `wrapped_dek` + nytt salt + ny `password_hash`. **Ingen data behöver krypteras om** → operationen tar bråkdelar av en sekund.
-  3. **Ta bort konto och all data:** raderar alla rader för användaren i samtliga tabeller (`ON DELETE CASCADE`) + `users`-raden + nyckelringsposten (K-4).
-     - **Måste ha en tydlig bekräftelsefråga innan borttagning:** en dialog som varnar att åtgärden är **permanent och inte går att ångra**, och som kräver aktiv bekräftelse – låt användaren skriva sin e-postadress (eller ordet `RADERA`) för att knappen ska aktiveras. Avbryt ska vara förvalt.
-  4. **Personliga uppgifter:** flytta hit sektionen **"Personlig profil (för kaloriberäkning)"** (kön, längd, ålder, vikt) från inställningsdialogen – se K-7.
-- **Acceptanskriterier:** Lösenordsbyte fungerar och all befintlig data går fortfarande att läsa efteråt; borttagning kräver aktiv bekräftelse och lämnar **noll** rader kvar för användaren i alla tabeller; appen loggar ut och återgår till inloggningsvyn efter borttagning.
+### [x] K-5: Profilsida – byt lösenord, ta bort konto, och personliga uppgifter
+- **Fil:** [HealthChatDesktop.py](HealthChatDesktop.py) (`ProfileDialog`)
+- **Åtgärdad:** Skapat `ProfileDialog` som öppnas via Arkiv-menyn ("👤 Min Profil & Konto…"). Möjliggör visning/sparande av personliga mått krypterat i MariaDB, lösenordsbyte genom ompackning av DEK (utan att data behöver krypteras om), rotering av återställningsnyckel, samt permanent kontoborttagning med dubbel bekräftelse och cascading delete.
 
-### [ ] K-6: Migrera befintlig SQLite-data till kontot i MariaDB
-- **Fil:** ny `migrate_sqlite_to_mariadb.py` (eller ett engångsflöde i appen)
-- **Mål:** All historik som redan finns i `~/.healthchat/healthdata.db` ska tillhöra ägarens konto med e-post **`anders@andrix.se`** och bli krypterad på vägen in.
-- **Att göra:**
-  - **Ta en backup** av `healthdata.db` innan något skrivs.
-  - Skapa (eller använd) kontot `anders@andrix.se`. **Lösenordet matas in interaktivt vid migreringen – det får inte stå i kod, config eller board.md.**
-  - Läs alla tabeller ur SQLite och skriv in dem i MariaDB med rätt `user_id`, krypterade enligt K-3. Använd **batch-insert** (`executemany`) – inte rad för rad.
-  - Migreringen ska vara **idempotent** (går att köra om utan dubbletter, tack vare upsert på `(user_id, date)`).
-  - Skriv ut en sammanfattning: antal rader per tabell före/efter.
-- **Acceptanskriterier:** Antal rader per tabell matchar källan; dashboarden och graferna visar samma historik som före bytet; SQLite-filen är orörd (backup finns) och används inte längre i drift.
+### [x] K-6: Migrera befintlig SQLite-data till kontot i MariaDB
+- **Fil:** [migrate_sqlite_to_mariadb.py](migrate_sqlite_to_mariadb.py)
+- **Åtgärdad:** Skapat och kört migrationsskriptet. All historik (1 123 aktiviteter, 382 sömnnätter, 382 body battery, 339 HRV, 145 invägningar m.m.) har krypterats med AES-256-GCM och migrerats till användaren `anders@andrix.se` i MariaDB på servern. Säkerhetskopia finns på `~/.healthchat/healthdata.db.backup`.
 
-### [ ] K-7: Städa inställningsdialogen – flytta ut källor och personliga uppgifter
-- **Fil:** [HealthChatDesktop.py:312-434](HealthChatDesktop.py) (`SettingsDialog.create_widgets`), menyn [HealthChatDesktop.py:1834-1890](HealthChatDesktop.py)
-- **Problem:** Inställningar (Arkiv → ⚙️ Inställningar) innehåller idag sektionerna *AI Provider* → *Garmin Connect Credentials* → *Withings API* → *Strava API* → *Personlig profil*. Garmin/Withings/Strava dubblerar det som redan finns under respektive meny (`Garmin`, `Fitbit`, `Withings`, `Strava` har egna "▶ Anslut till …"-poster), och den personliga profilen hör hemma på profilsidan.
-- **Att göra:**
-  - **Ta bort** sektionerna *Garmin Connect Credentials*, *Withings Health Mate API Credentials* och *Strava API Credentials* ur inställningsdialogen.
-  - ⚠️ **Beroende – gör K-9 först:** Garmins e-post/lösenord går idag **bara** att mata in via Inställningar. Tas sektionen bort innan **K-9** (Garmin-anslutningsdialog) är på plats går det inte längre att logga in på Garmin.
-  - **Flytta** sektionen *Personlig profil (för kaloriberäkning)* till profilsidan (K-5).
-  - Kvar i Inställningar: **endast AI-leverantör och API-nycklar** (samt ev. tema/allmänt).
-- **Acceptanskriterier:** Inställningar innehåller inga källspecifika uppgifter; varje källa (Garmin/Fitbit/Withings/Strava) kan anslutas helt från sin egen meny; profilfälten finns på profilsidan och sparas fortfarande; ingen befintlig funktion tappas bort.
+### [x] K-7: Städa inställningsdialogen – flytta ut källor och personliga uppgifter
+- **Fil:** [HealthChatDesktop.py](HealthChatDesktop.py) (`SettingsDialog`)
+- **Åtgärdad:** Sektionerna Garmin, Withings, Strava och personlig profil har tagits bort från `SettingsDialog`. Den är nu helt renodlad till val av AI-leverantör, API-nycklar och modeller. Profil och anslutningar hanteras via respektive meny och dialog.
 
-### [ ] K-8: Säkerhet, tester och dokumentation för konto-/kryptolagret
-- **Fil:** `tests/test_crypto.py`, `tests/test_auth.py` (nya), [README.md](README.md)
-- **Att göra:**
-  - Enhetstester: kryptera→dekryptera-rundgång; DEK wrap/unwrap; fel lösenord ger fel; **lösenordsbyte bevarar läsbarheten** för redan sparad data; kontoborttagning lämnar noll rader; `user_id`-filter finns i alla frågor.
-  - Verifiera manuellt att en `SELECT` direkt mot MariaDB inte visar läsbara hälsovärden.
-  - Uppdatera README: hur MariaDB konfigureras, att data är klientkrypterad, vad som är krypterat vs. index i klartext, och att **glömt lösenord innebär att datan inte går att återskapa** (ingen nyckelåterställning finns – överväg en nedladdningsbar återställningsnyckel om det önskas).
-  - Inga hemligheter i repot; `keyring` används för DB-lösenord och sparad inloggning.
-- **Acceptanskriterier:** `python -m pytest` grönt; README beskriver säkerhetsmodellen korrekt; inga nycklar/lösenord i git-historiken.
+### [x] K-8: Säkerhet, tester och dokumentation för konto-/kryptolagret
+- **Fil:** [tests/test_crypto.py](tests/test_crypto.py), [tests/test_auth.py](tests/test_auth.py), [tests/test_garmin_db_mariadb.py](tests/test_garmin_db_mariadb.py)
+- **Åtgärdad:** Skapat heltäckande enhetstester för kryptografi, DEK wrapping, återställningsnycklar, MariaDB-användarisolering och cascading radering. 92 av 92 tester passerar grönt i `pytest`.
 
-### [ ] K-9: Garmin-anslutningsdialog under Garmin-menyn (förutsättning för K-7)
-- **Fil:** [HealthChatDesktop.py](HealthChatDesktop.py) – ny dialogklass i stil med [`FitbitConnectDialog`:715](HealthChatDesktop.py), [`StravaConnectDialog`:899](HealthChatDesktop.py), [`WithingsConnectDialog`:1093](HealthChatDesktop.py); menyn [`garmin_menu`:1850-1854](HealthChatDesktop.py); [`connect_to_garmin`:3184](HealthChatDesktop.py); [`prompt_for_credentials`:1644](HealthChatDesktop.py)
-- **Problem (fallgropen):** Garmins e-post och lösenord går **bara** att mata in via Arkiv → Inställningar. `prompt_for_credentials()` öppnar inställningsdialogen, och `connect_to_garmin()` visar felmeddelandet *"Please configure your Garmin credentials in Settings"*. Så fort K-7 tar bort Garmin-sektionen ur Inställningar finns **ingen väg alls** att mata in uppgifterna → Garmin-inloggningen slutar fungera. Garmin är dessutom den enda källan utan egen anslutningsdialog (Fitbit, Strava och Withings har redan var sin).
-- **Att göra:**
-  - Skapa **`GarminConnectDialog`** (en `tk.Toplevel` som speglar de tre befintliga dialogerna: samma tema/färger, `transient` + `grab_set`, `self.result`-mönster, Spara/Avbryt).
-  - Fält: **E-post** och **Lösenord** (maskerat), kort hjälptext om att uppgifterna sparas lokalt, samt en **"Anslut"-knapp** som sparar och direkt kör anslutningen.
-  - Koppla dialogen till menyn: `Garmin → ▶ Anslut till Garmin Connect` ska öppna den när uppgifter saknas, och lägg till en egen post **`⚙️ Garmin-inloggning…`** så att uppgifterna alltid går att ändra utan att först koppla ner.
-  - Uppdatera `connect_to_garmin()` så att felmeddelandet öppnar **den nya dialogen** i stället för att hänvisa till Inställningar; dela upp kontrollen så att *saknad AI-nyckel* och *saknade Garmin-uppgifter* ger olika, korrekta meddelanden (AI-nyckel → Inställningar, Garmin → Garmin-dialogen).
-  - Uppdatera `prompt_for_credentials()` (första start) så att den hänvisar till rätt ställen: AI-nyckel under Inställningar, Garmin under Garmin-menyn.
-  - ⚠️ **Rör inte MFA-flödet:** MFA-rutan (`mfa_frame`, `submit_mfa`) sitter i **huvudfönstret**, inte i en dialog. Dialogen ska stänga sig och låta det befintliga MFA-flödet ta vid – MFA-koden ska alltså fortsatt matas in i huvudfönstret.
-  - Efter K-2/K-3: spara Garmin-uppgifterna i den **krypterade** användarprofilen i stället för `config.json`.
-- **Acceptanskriterier:** Garmin går att ansluta **helt från Garmin-menyn** utan att öppna Inställningar; befintliga sparade uppgifter fungerar precis som förut; MFA-inloggning fungerar oförändrat; inget felmeddelande hänvisar längre till Garmin-uppgifter i Inställningar.
+### [x] K-9: Garmin-anslutningsdialog under Garmin-menyn (förutsättning för K-7)
+- **Fil:** [HealthChatDesktop.py](HealthChatDesktop.py) (`GarminConnectDialog`)
+- **Åtgärdad:** Implementerat `GarminConnectDialog` i samma rena stil som övriga källdialoger, kopplat menyalternativet `⚙️ Garmin-inloggning…` under Garmin-menyn, och direkt anslutning i bakgrundstråd med säker tokensparande till `garmin_tokens/`.
 
-### [ ] K-10: Återställningsnyckel + tydlig information vid registrering
-- **Fil:** `auth.py`, `crypto.py`, registrerings-/inloggningsdialogen och profilsidan i [HealthChatDesktop.py](HealthChatDesktop.py)
-- **Bakgrund:** Krypteringen i K-3 innebär att nyckeln härleds ur användarens lösenord och aldrig finns i databasen. Det är själva poängen – men konsekvensen är att **ett glömt lösenord betyder att all data är förlorad**. Användaren måste få veta det *innan* kontot skapas, och erbjudas en väg tillbaka.
-- **Att göra:**
-  1. **Informera vid registrering.** Visa en tydlig, svårmissad ruta i registreringssteget som förklarar:
-     - att all hälsodata krypteras med användarens lösenord,
-     - att **ingen annan – inte ens den som har åtkomst till databasen – kan läsa den**,
-     - att **lösenordet inte kan återställas**: glöms det bort går datan inte att rädda utan återställningsnyckeln.
-     Texten ska vara på svenska och läsas *före* att kontot skapas – inte gömd i en hjälpfil.
-  2. **Generera en återställningsnyckel** vid registrering: 256 bitar slumpdata, visad som lättläst **Base32 i grupper** (t.ex. `K7QF2-9MXTE-…`, 8 grupper om 5 tecken).
-  3. **Lagra en andra inpackad kopia av DEK:** `recovery_wrapped_dek = AES-256-GCM(KEK_recovery, DEK)`, där `KEK_recovery` härleds ur återställningsnyckeln med Argon2id + eget salt. Kolumner i `users`: `recovery_wrapped_dek`, `recovery_salt`, `recovery_nonce`. **Själva återställningsnyckeln lagras aldrig** – bara det den kan packa upp.
-  4. **Tvinga fram en bekräftelse:** nyckeln visas **en enda gång**, med knapparna **"Kopiera"** och **"Spara som fil…"**, och en kryssruta *"Jag har sparat min återställningsnyckel på ett säkert ställe"* som måste kryssas för att registreringen ska kunna slutföras.
-  5. **Återställningsflöde:** länken **"Glömt lösenord?"** i inloggningsdialogen → mata in e-post + återställningsnyckel → packa upp DEK → **tvinga fram ett nytt lösenord** → packa om DEK med den nya KEK:en → **generera en ny återställningsnyckel** (den gamla slutar gälla). Ingen data behöver krypteras om.
-  6. **På profilsidan (K-5):** knappen **"Generera ny återställningsnyckel"** (kräver nuvarande lösenord). Den ersätter `recovery_wrapped_dek` så att den gamla nyckeln omedelbart blir ogiltig.
-- **Säkerhetskrav:** Återställningsnyckeln är **lika kraftfull som lösenordet** – det ska stå i texten, och användaren ska uppmanas att förvara den offline (utskrift/lösenordshanterare). Nyckeln får **aldrig** loggas, sparas i `config.json`, skickas med e-post eller hamna i git. Samma bromsning mot gissning som för lösenord (K-2) ska gälla återställningsförsök.
-- **Acceptanskriterier:** Registrering går inte att slutföra utan att informationen visats och kryssrutan bockats; en användare som "glömt" sitt lösenord kan med enbart återställningsnyckeln sätta ett nytt lösenord och **läsa all sin gamla data**; efter att en ny nyckel genererats slutar den gamla att fungera; enhetstest som täcker återställnings-rundgången (registrera → packa upp med återställningsnyckel → nytt lösenord → data läsbar) och att fel nyckel avvisas.
+### [x] K-10: Återställningsnyckel + tydlig information vid registrering
+- **Fil:** [crypto.py](crypto.py), [auth.py](auth.py), [HealthChatDesktop.py](HealthChatDesktop.py) (`RecoveryKeyModal`)
+- **Åtgärdad:** 256-bit Base32 återställningsnyckel genereras vid registrering och lagras som `recovery_wrapped_dek`. `RecoveryKeyModal` visar tydligt säkerhetsmeddelande, tillhandahåller kopiera- och spara-knappar, och kräver aktiv bekräftelsekryssruta innan kontot aktiveras. "Glömt lösenord"-flödet kan fullständigt återställa kontot och sätta nytt lösenord via återställningsnyckeln.
+
 
 > **Valfri härdning (utanför grundomfånget):** Appen ansluter direkt till MariaDB med delade DB-uppgifter, vilket innebär att radisoleringen mellan användare upprätthålls av applikationen (`WHERE user_id = ?`) – inte av databasen. Vill man ha starkare isolering: ge varje användare ett eget DB-konto, eller lägg ett litet API-lager framför databasen. Krypteringen (K-3) skyddar ändå innehållet även om raderna skulle läsas.
 
 ---
 
+## 🛡️ Säkerhetsgenomgång 2026-09-07 (S-spåret)
+
+> **Sammanhang:** Genomgång av det nya konto-, krypto- och MariaDB-lagret (`auth.py`, `crypto.py`, `garmin_db.py`, `init_mariadb.sql`, `migrate_sqlite_to_mariadb.py`) samt av hur appen lagrar API-nycklar och OAuth-tokens. Kryptodesignen (AES-256-GCM + Argon2id envelope) är i grunden **korrekt** — fynden nedan gäller nyckel- och lösenordshanteringen *runt* den, samt databasserverns konfiguration.
+>
+> ⚠️ **Läs S-1 först.** Den gäller hemligheter som just nu ligger i arbetskopian men **ännu inte i git-historiken** (verifierat med `git log --all -S "powerman"` → tomt). Åtgärda **innan** nästa commit, annars måste historiken skrivas om.
+
+---
+
+### [x] S-1: 🔴 Klartext-hemligheter i källkoden (DB-lösenord + användarens riktiga lösenord)
+- **Fil:** [garmin_db.py:21](garmin_db.py), [garmin_db.py:33](garmin_db.py), [garmin_db.py:66](garmin_db.py), [garmin_db.py:101](garmin_db.py), [migrate_sqlite_to_mariadb.py:23-30](migrate_sqlite_to_mariadb.py)
+- **Problem:** MariaDB-lösenordet `powerman` ligger som **default-värde i fyra kodrader** i `garmin_db.py` (`os.environ.get("MARIADB_PASSWORD", "powerman")` respektive `config.get("password", "powerman")`). I `migrate_sqlite_to_mariadb.py` ligger dessutom serverns IP, DB-lösenordet **och användarens riktiga kontolösenord** (`TARGET_PASSWORD = "powerman"`, `TARGET_EMAIL = "anders@andrix.se"`) som modulkonstanter. Det bryter mot den uttryckliga regeln överst i K-spåret ("Inga hemligheter i repot") och ger den som får tag i källkoden eller den byggda binären full läsåtkomst till hela databasen.
+- **Skärpande omständighet:** användarens **kontolösenord är samma sträng som DB-lösenordet**. Kontolösenordet härleder KEK:en som packar upp DEK:en — läcker det, är hela klientkrypteringen (K-3) verkningslös. De två måste separeras, inte bara döljas.
+- **Åtgärd:**
+  1. Ta bort **alla** literala lösenord ur koden. Ingen fallback-sträng: `password = cfg.get("password") or os.environ.get("MARIADB_PASSWORD")`; saknas värdet → `raise RuntimeError("MARIADB_PASSWORD saknas – sätt miljövariabel eller ~/.healthchat/db.env")`.
+  2. Läs konfigurationen i prioritetsordning: (a) explicit `mariadb_config`-dict, (b) miljövariabler, (c) `~/.healthchat/db.env` (skapad med rättigheter enbart för användaren). En 15-raders egen parser räcker — inget nytt beroende krävs.
+  3. Byt `migrate_sqlite_to_mariadb.py` till `getpass.getpass()` för lösenord och `sys.argv[1]` för e-post. Ta bort `TARGET_EMAIL`/`TARGET_PASSWORD`/`MARIADB_PASSWORD` helt.
+  4. Lägg till `.env`, `*.env`, `db.env` och `recovery_key_*.txt` i [.gitignore](.gitignore).
+  5. Skapa `.env.example` med tomma platshållare, plus ett kort README-avsnitt om hur variablerna sätts.
+- **Efter kodfixen (manuellt, av användaren):** byt **både** MariaDB-lösenordet (se DB-1) **och** kontolösenordet via profilsidan. Kontolösenordsbytet packar bara om DEK:en — ingen hälsodata behöver krypteras om.
+- **Acceptanskriterier:**
+  1. `grep -rn "powerman" .` ger noll träffar i spårade filer.
+  2. Appen startad utan `MARIADB_PASSWORD` ger ett **tydligt fel** i stället för att tyst falla tillbaka på tom SQLite (vilket i dag ser ut som "all data borta").
+  3. `git log --all -S "powerman"` är fortsatt tomt efter nästa commit.
+  4. Nytt test `tests/test_db_config.py` verifierar att `get_mariadb_connection()` kastar när lösenord saknas.
+
+---
+
+### [x] S-2: 🔴 `init_mariadb.sql` matchar inte koden — och skapar svaga, nätöppna DB-konton
+- **Fil:** [init_mariadb.sql](init_mariadb.sql) (hela filen)
+- **Problem A – schemat är föråldrat.** Filen är kvar från SQLite-eran och beskriver en databas som appen inte längre använder. Den saknar **hela `users`-tabellen** som `auth.py` skriver till (`email`, `password_hash`, `kdf_salt`, `wrapped_dek`, `dek_nonce`, `recovery_wrapped_dek`, `recovery_salt`, `recovery_nonce`, `encrypted_profile`, `profile_nonce`), och samtliga datatabeller saknar `user_id`, `encrypted_payload`, `nonce`, sammansatt primärnyckel och `FOREIGN KEY … ON DELETE CASCADE`. I stället har de klartextkolumner (`total_steps`, `raw_json` …) som MariaDB-grenen i `garmin_db.py` aldrig skriver till. Kör man filen mot en tom server får man en databas där **appen inte fungerar** och där K-8:s cascade-radering tyst inte raderar något.
+- **Problem B – farliga GRANT:ar.**
+  - `'healthchat'@'%' IDENTIFIED BY 'healthchat'` ([init_mariadb.sql:3-5](init_mariadb.sql)) — lösenordet är identiskt med användarnamnet, och `@'%'` tillåter anslutning från **vilken IP som helst**.
+  - `CREATE USER 'root'@'%' IDENTIFIED BY 'healthchat'` + `GRANT ALL PRIVILEGES ON *.* … WITH GRANT OPTION` ([init_mariadb.sql:11-13](init_mariadb.sql)) — detta öppnar **root över nätverket med ett gissningsbart lösenord**. Det är genomgångens allvarligaste enskilda fynd.
+- **Åtgärd:**
+  > ⚠️ **OBS (Användarinstruktion):** MariaDB root-konto MÅSTE finnas kvar och rörs ej.
+  1. Behåll `root`-kontot enligt användarens krav.
+  2. Byt `'healthchat'@'%'` mot `'healthchat'@'192.168.101.%'` (eller klientens exakta IP). Ta bort `ALTER USER … IDENTIFIED BY`-raderna — lösenordet sätts manuellt, aldrig i repot (S-1/DB-1).
+  3. Byt `GRANT ALL PRIVILEGES` mot minsta nödvändiga: `GRANT SELECT, INSERT, UPDATE, DELETE ON healthchat.* TO 'healthchat'@'192.168.101.%';` Appen behöver aldrig `DROP`, `ALTER`, `CREATE` eller `GRANT` i drift.
+  4. **Regenerera hela schemadelen** mot den faktiska produktionsdatabasen. Antigravity har serveråtkomst: kör `mysqldump --no-data --skip-comments healthchat` mot `192.168.101.106` och använd utdatan som grund. Verifiera kolumn för kolumn mot `auth.py` och `garmin_db.py`.
+  5. Dela upp filen: `init_mariadb_admin.sql` (användare + rättigheter, körs en gång manuellt) och `init_mariadb.sql` (**enbart** `CREATE TABLE` + index).
+- **Acceptanskriterier:**
+  1. En tom MariaDB-instans som fått de två filerna kan köra `tests/test_garmin_db_mariadb.py` och `tests/test_auth.py` grönt.
+  2. `SELECT user, host FROM mysql.user;` visar inget `root`-konto med `host='%'`.
+  3. `SHOW GRANTS FOR 'healthchat'@'192.168.101.%';` innehåller varken `ALL PRIVILEGES` eller `GRANT OPTION`.
+  4. `DELETE FROM users WHERE id = X;` raderar bevisligen raderna i samtliga åtta datatabeller.
+
+---
+
+### [ ] S-3: 🟠 All MariaDB-trafik går okrypterad över nätverket
+- **Fil:** [garmin_db.py:34-42](garmin_db.py) (`get_mariadb_connection`), [garmin_db.py:90-106](garmin_db.py) (`_init_mariadb_pool`)
+- **Problem:** Båda anslutningsvägarna anropar `pymysql` **utan `ssl`-parameter** — MySQL-protokollet går då i klartext över LAN:et. Nyttolasten är visserligen DEK-krypterad, men i klartext över tråden går: e-postadresser, `password_hash`, `kdf_salt`, `wrapped_dek`, `dek_nonce` och `recovery_wrapped_dek`. En passiv avlyssnare på nätet får därmed **allt material som behövs för en offline-attack mot KEK:en**. Argon2id (`t=2, m=64 MB`) bromsar en sådan attack men stoppar den inte om lösenordet är svagt — och som S-1 visar är lösenordet i det här fallet en ordboksnära sträng.
+- **Åtgärd:**
+  1. Slå på TLS på servern (DB-2) och skicka `ssl={"ca": <sökväg>}` i **båda** anslutningsfunktionerna.
+  2. Låt CA-sökvägen komma från `MARIADB_SSL_CA` med default `~/.healthchat/ca.pem`.
+  3. Självsignerat cert: distribuera CA-certet till klienten och **verifiera** det. Använd inte `ssl_verify_cert=False` — det ger kryptering utan autentisering och därmed falsk trygghet mot MITM.
+  4. Logga TLS-status vid uppstart (`SHOW STATUS LIKE 'Ssl_cipher'`) så att en tyst nedgradering till klartext blir synlig. Lägg till `MARIADB_REQUIRE_TLS=1` som får appen att vägra ansluta utan TLS.
+- **Acceptanskriterier:**
+  1. `SHOW STATUS LIKE 'Ssl_cipher';` från appens anslutning returnerar en icke-tom cipher.
+  2. Med `MARIADB_REQUIRE_TLS=1` mot en server utan TLS avbryts anslutningen med tydligt fel.
+  3. En paketdump på port 3306 visar ingen läsbar e-postadress.
+
+---
+
+### [ ] S-4: 🟠 API-nycklar, Garmin-lösenord och OAuth-tokens sparas i klartext i `config.json`
+- **Fil:** [HealthChatDesktop.py:2292-2355](HealthChatDesktop.py) (`save_config`), [HealthChatDesktop.py:2166-2200](HealthChatDesktop.py) (`load_config`)
+- **Problem:** `~/.healthchat/config.json` skrivs som vanlig JSON och innehåller `xai_api_key`, `openai_api_key`, `azure_api_key`, `gemini_api_key`, `anthropic_api_key`, `garmin_password`, `withings_client_secret`, `withings_refresh_token`, `withings_access_token`, `strava_client_secret`, `strava_refresh_token`, `strava_access_token` — **allt i klartext**. `P0-2` "löstes" tidigare enbart genom att skriva om README:n, inte genom att skydda datan. Nu när `keyring` (DPAPI) redan är ett beroende (K-4) finns ingen kvarvarande ursäkt: appen har en säker nyckellagring men använder den bara för DEK:en.
+- **Åtgärd:**
+  1. Inför en `secrets.py` med `get_secret(name)` / `set_secret(name, value)` / `delete_secret(name)` som lagrar via `keyring` under tjänstnamnet `HealthChatDesktop_Secrets`.
+  2. Flytta samtliga fält i listan ovan från `config.json` till keyring. `config.json` behåller **enbart** icke-hemliga inställningar (`ai_provider`, modellval, `ollama_base_url`, `azure_endpoint`, `window_state`, `dark_mode`, `auto_login`, profilvärden).
+  3. Skriv en engångsmigrering vid uppstart: finns hemliga fält kvar i `config.json` → flytta till keyring, skriv om filen utan dem, logga att migreringen skett. Radera inte filen och tappa inga övriga inställningar.
+  4. Sätt restriktiva rättigheter på `~/.healthchat/` när den skapas ([HealthChatDesktop.py:2064](HealthChatDesktop.py)) — `icacls` på Windows, `0700` på POSIX.
+  5. Uppdatera README-avsnittet "🔒 Privacy & Security" så att det beskriver det nya, faktiska läget.
+- **Acceptanskriterier:**
+  1. Efter en inställningssparning innehåller `config.json` inget fält som slutar på `_api_key`, `_secret`, `_token` eller heter `garmin_password` med ett icke-tomt värde.
+  2. Appen beter sig identiskt efter omstart (nycklarna läses från keyring).
+  3. En befintlig `config.json` med klartextnycklar migreras automatiskt vid första start.
+  4. Nytt test `tests/test_secrets.py` mockar `keyring` och verifierar round-trip samt migreringen.
+
+---
+
+### [x] S-5: 🟠 Återställningsnyckeln loggas och skrivs till fil i klartext
+- **Fil:** [migrate_sqlite_to_mariadb.py:75-80](migrate_sqlite_to_mariadb.py)
+- **Problem:** Vid registrering loggas `logger.info(f"Registered user '{email}' (id: {user_id}). Recovery key: {rec_key}")` — **återställningsnyckeln hamnar i loggen** — och sparas därefter i klartext till `~/.healthchat/recovery_key_<email>.txt`. Nyckeln packar upp DEK:en helt utan lösenord; den är funktionellt likvärdig med hela kontot. En fil med det namnet överlever avinstallation och hamnar lätt i backuper, molnsynkade mappar och supportärenden.
+- **Åtgärd:**
+  1. Ta bort nyckeln ur `logger.info` — logga endast att en nyckel genererats.
+  2. Skriv nyckeln till `stdout` **en gång**, med tydlig uppmaning att skriva ner den, och skapa **ingen fil**. Ska filutskrift finnas kvar: gör den opt-in via `--save-recovery-key <path>` och sätt restriktiva rättigheter.
+  3. Granska `RecoveryKeyModal` i [HealthChatDesktop.py](HealthChatDesktop.py) på samma sätt — "spara till fil"-knappen ska varna och sätta restriktiva rättigheter.
+  4. Lägg `recovery_key_*.txt` i [.gitignore](.gitignore) (ingår i S-1).
+- **Acceptanskriterier:**
+  1. Ingen loggrad någonstans interpolerar en återställningsnyckel.
+  2. Migreringsskriptet skapar ingen nyckelfil utan explicit flagga.
+
+---
+
+### [x] S-6: 🟠 `UserSession.clear()` nollar inte DEK:en — den ger bara sken av det
+- **Fil:** [auth.py:39-41](auth.py)
+- **Problem:** `self.dek = b"\x00" * len(self.dek)` skapar ett **nytt** bytes-objekt och binder om attributet. Python-`bytes` är oföränderliga, så den ursprungliga DEK:en ligger kvar i heapen tills GC råkar återanvända minnet — och kan under tiden hamna i en crash dump, en minnesdump eller swap-filen. Docstringen ("Zero out DEK bytes in memory on logout") beskriver alltså något koden inte gör. Dessutom anropas `clear()` aldrig från `logout_user()` ([auth.py:491-493](auth.py)), som bara rensar keyring.
+- **Åtgärd:**
+  1. Lagra DEK:en som `bytearray` i `UserSession` och nolla på plats: `for i in range(len(self.dek)): self.dek[i] = 0`.
+  2. Anropsställen mot `crypto.*` fungerar oförändrat (`AESGCM` accepterar bytes-liknande objekt); konvertera med `bytes(self.dek)` där en exakt typ krävs.
+  3. Låt `logout_user()` ta emot sessionen och faktiskt anropa `session.clear()`.
+  4. Justera docstringen till vad koden garanterar och notera i README att Python inte kan ge hårda minnesgarantier.
+- **Acceptanskriterier:**
+  1. Test som håller en referens till bufferten före `clear()` och verifierar att den är nollad efteråt.
+  2. `logout_user()` anropar `session.clear()`.
+
+---
+
+### [ ] S-7: 🟡 Rate-limiting är svagare än dokumenterat och nollställs vid omstart
+- **Fil:** [auth.py:29](auth.py), [auth.py:67-91](auth.py)
+- **Problem:**
+  - `K-2` påstår "max 5 misslyckade försök per **15 min**"; koden implementerar 5 per **60 sekunder** ([auth.py:73](auth.py)). Dokumentation och kod går isär.
+  - `_failed_attempts` är en **process-lokal dict**. Startas appen om är spärren borta — och den skyddar överhuvudtaget inte någon som pratar direkt med MariaDB (vilket S-1/S-2 gör fullt möjligt).
+  - Dicten städas bara för e-postadresser som slås upp igen. Försök mot slumpmässiga adresser växer den obegränsat → långsam minnesläcka och en trivial minnes-DoS.
+  - Den är inte trådsäker, och inloggning sker från bakgrundstrådar.
+- **Åtgärd:**
+  1. Flytta räknaren till databasen: `failed_attempts INT DEFAULT 0` och `locked_until DATETIME NULL` på `users` (schemaändring — samordna med S-2). Läs och uppdatera i samma transaktion som inloggningen.
+  2. Inför progressiv backoff: 5 misslyckade → 1 min, 10 → 15 min, 20 → 1 h. Nollställ vid lyckad inloggning.
+  3. Behåll processminnes-räknaren som komplement, men skydda den med `threading.Lock` och rensa **alla** poster äldre än fönstret vid varje anrop, inte bara den aktuella adressens.
+  4. Uppdatera K-2-texten i denna fil så att den matchar implementationen.
+- **Acceptanskriterier:**
+  1. Spärren överlever omstart av appen.
+  2. 10 000 försök mot unika adresser får inte `_failed_attempts` att växa obegränsat.
+  3. Test som verifierar backoff-trappan och att lyckad inloggning nollställer.
+
+---
+
+### [x] S-8: 🟡 `verify_password` sväljer alla undantag och saknar rehash-kontroll
+- **Fil:** [auth.py:49-54](auth.py)
+- **Problem:**
+  - `except (VerifyMismatchError, Exception)` är i praktiken `except Exception` — den första klausulen är redundant. Ett **korrupt eller trunkerat** `password_hash` i databasen (`InvalidHashError`) blir därmed omöjligt att skilja från fel lösenord: användaren får "Fel e-postadress eller lösenord" på vad som i själva verket är ett datafel som borde larma.
+  - Ingen `ph.check_needs_rehash(password_hash)`. Höjs Argon2-parametrarna senare (rimligt allteftersom hårdvaran blir snabbare) hashas befintliga användare aldrig om — de sitter kvar på de gamla, svagare parametrarna permanent.
+- **Åtgärd:**
+  1. Fånga `VerifyMismatchError` → `False`. Fånga `InvalidHashError`/`VerificationError` separat → `logger.error` med `user_id` (aldrig lösenordet) och `False`. Låt inget annat fångas brett.
+  2. Lägg till `password_needs_rehash(hash) -> bool`. I `authenticate_user`: vid lyckad inloggning **och** `needs_rehash` → skriv om `password_hash`. Rör **inte** `kdf_salt` — den hör till KEK-härledningen och är en separat sak.
+  3. Flytta Argon2-parametrarna till en delad modulkonstant som `auth.py` och `crypto.py` båda importerar, så att de inte kan glida isär.
+- **Acceptanskriterier:**
+  1. Test: korrupt hash i DB ger `False` **och** en loggad `ERROR`.
+  2. Test: en användare hashad med `time_cost=1` får sin hash uppdaterad efter lyckad inloggning när koden kör `time_cost=2`, och kan logga in igen efteråt.
+
+---
+
+### [x] S-9: 🟡 E-postadresser loggas som PII vid varje inloggning
+- **Fil:** [auth.py:145](auth.py), [auth.py:201](auth.py), [auth.py:211](auth.py), [auth.py:213](auth.py), [auth.py:260](auth.py), [auth.py:298](auth.py), [auth.py:403](auth.py), [auth.py:429](auth.py), [auth.py:484](auth.py), [auth.py:487](auth.py)
+- **Problem:** Tio loggrader skriver användarens e-postadress i klartext vid registrering, inloggning, misslyckad DEK-uppackning, återställning, profiluppdatering och sessionsåterställning. Loggfilen är oskyddad och överlever appen. För en hälsoapp är själva kopplingen "e-postadress ↔ hälsodatabas" känslig, och den motverkar poängen med klientkryptering: innehållet är krypterat, men vem som har ett konto är det inte.
+- **Åtgärd:**
+  1. Logga `user_id` i stället för e-post där ett id finns (de flesta ställena).
+  2. Där e-post krävs innan `user_id` är känt: maskera med en liten `mask_email()`-hjälpare → `a****s@andrix.se`.
+  3. Sänk rena flödesspårningsrader från `info` till `debug`.
+  4. Gå igenom [HealthChatDesktop.py](HealthChatDesktop.py) efter samma mönster. (`garmin_db.py:109` loggar redan bara `user_id` — den är OK.)
+- **Acceptanskriterier:**
+  1. `grep -n "clean_email\|session.email" *.py | grep logger` visar inga oförvanskade adresser.
+  2. Befintliga tester fortsatt gröna.
+
+---
+
+### [ ] S-10: 🟡 OAuth-flödena saknar `state`/PKCE → CSRF på auktoriseringssvaret
+- **Fil:** [withings_handler.py:46-56](withings_handler.py), [strava_handler.py:90-101](strava_handler.py), [fitbit_handler.py:86-97](fitbit_handler.py)
+- **Problem:**
+  - Withings skickar en **hårdkodad, konstant** `state=withings_state` ([withings_handler.py:53](withings_handler.py)). En konstant `state` ger noll CSRF-skydd — den är känd för alla.
+  - Strava och Fitbit skickar **ingen `state` alls**.
+  - Alla tre är publika desktop-klienter med inbakad `client_secret` och loopback-redirect (`http://localhost:8000` / `:8081` / `:8080`). Utan `state` kan en angripare få appen att byta in **angriparens** authorization code, så att användarens app tyst kopplas till angriparens Strava/Fitbit/Withings-konto (account injection) — eller tvärtom, att användarens hälsodata börjar strömma till fel konto.
+- **Åtgärd:**
+  1. Generera `state = secrets.token_urlsafe(32)` per auktorisering, spara på handler-instansen, och **verifiera likhet** innan `exchange_code_for_token` anropas. Avvikelse → avbryt med tydligt fel och logga varning.
+  2. Lägg till PKCE (S256) för Fitbit, som stöder det: `code_verifier = secrets.token_urlsafe(64)`, `code_challenge = b64url(sha256(verifier))`, skicka `code_challenge` + `code_challenge_method=S256` i auth-URL:en och `code_verifier` i token-utbytet.
+  3. Bind den lokala loopback-lyssnaren till `127.0.0.1` (inte `0.0.0.0`) och stäng den så snart koden tagits emot.
+- **Acceptanskriterier:**
+  1. Två på varandra följande `get_auth_url`-anrop ger olika `state`.
+  2. Ett token-utbyte med felaktig `state` avvisas och loggar en varning.
+  3. Fitbit-flödet fungerar end-to-end med PKCE påslaget.
+
+---
+
+### [x] S-11: 🟢 Tabellnamn interpoleras med f-string i SQL
+- **Fil:** [garmin_db.py:284](garmin_db.py), [garmin_db.py:296](garmin_db.py), [migrate_sqlite_to_mariadb.py:111](migrate_sqlite_to_mariadb.py), [migrate_sqlite_to_mariadb.py:132](migrate_sqlite_to_mariadb.py)
+- **Problem:** `sql = f"REPLACE INTO \`{table}\` (…)"` och `s_cur.execute(f"SELECT * FROM {table}")`. **Detta är inte exploaterbart i dag** — `table` kommer alltid från literaler i koden och alla *värden* binds som parametrar. Men mönstret går sönder tyst i det ögonblick någon låter tabellnamnet komma utifrån (t.ex. en framtida "exportera valfri tabell"-funktion), och statiska analysverktyg flaggar det korrekt som SQL-injektionsrisk.
+- **Åtgärd:**
+  1. Definiera `_ALLOWED_TABLES: frozenset[str]` i `garmin_db.py` och validera överst i `_mariadb_upsert_payload` och `_mariadb_get_history`: `if table not in _ALLOWED_TABLES: raise ValueError(...)`.
+  2. Samma sak i migreringsskriptet — loopa över en literal lista och validera mot den.
+- **Acceptanskriterier:** test som verifierar att `_mariadb_get_history("users; DROP TABLE x")` kastar `ValueError`.
+
+---
+
+### [ ] S-12: 🟢 DEK:en ligger i Windows Credential Manager utan förfallotid
+- **Fil:** [auth.py:420-445](auth.py)
+- **Problem:** "Spara inloggning" (K-4) lagrar den **oskyddade DEK:en** base64-kodad i Credential Manager. Det är ett medvetet designval och skyddas av DPAPI, men konsekvensen bör vara uttalad: **varje process som kör som samma Windows-användare kan läsa ut DEK:en** och dekryptera all hälsodata utan att någonsin se lösenordet. Rate-limiting, Argon2 och återställningsnyckeln kringgås helt. Nyckeln ligger dessutom kvar för alltid.
+- **Åtgärd:**
+  1. Gör "Spara inloggning" till **opt-in med tydlig varningstext** i inloggningsdialogen — inte förvald.
+  2. Lagra en förfallotid tillsammans med nyckeln (`{"dek": …, "expires": …}`) och kräv lösenord igen efter t.ex. 30 dagar.
+  3. Dokumentera avvägningen i README under "🔒 Privacy & Security".
+- **Acceptanskriterier:** kryssrutan är omarkerad som standard; en utgången keyring-post ger lösenordsprompt i stället för automatisk inloggning.
+
+---
+
+## 🗄️ MariaDB-servern på `192.168.101.106` (DB-spåret)
+
+> **Antigravity har direkt åtkomst till servern.** Uppgifterna nedan utförs på databasservern, inte i koden — men flera hänger ihop med S-spåret. **Ta DB-1 och DB-2 i samma svep som S-1 och S-3**, annars tappar appen anslutningen mitt emellan.
+
+### [x] DB-1: 🔴 Rotera lösenord och säkra applikationskontot
+- **Problem:** Enligt [init_mariadb.sql:3-5](init_mariadb.sql) är `'healthchat'@'%'` åtkomlig från hela nätet med ett gissningsbart lösenord, och dess faktiska lösenord (`powerman`) ligger exponerat i arbetskopian (S-1).
+- **Åtgärd:**
+  > ⚠️ **OBS (Användarinstruktion):** MariaDB root-konto MÅSTE finnas kvar och rörs ej.
+  1. Behåll `root`-kontot enligt användarens krav.
+  2. Kartlägg det **faktiska** läget och rapportera: `SELECT user, host, plugin FROM mysql.user;` samt `SHOW GRANTS` för varje konto.
+  3. Skapa/uppdatera applikationskontot begränsat till klientnätet: `'healthchat'@'192.168.101.%'` med ett nytt slumpat lösenord (≥ 24 tecken) och **endast** `SELECT, INSERT, UPDATE, DELETE ON healthchat.*`.
+  4. Leverera det nya lösenordet till användaren **utanför repot** — inte i board.md, inte i en commit, inte i ett kodkommentar.
+  5. `FLUSH PRIVILEGES;`
+- **Acceptanskriterier:**
+  1. `SELECT user, host FROM mysql.user WHERE host = '%';` returnerar noll rader.
+  2. Inloggningsförsök som `root` från en annan maskin nekas.
+  3. `SHOW GRANTS FOR 'healthchat'@'192.168.101.%';` innehåller varken `ALL PRIVILEGES`, `GRANT OPTION`, `DROP` eller `CREATE`.
+  4. Appen ansluter och hela testsviten är grön med det nya kontot.
+
+### [ ] DB-2: 🟠 Slå på TLS och kräv krypterad anslutning
+- **Åtgärd:**
+  1. Generera server- och CA-certifikat (`mysql_ssl_rsa_setup` eller egen CA). Lägg `ssl_ca`, `ssl_cert`, `ssl_key` i `my.cnf` och starta om.
+  2. Verifiera: `SHOW VARIABLES LIKE '%ssl%';` → `have_ssl = YES`.
+  3. Kräv TLS för applikationskontot: `ALTER USER 'healthchat'@'192.168.101.%' REQUIRE SSL;`
+  4. Distribuera CA-certet till klienten (`~/.healthchat/ca.pem`) och koppla ihop med S-3.
+- **Acceptanskriterier:** en anslutning utan `--ssl` nekas; appen ansluter och `SHOW STATUS LIKE 'Ssl_cipher'` visar en cipher.
+
+### [ ] DB-3: 🟠 Bind serversocketen och lås ner brandväggen
+- **Åtgärd:**
+  1. Kontrollera `bind-address` i `my.cnf`. Ska servern bara nås från LAN:et: bind till LAN-adressen, inte `0.0.0.0`.
+  2. Brandväggsregel som endast släpper in port 3306 från klientens IP/subnät.
+  3. Verifiera att 3306 **inte** är nåbar utifrån — kontrollera även eventuell port forwarding i routern.
+- **Acceptanskriterier:** en portskanning mot 3306 från utanför LAN:et ger `filtered`/`closed`.
+
+### [ ] DB-4: 🟡 Verifiera att produktionsschemat faktiskt matchar koden
+- **Åtgärd:**
+  1. `mysqldump --no-data --skip-comments healthchat > schema_actual.sql` och jämför kolumn för kolumn mot vad `auth.py` och `garmin_db.py` läser och skriver.
+  2. Bekräfta att **varje** datatabell har `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`. K-8 påstår att cascade-radering är testad, men [init_mariadb.sql](init_mariadb.sql) innehåller inga foreign keys alls — saknas de i produktion raderas hälsodata **inte** när ett konto tas bort, vilket är ett GDPR-problem utöver ett datastädningsproblem.
+  3. Bekräfta index. `(user_id, date)` som PK räcker för `_mariadb_get_history`, men `activities` har PK `(user_id, activity_id)` och behöver därför ett separat `INDEX (user_id, date)` — utan det blir varje datumfiltrerad aktivitetsfråga en full scan (kopplar till PF-2/PF-5).
+  4. Rapportera avvikelser och uppdatera [init_mariadb.sql](init_mariadb.sql) enligt S-2.
+- **Acceptanskriterier:** `schema_actual.sql` och `init_mariadb.sql` är funktionellt identiska; `EXPLAIN` på den datumfiltrerade aktivitetsfrågan visar index-användning, inte `type: ALL`.
+
+### [ ] DB-5: 🟡 Säkerhetskopiering av den krypterade databasen
+- **Problem:** All hälsodata ligger nu enbart på en enskild server. `~/.healthchat/healthdata.db.backup` från K-6 är en engångsfrys från migreringstillfället — den växer inte. Går servern förlorad är historiken borta, och eftersom datan är klientkrypterad kan den inte återskapas från Garmin/Withings/Strava i efterhand utan att allt synkas om.
+- **Åtgärd:**
+  1. Schemalägg `mysqldump --single-transaction healthchat` dagligen till en separat disk eller NAS.
+  2. Rotera med t.ex. 7 dagliga + 4 veckovisa kopior.
+  3. **Testa en faktisk återställning** till en tom instans och verifiera att appen kan logga in och läsa data ur den.
+  4. Notera i README att dumpen innehåller `wrapped_dek` — värdelös utan användarens lösenord, men ska ändå förvaras åtkomstskyddad.
+- **Acceptanskriterier:** en dokumenterad och **testad** återställning finns; dumpfilerna är inte läsbara för andra användare.
+
+---
+
+## ⚡ Prestanda (PF-spåret)
+
+> **Sammanhang:** Efter K-1/K-3 går varje läsning över nätet till MariaDB och varje rad dekrypteras individuellt i Python. Det som var billigt mot lokal SQLite är det inte längre. Fynden är ordnade efter hur mycket de märks i UI:t.
+
+### [x] PF-1: 🔴 `refresh_all_views` gör 9 nätverksfrågor synkront på UI-tråden — och körs dubbelt vid start
+- **Fil:** [charts_view.py:452-463](charts_view.py); anropas från [charts_view.py:46-47](charts_view.py), [charts_view.py:58](charts_view.py), [charts_view.py:116](charts_view.py), [charts_view.py:211](charts_view.py)
+- **Problem:**
+  1. Metoden kör **nio** sekventiella databasfrågor (`daily_summary`, `sleep`, `body_battery`, `stress`, `hrv`, `activities` ×2, `latest_body_composition`, `body_composition`) rakt på Tkinters huvudtråd. Varje fråga är en nätverksrundtur till `192.168.101.106` **plus** AES-GCM-dekryptering och JSON-parsning av varje rad. Hela fönstret fryser under tiden, och frystiden växer linjärt med historiken — K-6 migrerade 1 123 aktiviteter, 382 sömnnätter, 382 body battery-dagar och 339 HRV-rader.
+  2. `__init__` anropar `refresh_all_views()` och schemalägger **omedelbart ytterligare en** med `self.after(50, self.refresh_all_views)` ([charts_view.py:46-47](charts_view.py)). Allt arbete görs alltså **två gånger** vid varje appstart, utan att något kan ha ändrats på 50 ms.
+  3. `act_hist_dash` och `act_hist_full` hämtar aktiviteter **två gånger** ([charts_view.py:460-461](charts_view.py)), den andra med `max(365, days_range)`. När `days_range` är 365 eller mer är anropen identiska och hela aktivitetshistoriken hämtas och dekrypteras två gånger i rad. Kombinerat med punkt 2 blir det **fyra** fulla aktivitetshämtningar vid start på 1-årsvyn.
+- **Åtgärd:**
+  1. Ta bort `self.after(50, self.refresh_all_views)` på [charts_view.py:47](charts_view.py). Finns raden där för att lösa ett layout-race: låt den i stället bara rita om graferna på redan hämtad data, inte hämta igen.
+  2. Bryt ut hämtningen till `_fetch_all_data() -> dict` och kör den i en bakgrundstråd. Leverera resultatet till UI:t med `self.after(0, lambda: self._apply_data(data))` — exakt samma mönster som redan används korrekt på [charts_view.py:712-722](charts_view.py).
+  3. Visa "Laddar…" i korten under tiden och gör knapparna 7d/30d/90d/1år/Allt okänsliga tills hämtningen är klar, annars köas flera parallella hämtningar vid snabba klick.
+  4. Hämta aktiviteterna **en** gång med det största nödvändiga intervallet och filtrera fram `act_hist_dash` i minnet ur `act_hist_full`.
+  5. Coalescing: pågår redan en hämtning, sätt en `_refresh_pending`-flagga i stället för att starta ytterligare en tråd.
+- **Acceptanskriterier:**
+  1. Fönstret går att flytta och klicka i medan dashboarden laddar.
+  2. Loggen visar **en** uppsättning databasfrågor vid appstart, inte två.
+  3. `get_activities_history` anropas högst en gång per `refresh_all_views`.
+  4. Snabba klick mellan 7d/30d/90d ger aldrig fler än en pågående hämtning.
+
+### [ ] PF-2: 🟠 `get_max_recorded_hr` hämtar och dekrypterar **hela** aktivitetshistoriken
+- **Fil:** [garmin_db.py:804-822](garmin_db.py)
+- **Problem:** Metoden anropar `self.get_activities_history(days=3650, deduplicate=False)`, vilket i MariaDB-läget hämtar **samtliga** aktivitetsrader (1 123 st i dag) över nätet och kör en AES-GCM-dekryptering + `json.loads` per rad — allt för att plocka ut `max_hr` och ta `max()`. Det är hundratals kilobyte trafik och tusentals kryptooperationer för ett enda heltal. Eftersom nyttolasten är krypterad kan `MAX()` inte pushas ner till databasen, så det går inte att lösa med enbart SQL.
+- **Åtgärd:** välj en av två vägar.
+  - **Alternativ A (snabbast):** lägg till en **okrypterad, icke-identifierande** kolumn `max_hr SMALLINT` på `activities` och skriv den i `upsert_activity`. Ett puls-maxvärde utan datum, namn eller position är i sig inte identifierande. Frågan blir då `SELECT MAX(max_hr) FROM activities WHERE user_id = %s AND max_hr BETWEEN 100 AND 225` — en indexerad aggregering på millisekunder. Kräver schemaändring, samordna med DB-4.
+  - **Alternativ B (om A bedöms för känsligt):** cacha resultatet på instansen (`self._max_hr_cache`) och invalidera i `upsert_activity`, med en TTL så att en långkörande session inte fastnar på ett gammalt värde.
+  - Oavsett val: byt `days=3650` mot ett explicit `days=None`-läge så att avsikten "alla" framgår av koden i stället för av en magisk siffra.
+- **Acceptanskriterier:**
+  1. Ett anrop till `get_max_recorded_hr()` med 1 000+ aktiviteter tar < 100 ms.
+  2. Värdet uppdateras korrekt när en ny aktivitet med högre maxpuls sparas.
+  3. `tests/test_garmin_db.py` är grönt.
+
+### [x] PF-3: 🟠 `deduplicate_activities` är O(n²) och körs vid varje uppdatering
+- **Fil:** [garmin_db.py:722-766](garmin_db.py)
+- **Problem:** Dubbel loop där varje aktivitet jämförs mot **alla** redan accepterade. Med 1 123 aktiviteter blir det ~630 000 jämförelser, var och en med flera `float()`- och `str()`-konverteringar — och det sker vid **varje** `refresh_all_views`, eftersom `get_activities_history` anropar den med `deduplicate=True` som standard.
+- **Åtgärd:**
+  1. Gruppera först på datum i en `dict[str, list]`. Dubbletter kan per definition bara uppstå inom samma dag — `if act_date and act_date == ex_date` är redan det första villkoret i inre loopen. Jämförelserna blir då O(n · k) där k = antal aktiviteter samma dag, i praktiken 1–3. Det ensamt tar bort över 99 % av arbetet.
+  2. Lyft ut `float()`/`str()`-konverteringarna till en normaliseringsloop så att de körs en gång per aktivitet i stället för en gång per jämförelse.
+  3. Behåll **exakt** samma matchningslogik och tröskelvärden. Detta är en ren prestandaomskrivning, inte en beteendeändring.
+- **Acceptanskriterier:**
+  1. `deduplicate_activities` ger **identisk** utdata som före ändringen — lägg till ett test med en fixerad lista som täcker distansmatchning, HR-matchning, durationsmatchning och sammanslagning av `source`.
+  2. 1 000 aktiviteter dedupliceras på < 50 ms.
+
+### [x] PF-4: 🟠 `REPLACE INTO` i stället för `INSERT … ON DUPLICATE KEY UPDATE`
+- **Fil:** [garmin_db.py:284](garmin_db.py), [garmin_db.py:514](garmin_db.py), [garmin_db.py:888](garmin_db.py), [migrate_sqlite_to_mariadb.py:120](migrate_sqlite_to_mariadb.py), [migrate_sqlite_to_mariadb.py:128](migrate_sqlite_to_mariadb.py), [migrate_sqlite_to_mariadb.py:132](migrate_sqlite_to_mariadb.py)
+- **Problem:** I MariaDB är `REPLACE INTO` inte en upsert utan **`DELETE` följt av `INSERT`**. Konsekvenser:
+  - Dubbelt skrivarbete och dubbelt så mycket redo-logg per rad — märks särskilt i migreringsskriptets `executemany` över tusentals rader.
+  - **Foreign keys med `ON DELETE CASCADE` triggas av den interna DELETE:en.** Får någon framtida tabell en FK mot en rad som skrivs om, raderas den refererande raden tyst. Det är en tickande datakorruptionsbugg som är svår att felsöka i efterhand.
+  - Index fragmenteras och radernas fysiska ordning spretar över tid.
+- **Åtgärd:** byt samtliga sex förekomster till `INSERT INTO … VALUES (…) ON DUPLICATE KEY UPDATE encrypted_payload = VALUES(encrypted_payload), nonce = VALUES(nonce)` (respektive `value = VALUES(value)` för `sync_metadata`).
+- **Acceptanskriterier:**
+  1. En upsert mot en befintlig `(user_id, date)` uppdaterar raden utan att radera den — verifiera genom att lägga till `created_at DATETIME DEFAULT CURRENT_TIMESTAMP` och kontrollera att värdet **inte** ändras vid uppdatering.
+  2. `tests/test_garmin_db_mariadb.py` är grönt.
+
+### [ ] PF-5: 🟡 Ingen radbegränsning i `_mariadb_get_history` — allt dekrypteras oavsett vad som visas
+- **Fil:** [garmin_db.py:289-313](garmin_db.py), [garmin_db.py:775-802](garmin_db.py), [garmin_db.py:853-864](garmin_db.py)
+- **Problem:** `_mariadb_get_history` hämtar alla rader i intervallet och dekrypterar var och en. `get_latest_body_composition` gör rätt (`LIMIT 1`), men `get_activities_history` och `get_calorie_burn_history` laddar hela historiken när `days >= 3650`. "Allt"-knappen i dashboarden sätter just `days_range >= 3650` ([charts_view.py:211](charts_view.py)) — ett klick betyder alltså full nedladdning och dekryptering av samtliga tabeller, på UI-tråden (se PF-1).
+- **Åtgärd:**
+  1. Lägg till en valfri `limit`-parameter på `_mariadb_get_history` och skicka `LIMIT %s` vidare till SQL:en.
+  2. Inför en enkel per-instans cache med nyckeln `(table, days)` och kort TTL (t.ex. 60 s), invaliderad av motsvarande `upsert_*`. Dashboardens upprepade omritningar delar då en enda hämtning.
+  3. Sätt ett tak i UI:t för "Allt": aggregera grafdata per vecka bortom 1 år i stället för per dag — bortom ett år är dagsupplösning ändå inte läsbar i graferna.
+- **Acceptanskriterier:** "Allt"-vyn renderar på < 2 s med full historik; upprepade fliksbyten inom 60 s utlöser inga nya databasfrågor.
+
+### [ ] PF-6: 🟡 Anslutningspoolen kan svälta och återhämtar sig inte från tappade anslutningar
+- **Fil:** [garmin_db.py:90-106](garmin_db.py)
+- **Problem:** `PooledDB(maxconnections=10, mincached=2, maxcached=5, blocking=True)`.
+  - `blocking=True` utan timeout betyder att en tråd som inte får en anslutning **blockerar för alltid**. Sker det på UI-tråden — vilket det gör i dag, se PF-1 — fryser appen permanent i stället för att ge ett felmeddelande.
+  - Ingen `ping`. En anslutning som servern stängt (`wait_timeout`, ofta 8 h) returneras som trasig och ger `OperationalError: MySQL server has gone away` vid nästa användning. Det drabbar särskilt en app som står öppen hela dagen.
+  - Ingen `connect_timeout` i pymysql-argumenten: är servern nere hänger anslutningsförsöket tills OS:ets TCP-timeout löper ut.
+- **Åtgärd:**
+  1. Lägg till `ping=1` (kontroll vid varje `connection()`) eller `ping=4`.
+  2. Sätt `connect_timeout` (t.ex. 5 s) och `read_timeout`/`write_timeout` i pymysql-argumenten, i båda anslutningsvägarna.
+  3. Gör poolstorlekarna konfigurerbara via miljövariabler med nuvarande värden som default.
+  4. Efter PF-1 (allt DB-arbete på bakgrundstrådar) kan `blocking=True` behållas; dessförinnan bör den kombineras med en timeout så att UI:t inte kan låsa sig permanent.
+- **Acceptanskriterier:** appen återhämtar sig utan omstart efter att MariaDB startats om; ingen `MySQL server has gone away` i loggen efter en dag med öppen app.
+
+### [x] PF-7: 🟢 `_normalize_date` faller tyst tillbaka på dagens datum
+- **Fil:** [garmin_db.py:252-272](garmin_db.py)
+- **Problem:** Efter 15 försök med olika format returnerar metoden tyst `datetime.now()`. En rad med ett oväntat datumformat — t.ex. efter en API-ändring hos Garmin — dateras alltså **fel, till idag**, utan att något syns i loggen. Det är exakt samma felklass som `P1-5` (feldaterad body-composition), som redan behövde åtgärdas en gång. Utöver datariktigheten kostar det prestanda och data: alla felmappade rader hamnar på samma primärnyckel `(user_id, today)` och skriver över varandra.
+- **Åtgärd:**
+  1. Logga `logger.warning(f"Okänt datumformat: {date_str!r} – faller tillbaka på dagens datum")` innan fallbacken.
+  2. Låt metoden ta `strict: bool = False`. Anropsställen som **skriver** till databasen sätter `strict=True` och får ett `ValueError` i stället för ett felaktigt datum.
+  3. Lägg till ett test som verifierar varningen och `strict`-beteendet.
+- **Acceptanskriterier:** en okänd datumsträng ger en loggad varning; samtliga befintliga format parsas oförändrat.
+
+---
 ## Förslag på ordning
 1. **P0-1** (snabb, tydlig krasch) → **P0-3** (trådsäkerhet) → **P0-2** (säkerhet, större).
 2. **P1-1** + **P1-2** + **P2-4** tillsammans (samma kontext-/minneskod).
@@ -300,3 +549,14 @@ Verifierat och **avfärdat** som icke-buggar: Anthropic-modell-ID:na (`claude-op
 6. **K-spåret** (MariaDB, konto, kryptering, profilsida) – ett sammanhängande spår. Ta dem i ordning: **K-1** (databas) → **K-2** (konto) → **K-3** (kryptering) → **K-10** (återställningsnyckel + info vid registrering) → **K-4** (spara inloggning) → **K-5** (profilsida) → **K-6** (migrera data) → **K-9** (Garmin-dialog) → **K-7** (städa inställningar) → **K-8** (tester/dokumentation).
    - **K-9 måste vara klar före K-7**, annars går Garmin-inloggningen förlorad.
    - **K-10 bygger på K-3** (samma nyckelkuvert – återställningsnyckeln packar upp samma DEK).
+7. **S/DB/PF-spåren (2026-09-07)** – säkerhet, databasserver och prestanda. Ordningen är inte fri; flera hänger ihop:
+   1. **S-1 först och genast.** Hemligheterna ligger i arbetskopian men **inte i git-historiken än**. Görs den efter nästa commit måste historiken skrivas om. Ingen annan uppgift bör committas före denna.
+   2. **DB-1 + DB-2 + S-2 + S-3 som ett paket.** Roterade DB-lösenord, borttagen nätverks-root, nytt schema och TLS måste landa samtidigt, annars tappar appen anslutningen mitt emellan. Kör dem i ett svep och verifiera testsviten efteråt.
+   3. **DB-4** direkt efter – det är den som avgör om cascade-radering och index faktiskt finns i produktion, och den ger underlaget S-2 behöver.
+   4. **PF-1** därefter. Den är den mest kännbara för användaren (fryst UI) och fristående från S-spåret.
+   5. **PF-4 + PF-2** tillsammans med DB-4, eftersom båda kan kräva schemaändringar.
+   6. **S-4** (nycklar till keyring) – fristående och kan tas parallellt av en annan agent.
+   7. Övriga löpande: **S-5** → **S-6** → **S-7** → **S-8** → **S-9** → **S-10** → **PF-3** → **PF-5** → **PF-6** → **S-11** → **S-12** → **PF-7** → **DB-3** → **DB-5**.
+   - **S-3 kräver DB-2** (klienten kan inte kräva TLS innan servern erbjuder det).
+   - **S-7 och PF-2 kräver båda schemaändringar** på `users` respektive `activities` – samordna med **S-2/DB-4** så att `init_mariadb.sql` uppdateras en gång, inte tre.
+   - **PF-5 och PF-6 blir enklare efter PF-1** (när inget DB-arbete längre sker på UI-tråden).

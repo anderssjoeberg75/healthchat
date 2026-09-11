@@ -69,6 +69,7 @@ def estimate_daily_burn(
     age_years: float = 0,
     sex: str = "male",
     steps: int = 0,
+    workout_steps: int = 0,
     workout_calories: float = 0.0,
     bmr_override: float = 0.0,
     is_today: bool = True,
@@ -81,7 +82,10 @@ def estimate_daily_burn(
     weight_kg, height_cm, age_years, sex:
         Used to compute BMR when no device value is supplied.
     steps:
-        Steps walked so far on the day.
+        Total steps walked so far on the day.
+    workout_steps:
+        Steps taken during logged workouts on the day (deducted from total steps
+        to prevent double-counting calories).
     workout_calories:
         Sum of calories from logged workouts on the day.
     bmr_override:
@@ -110,7 +114,11 @@ def estimate_daily_burn(
     frac = day_fraction_elapsed(at_time) if is_today else 1.0
     resting_burn = bmr_full * frac
 
-    steps_burn_val = step_burn(steps, weight_kg)
+    total_steps = max(0, int(steps or 0))
+    w_steps = max(0, int(workout_steps or 0))
+    everyday_steps = max(0, total_steps - w_steps)
+
+    steps_burn_val = step_burn(everyday_steps, weight_kg)
     workout_burn = max(0.0, float(workout_calories or 0.0))
     total = resting_burn + steps_burn_val + workout_burn
 
@@ -119,7 +127,9 @@ def estimate_daily_burn(
         "bmr_source": bmr_source,
         "day_fraction": round(frac, 4),
         "resting_burn": round(resting_burn),
-        "steps": int(steps or 0),
+        "steps": total_steps,
+        "workout_steps": w_steps,
+        "everyday_steps": everyday_steps,
         "steps_burn": round(steps_burn_val),
         "workout_burn": round(workout_burn),
         "total_burn": round(total),

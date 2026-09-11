@@ -116,20 +116,29 @@ class StravaHandler:
             "grant_type": "authorization_code"
         }
         
-        res = requests.post(STRAVA_TOKEN_URL, data=data)
-        if res.status_code == 200:
-            tokens = res.json()
-            self.save_tokens(tokens)
-            return tokens
-        else:
-            try:
-                err_json = res.json()
-                if res.status_code in (400, 401) and ("Application" in str(err_json) or "code" in str(err_json)):
-                    err_msg = "Ogiltigt Client ID eller Client Secret. Vänligen kontrollera dina uppgifter på strava.com/settings/api och se till att du kopierat hela Client ID och Client Secret utan extra tecken."
-                else:
-                    err_msg = f"Strava-fel ({res.status_code}): {err_json.get('message', res.text)}"
-            except Exception:
-                err_msg = f"Strava Token Exchange Failed ({res.status_code}): {res.text}"
+        try:
+            res = requests.post(STRAVA_TOKEN_URL, data=data, timeout=(5, 30))
+            if res.status_code == 200:
+                tokens = res.json()
+                self.save_tokens(tokens)
+                return tokens
+            else:
+                try:
+                    err_json = res.json()
+                    if res.status_code in (400, 401) and ("Application" in str(err_json) or "code" in str(err_json)):
+                        err_msg = "Ogiltigt Client ID eller Client Secret. Vänligen kontrollera dina uppgifter på strava.com/settings/api och se till att du kopierat hela Client ID och Client Secret utan extra tecken."
+                    else:
+                        err_msg = f"Strava-fel ({res.status_code}): {err_json.get('message', res.text)}"
+                except Exception:
+                    err_msg = f"Strava Token Exchange Failed ({res.status_code}): {res.text}"
+                self.last_error = err_msg
+                raise Exception(err_msg)
+        except requests.exceptions.Timeout:
+            err_msg = "Strava token exchange timed out after 30 seconds"
+            self.last_error = err_msg
+            raise Exception(err_msg)
+        except requests.exceptions.RequestException as req_err:
+            err_msg = f"Strava network error during token exchange: {req_err}"
             self.last_error = err_msg
             raise Exception(err_msg)
 
@@ -145,7 +154,7 @@ class StravaHandler:
             "refresh_token": self.refresh_token
         }
         try:
-            res = requests.post(STRAVA_TOKEN_URL, data=data)
+            res = requests.post(STRAVA_TOKEN_URL, data=data, timeout=(5, 30))
             if res.status_code == 200:
                 tokens = res.json()
                 self.save_tokens(tokens)
@@ -181,18 +190,27 @@ class StravaHandler:
         
         while True:
             url = f"{STRAVA_API_BASE}/athlete/activities?after={after_ts}&page={page}&per_page={per_page}"
-            res = requests.get(url, headers=headers)
-            if res.status_code == 401:
-                # Try refreshing token once
-                if self.refresh_access_token():
-                    headers = self._get_headers()
-                    res = requests.get(url, headers=headers)
-            
-            if res.status_code != 200:
-                logger.error(f"Failed to fetch Strava activities ({res.status_code}): {res.text}")
-                break
+            try:
+                res = requests.get(url, headers=headers, timeout=(5, 30))
+                if res.status_code == 401:
+                    # Try refreshing token once
+                    if self.refresh_access_token():
+                        headers = self._get_headers()
+                        res = requests.get(url, headers=headers, timeout=(5, 30))
                 
-            items = res.json()
+                if res.status_code != 200:
+                    logger.error(f"Failed to fetch Strava activities ({res.status_code}): {res.text}")
+                    break
+                    
+                items = res.json()
+            except requests.exceptions.Timeout:
+                logger.warning(f"Strava fetch activities timed out for page {page}")
+                self.last_error = f"Timeout vid hämtning av Strava-aktiviteter (sida {page})"
+                break
+            except requests.exceptions.RequestException as req_err:
+                logger.warning(f"Strava network error fetching activities: {req_err}")
+                self.last_error = str(req_err)
+                break
             if not isinstance(items, list) or len(items) == 0:
                 break
                 

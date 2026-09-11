@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
+  <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  
+  <!-- Auth Overlay Modal -->
+  <div id="auth-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header-banner">
+        <div class="brand-logo">
+          <h2>🔒 HealthChat <span class="badge-v">v4.1</span></h2>
+        </div>
+        <p class="modal-subtitle">End-to-End Krypterad Hälsoanalys</p>
+      </div>
+
+      <div class="modal-body">
+        <div class="tab-buttons auth-tabs">
+          <button id="tab-btn-login" class="tab-btn active" onclick="switchAuthTab('login')">Logga in</button>
+          <button id="tab-btn-register" class="tab-btn" onclick="switchAuthTab('register')">Skapa konto</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="form-login" onsubmit="handleLogin(event)">
+          <div class="input-group">
+            <label for="login-email">E-postadress</label>
+            <input type="email" id="login-email" required placeholder="namn@exempel.se">
+          </div>
+          <div class="input-group">
+            <label for="login-password">Lösenord</label>
+            <input type="password" id="login-password" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Logga in</button>
+        </form>
+
+        <!-- Register Form -->
+        <form id="form-register" class="hidden" onsubmit="handleRegister(event)">
+          <div class="input-group">
+            <label for="reg-email">E-postadress</label>
+            <input type="email" id="reg-email" required placeholder="namn@exempel.se">
+          </div>
+          <div class="input-group">
+            <label for="reg-password">Lösenord (minst 8 tecken)</label>
+            <input type="password" id="reg-password" required minlength="8" placeholder="••••••••">
+          </div>
+          <div class="input-row">
+            <div class="input-group">
+              <label for="reg-sex">Kön</label>
+              <select id="reg-sex" class="select-input">
+                <option value="male">Man</option>
+                <option value="female">Kvinna</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="reg-age">Ålder</label>
+              <input type="number" id="reg-age" value="30" min="10" max="120">
+            </div>
+          </div>
+          <div class="input-row">
+            <div class="input-group">
+              <label for="reg-height">Längd (cm)</label>
+              <input type="number" id="reg-height" value="175" min="100" max="230">
+            </div>
+            <div class="input-group">
+              <label for="reg-weight">Vikt (kg)</label>
+              <input type="number" id="reg-weight" value="70" step="0.1" min="30" max="300">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Registrera konto</button>
+        </form>
+
+        <div id="auth-error" class="error-msg hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recovery Key Modal -->
+  <div id="recovery-modal" class="modal-overlay hidden">
+    <div class="modal-card recovery-card">
+      <div class="modal-header-banner" style="background:#D97706;">
+        <h2>⚠️ VIKTIGT: Återställningsnyckel</h2>
+        <p class="modal-subtitle">Spara din nyckel säkert</p>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.875rem; color:#4B5563; margin-bottom:12px;">
+          HealthChat använder klientsideskryptering (AES-256-GCM). Om du glömmer ditt lösenord krävs denna nyckel för att återställa ditt konto.
+        </p>
+        <div class="key-box" id="recovery-key-text">---</div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="copyRecoveryKey()">📋 Kopiera nyckel</button>
+          <button class="btn btn-primary" onclick="closeRecoveryModal()">Jag har sparat nyckeln</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App Layout (HealthChat Hub View) -->
+  <div id="app-layout" class="app-container hidden">
+    
+    <!-- Top Header Bar (HealthChat Hub Header) -->
+    <header class="hub-header">
+      <div class="hub-title-group">
+        <h1>📊 HealthChat Hub</h1>
+        <span class="hub-sync-status" id="sync-status-text">✅ Ansluten till MariaDB (192.168.101.106)</span>
+      </div>
+      <div class="hub-range-controls">
+        <span class="range-label">Tidsintervall:</span>
+        <button class="btn-range" id="btn-range-7" onclick="setDaysRange(7)">7 Dagar</button>
+        <button class="btn-range active" id="btn-range-30" onclick="setDaysRange(30)">30 Dagar</button>
+        <button class="btn-range" id="btn-range-90" onclick="setDaysRange(90)">90 Dagar</button>
+        <button class="btn-range" id="btn-range-365" onclick="setDaysRange(365)">1 År</button>
+        <button class="btn-range" id="btn-range-3650" onclick="setDaysRange(3650)">Alla</button>
+        <button class="btn btn-secondary" onclick="refreshDashboard()">🔄 Uppdatera</button>
+      </div>
+    </header>
+
+    <!-- Top Navigation Bar (COROS Style) -->
+    <nav class="hub-navbar">
+      <div class="nav-tabs-left">
+        <button class="nav-tab-btn active" id="tab-btn-health" onclick="showTab('health')">
+          <span>❤️</span> Hälsa
+        </button>
+        <button class="nav-tab-btn" id="tab-btn-training" onclick="showTab('training')">
+          <span>🏃</span> Träning
+        </button>
+        <button class="nav-tab-btn" id="tab-btn-activities" onclick="showTab('activities')">
+          <span>📝</span> Senaste Pass & Logg
+        </button>
+        <button class="nav-tab-btn" id="tab-btn-ai-chat" onclick="showTab('ai-chat')">
+          <span>💬</span> Fråga Coachen
+        </button>
+        <button class="nav-tab-btn" id="tab-btn-profile" onclick="showTab('profile')">
+          <span>👤</span> Profil & Konto
+        </button>
+      </div>
+
+      <div class="nav-tabs-right">
+        <span class="user-tag" id="user-display-email">användare@exempel.se</span>
+        <span class="avatar-initial hidden" id="user-avatar-initial">U</span>
+        <button class="btn btn-secondary" onclick="handleLogout()">🚪 Logga ut</button>
+      </div>
+    </nav>
+
+    <!-- Content Views Container -->
+    <main class="hub-main-content">
+      
+      <!-- TAB 1: HÄLSA (COROS LIGHT THEME DASHBOARD) -->
+      <section id="tab-health" class="content-tab active">
+        
+        <!-- Top 3 Summary Cards Grid -->
+        <div class="cards-row">
+          
+          <!-- CARD 1: RECOVERY SCORE & AI-ANALYS -->
+          <div class="summary-card">
+            <h3>🔋 Recovery Score & Efficiency</h3>
+            <div class="summary-value" id="val-bb-level">72%</div>
+            <div class="summary-status-header" id="val-recovery-status">Återhämtad och redo för dagen!</div>
+            <div class="ai-advice-box" id="val-recovery-ai-box">Laddar AI-analys...</div>
+          </div>
+
+          <!-- CARD 2: WEIGHT & BODY COMP (WITHINGS) -->
+          <div class="summary-card">
+            <h3>⚖️ Weight & Body Comp (Withings)</h3>
+            <div class="summary-value" id="val-weight-kg">98.3 kg</div>
+            <div class="summary-trend" id="val-weight-trend">📉 -1.2 kg (-1.2%) under 30 d</div>
+            <div class="summary-subtext" id="val-bmi-text">BMI: 28.2 (📉 -0.4)</div>
+            <div class="summary-subtext" id="val-fat-pct">Fett: 21.4% | Muskelmassa: 72.1 kg</div>
+            <div class="summary-source" id="val-weight-source">Källa: Withings (2026-09-11)</div>
+          </div>
+
+          <!-- CARD 3: ACTIVE CALORIES BURNED -->
+          <div class="summary-card">
+            <h3>🔥 Kaloriförbränning idag</h3>
+            <div class="summary-value" id="val-calories-total">2 848 kcal</div>
+            <div class="summary-subtext" id="val-calories-breakdown">
+              Vila: 2 150 kcal | Aktivitet: 420 kcal | Träning: 278 kcal
+            </div>
+            <div class="summary-source" id="val-calories-source">Källa: Mifflin-St Jeor / Garmins BMR</div>
+          </div>
+
+        </div>
+
+        <!-- 8 Charts Grid (2 Columns x 4 Rows) -->
+        <div class="charts-grid-2col">
+          
+          <div class="chart-card-box">
+            <h4>⚖️ Vikt trend (kg)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-weight"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🔥 Kaloriförbränning per dag (Staplad dags-trend)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-calories"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🫀 Vilo-puls (RHR - bpm)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-rhr"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>📈 Vilo-HRV Trend (ms)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-hrv"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🛌 Sömn (Timmar / natt)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-sleep"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🌟 Sömnkvalitet (Score 0-100)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-sleep-score"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>⚡ Body Battery (Min / Max)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-bb"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box">
+            <h4>🧘 Stressnivå (Snitt)</h4>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-stress"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- TAB 2: TRÄNING -->
+      <section id="tab-training" class="content-tab hidden">
+        <div class="table-card-box">
+          <h3>🏃 Träningsbelastning & Zoner</h3>
+          <p style="font-size:0.9rem; color:#4B5563; margin-bottom:15px;">
+            Träningsvolym och pulszonsfördelning beräknat utifrån din Garmin/Fitbit-historik.
+          </p>
+          <div class="charts-grid-2col">
+            <div class="chart-card-box">
+              <h4>🏋️ Träningsvolym per vecka (timmar)</h4>
+              <div class="chart-canvas-wrapper">
+                <canvas id="chart-training-volume"></canvas>
+              </div>
+            </div>
+            <div class="chart-card-box">
+              <h4>🫀 Pulszonsfördelning (Z1-Z5)</h4>
+              <div class="chart-canvas-wrapper">
+                <canvas id="chart-hr-zones"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: SENASTE PASS & LOGG -->
+      <section id="tab-activities" class="content-tab hidden">
+        <div class="table-card-box">
+          <h3>📝 Senaste Träningspass & Aktivitetshistorik</h3>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Datum</th>
+                  <th>Aktivitet</th>
+                  <th>Distans</th>
+                  <th>Tid</th>
+                  <th>Snittpuls</th>
+                  <th>Kalorier</th>
+                  <th>Källa</th>
+                </tr>
+              </thead>
+              <tbody id="activities-table-body">
+                <tr><td colspan="7" style="text-align:center;">Laddar aktiviteter...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: FRÅGA COACHEN (HEALTHCHAT AI) -->
+      <section id="tab-ai-chat" class="content-tab hidden">
+        <div class="ai-chat-card-box">
+          <div class="chat-controls-bar">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <label for="ai-provider-select" style="font-size:0.85rem; font-weight:600;">AI-leverantör:</label>
+              <select id="ai-provider-select" class="select-input" style="width:auto;">
+                <option value="openai">OpenAI (GPT-4o)</option>
+                <option value="anthropic">Anthropic (Claude 3.7)</option>
+                <option value="gemini" selected>Google Gemini 1.5/2.0</option>
+                <option value="ollama">Ollama (Lokal AI)</option>
+                <option value="xai">xAI (Grok 2)</option>
+              </select>
+            </div>
+            <div class="quick-chips-row">
+              <button class="chip-btn" onclick="sendQuickPrompt('Ge mig en sammanfattning av min sömn denna vecka.')">🛌 Sömnanalys</button>
+              <button class="chip-btn" onclick="sendQuickPrompt('Hur ser min kaloriförbränning ut i förhållande till min träning?')">🔥 Kalorier</button>
+              <button class="chip-btn" onclick="sendQuickPrompt('Beräkna mina MAF-pulszoner.')">🫀 Pulszoner</button>
+            </div>
+          </div>
+
+          <div class="chat-messages-area" id="chat-messages-list">
+            <div class="chat-msg-row bot">
+              <span style="font-size:1.4rem;">🤖</span>
+              <div class="chat-msg-bubble">
+                Hej! Jag är din personliga AI-hälsocoach. Jag har tillgång till din krypterade Garmin/Fitbit/Withings-historik och kan hjälpa dig med träning, återhämtningsanalys och kost. Vad vill du diskutera idag?
+              </div>
+            </div>
+          </div>
+
+          <form class="chat-input-bar" onsubmit="handleSendChatMessage(event)">
+            <input type="text" id="chat-input-field" class="select-input" placeholder="Fråga om din träning, sömn eller återhämtning..." required autocomplete="off">
+            <button type="submit" class="btn btn-primary" id="btn-send-chat">Skicka 🚀</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- TAB 5: PROFIL & KONTO -->
+      <section id="tab-profile" class="content-tab hidden">
+        <div class="charts-grid-2col">
+          
+          <div class="table-card-box">
+            <h3>👤 Personlig profil</h3>
+            <form onsubmit="handleUpdateProfile(event)" style="margin-top:12px;">
+              <div class="input-row">
+                <div class="input-group">
+                  <label for="prof-sex">Kön</label>
+                  <select id="prof-sex" class="select-input">
+                    <option value="male">Man</option>
+                    <option value="female">Kvinna</option>
+                  </select>
+                </div>
+                <div class="input-group">
+                  <label for="prof-age">Ålder (år)</label>
+                  <input type="number" id="prof-age" min="10" max="120">
+                </div>
+              </div>
+              <div class="input-row">
+                <div class="input-group">
+                  <label for="prof-height">Längd (cm)</label>
+                  <input type="number" id="prof-height" min="100" max="230">
+                </div>
+                <div class="input-group">
+                  <label for="prof-weight">Vikt (kg)</label>
+                  <input type="number" id="prof-weight" step="0.1" min="30" max="300">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary" style="margin-top:10px;">💾 Spara profilmått</button>
+            </form>
+          </div>
+
+          <div class="table-card-box">
+            <h3>🔐 Byt lösenord</h3>
+            <form onsubmit="handleChangePassword(event)" style="margin-top:12px;">
+              <div class="input-group">
+                <label for="pwd-current">Nuvarande lösenord</label>
+                <input type="password" id="pwd-current" required placeholder="••••••••">
+              </div>
+              <div class="input-group">
+                <label for="pwd-new">Nytt lösenord (minst 8 tecken)</label>
+                <input type="password" id="pwd-new" required minlength="8" placeholder="••••••••">
+              </div>
+              <button type="submit" class="btn btn-secondary" style="margin-top:10px;">🔑 Uppdatera lösenord</button>
+            </form>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

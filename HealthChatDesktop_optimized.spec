@@ -17,7 +17,7 @@ datas = [
 binaries = []
 extra_hidden = []
 
-for pkg in ['numpy', 'matplotlib', 'chardet', 'charset_normalizer', 'requests', 'garth', 'garminconnect']:
+for pkg in ['numpy', 'matplotlib', 'chardet', 'charset_normalizer', 'requests', 'garth', 'garminconnect', 'argon2', 'keyring', 'cryptography']:
     try:
         p_datas, p_binaries, p_hidden = collect_all(pkg)
         datas += p_datas
@@ -40,6 +40,18 @@ a = Analysis(
         'ai_client',
         'garmin_handler',
         'garmin_db',
+        'auth',
+        'crypto',
+        'pymysql',
+        'argon2',
+        'argon2.low_level',
+        'keyring',
+        'keyring.backends',
+        'keyring.backends.Windows',
+        'dbutils',
+        'dbutils.pooled_db',
+        'cryptography',
+        'cryptography.hazmat.primitives.ciphers.aead',
         'calorie_calc',
         'fitbit_handler',
         'withings_handler',

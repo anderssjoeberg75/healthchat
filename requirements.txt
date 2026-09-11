@@ -1,8 +1,15 @@
-# HealthChat Desktop v4.0.4 Dependencies
+# HealthChat Desktop v4.1.0 Dependencies
 
 # Core Application
 garth==0.4.46              # Garmin Connect API wrapper
 tk==0.1.0                  # Tkinter (usually included with Python)
+
+# Database & Security
+pymysql==1.2.0             # MariaDB/MySQL database driver
+dbutils==3.2.0             # Thread-safe database connection pool
+cryptography>=43.0.0       # AES-256-GCM envelope encryption
+argon2-cffi>=25.1.0        # Argon2id password & recovery key derivation
+keyring>=25.7.0            # OS Keyring (Windows Credential Manager / DPAPI)
 
 # AI Providers
 openai==1.58.1             # OpenAI, xAI, Azure OpenAI, and Ollama (OpenAI-compatible)

@@ -43,3 +43,12 @@ config.json
 *.swp
 .DS_Store
 Thumbs.db
+
+# Graphify local output
+graphify-out/
+
+# Environment files & Recovery keys
+.env
+*.env
+db.env
+recovery_key_*.txt

@@ -125,3 +125,20 @@ def test_estimate_with_no_data_is_zero():
     result = calorie_calc.estimate_daily_burn(is_today=False)
     assert result["total_burn"] == 0
     assert result["bmr_full"] == 0
+
+
+def test_estimate_deducts_workout_steps():
+    # Total steps: 10000, workout_steps: 4000 -> everyday_steps: 6000
+    res_no_deduct = calorie_calc.estimate_daily_burn(
+        weight_kg=70, steps=10000, workout_steps=0, workout_calories=300, is_today=False
+    )
+    res_deduct = calorie_calc.estimate_daily_burn(
+        weight_kg=70, steps=10000, workout_steps=4000, workout_calories=300, is_today=False
+    )
+    assert res_deduct["workout_steps"] == 4000
+    assert res_deduct["everyday_steps"] == 6000
+    # 6000 steps * 0.04 kcal/step = 240 kcal vs 10000 * 0.04 = 400 kcal
+    assert res_deduct["steps_burn"] == 240
+    assert res_no_deduct["steps_burn"] == 400
+    assert res_deduct["total_burn"] == res_deduct["resting_burn"] + 240 + 300
+

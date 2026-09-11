@@ -1,0 +1,20 @@
+[Unit]
+Description=HealthChat FastAPI Web Application Service
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=healthchat
+WorkingDirectory=/opt/healthchat
+Environment="PATH=/opt/healthchat/venv/bin"
+Environment="MARIADB_HOST=192.168.101.106"
+Environment="MARIADB_PORT=3306"
+Environment="MARIADB_USER=healthchat"
+Environment="MARIADB_PASSWORD=powerman"
+Environment="MARIADB_DB=healthchat"
+ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -307,3 +307,28 @@ def test_sync_metadata_get_and_set(db):
     db.set_metadata("last_garmin_sync", "2026-08-26")
     assert db.get_metadata("last_garmin_sync") == "2026-08-26"
 
+
+def test_get_max_recorded_hr_source_filtering(db):
+    db.upsert_activity({
+        "activityId": 1,
+        "activityName": "Strava Run",
+        "activityType": "Running",
+        "startTimeLocal": "2020-01-01 10:00:00",
+        "maxHR": 204,
+        "source": "Strava"
+    })
+    db.upsert_activity({
+        "activityId": 2,
+        "activityName": "Garmin Run",
+        "activityType": "Running",
+        "startTimeLocal": "2020-01-02 10:00:00",
+        "maxHR": 166,
+        "source": "Garmin"
+    })
+
+    assert db.get_max_recorded_hr() == 204
+    assert db.get_max_recorded_hr(source="Garmin") == 166
+    assert db.get_max_recorded_hr(source="Strava") == 204
+
+
+

@@ -6,6 +6,7 @@ and offline Fitbit export archive file import (CSV/JSON).
 
 import os
 import sys
+import time
 import json
 import logging
 import urllib.parse
@@ -37,6 +38,8 @@ class FitbitHandler:
         self.refresh_token: Optional[str] = None
         self.client_id: Optional[str] = None
         self.client_secret: Optional[str] = None
+        self.expires_at: Optional[float] = None
+        self.last_error: Optional[str] = None
         self._authenticated = False
         
         self.load_stored_tokens()
@@ -51,6 +54,7 @@ class FitbitHandler:
                     self.refresh_token = data.get("refresh_token")
                     self.client_id = data.get("client_id")
                     self.client_secret = data.get("client_secret")
+                    self.expires_at = data.get("expires_at")
                     if self.access_token:
                         self._authenticated = True
                         logger.info("Fitbit tokens loaded successfully from disk.")
@@ -64,10 +68,13 @@ class FitbitHandler:
         try:
             tokens["client_id"] = self.client_id
             tokens["client_secret"] = self.client_secret
+            if "expires_in" in tokens and "expires_at" not in tokens:
+                tokens["expires_at"] = time.time() + float(tokens["expires_in"])
             with open(self.token_file, "w", encoding="utf-8") as f:
                 json.dump(tokens, f, indent=2)
             self.access_token = tokens.get("access_token")
             self.refresh_token = tokens.get("refresh_token")
+            self.expires_at = tokens.get("expires_at")
             self._authenticated = True
             logger.info("Saved Fitbit tokens to disk.")
         except Exception as e:
@@ -105,15 +112,59 @@ class FitbitHandler:
             "redirect_uri": redirect_uri
         }
         
-        res = requests.post(FITBIT_TOKEN_URL, headers=headers, data=data)
-        if res.status_code == 200:
-            tokens = res.json()
-            self.save_tokens(tokens)
-            return tokens
-        else:
-            raise Exception(f"Fitbit Token Exchange Failed ({res.status_code}): {res.text}")
+        try:
+            res = requests.post(FITBIT_TOKEN_URL, headers=headers, data=data, timeout=(5, 30))
+            if res.status_code == 200:
+                tokens = res.json()
+                self.save_tokens(tokens)
+                return tokens
+            else:
+                err_msg = f"Fitbit Token Exchange Failed ({res.status_code}): {res.text}"
+                self.last_error = err_msg
+                raise Exception(err_msg)
+        except requests.exceptions.Timeout:
+            err_msg = "Fitbit token exchange timed out after 30 seconds"
+            self.last_error = err_msg
+            raise Exception(err_msg)
+        except requests.exceptions.RequestException as req_err:
+            err_msg = f"Fitbit network error during token exchange: {req_err}"
+            self.last_error = err_msg
+            raise Exception(err_msg)
+
+    def refresh_access_token(self) -> bool:
+        """Refresh the access token using refresh_token if needed."""
+        if not self.refresh_token or not self.client_id or not self.client_secret:
+            logger.warning("Fitbit: Missing credentials or refresh token for token refresh")
+            return False
+
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token
+        }
+        try:
+            res = requests.post(FITBIT_TOKEN_URL, headers=headers, data=data, timeout=(5, 30))
+            if res.status_code == 200:
+                tokens = res.json()
+                self.save_tokens(tokens)
+                logger.info("Fitbit: Successfully refreshed access token")
+                return True
+            else:
+                logger.warning(f"Fitbit: Failed to refresh token ({res.status_code}): {res.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Fitbit: Exception during token refresh: {e}")
+            return False
 
     def _get_headers(self) -> Dict[str, str]:
+        # Check if expired and refresh if possible (5 min buffer)
+        if self.expires_at and time.time() > self.expires_at - 300:
+            self.refresh_access_token()
+
         if not self.access_token:
             raise Exception("Fitbit not authenticated")
         return {"Authorization": f"Bearer {self.access_token}"}
@@ -159,7 +210,12 @@ class FitbitHandler:
                     if self._authenticated:
                         try:
                             url = f"{FITBIT_API_BASE}/sleep/date/{d}.json"
-                            res = requests.get(url, headers=self._get_headers())
+                            res = requests.get(url, headers=self._get_headers(), timeout=(5, 30))
+                            if res.status_code == 401:
+                                # Attempt refresh and retry once
+                                if self.refresh_access_token():
+                                    res = requests.get(url, headers=self._get_headers(), timeout=(5, 30))
+
                             if res.status_code == 200:
                                 sleep_data = res.json()
                                 summary = sleep_data.get("summary", {})
@@ -176,6 +232,12 @@ class FitbitHandler:
                                         score=0,
                                         raw_data=sleep_data
                                     )
+                        except requests.exceptions.Timeout:
+                            logger.warning(f"Fitbit sleep request timed out for {d}")
+                            self.last_error = f"Timeout vid hämtning av Fitbit-sömn för {d}"
+                        except requests.exceptions.RequestException as req_err:
+                            logger.warning(f"Fitbit network error for {d}: {req_err}")
+                            self.last_error = str(req_err)
                         except Exception as e:
                             logger.debug(f"Fitbit sleep fetch failed for {d}: {e}")
 
