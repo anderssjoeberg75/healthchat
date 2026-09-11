@@ -5,7 +5,7 @@
 >
 > **Prioritet:** `P0` = bugg/säkerhet som påverkar användaren nu · `P1` = viktig robusthet/korrekthet · `P2` = kodkvalitet/underhåll.
 >
-> **ID-serier:** `B-` buggar/korrekthet · `S-` säkerhet (fortsätter efter `S-12`) · `UI-` frontend · `PF-` prestanda (fortsätter efter `PF-6`) · `Q-` kodkvalitet.
+> **ID-serier:** `B-` buggar/korrekthet · `S-` säkerhet (fortsätter efter `S-12`) · `TLS-` transportkryptering · `UI-` frontend · `PF-` prestanda (fortsätter efter `PF-6`) · `Q-` kodkvalitet.
 
 ---
 
@@ -18,10 +18,13 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 - **3 kritiska:** AI-chatten är helt trasig i UI:t (`B-1`), DEK:en lagras i **klartext** i databasen bredvid chiffertexten (`S-13`), och all hälsodata delas mellan användare så fort MariaDB inte svarar (`S-14`).
 - **6 allvarliga:** felaktig dedupliceringslogik som slår ihop olika träningspass (`B-2`), BMR som tyst blir 0 (`B-3`), omkastade argument som tömmer profilen mellan workers (`B-4`), påhittade hälsovärden i UI:t (`UI-1`), öppen CORS med credentials (`S-15`) och stored XSS i aktivitetstabellen (`UI-2`).
 - Därtill tolv mindre fynd kring OAuth-tokenhantering, connection pooling och kodkvalitet.
+- **Ingen transportkryptering:** webbläsare→app och app→MariaDB går båda i klartext (`TLS-1`, `TLS-3`). Klientkrypteringen skyddar data i vila – inte på tråden. Se avsnittet *Transportkryptering*.
 
 **Verifieringsstatus:** `B-2`, `B-3` och `B-6` är reproducerade med körbara skript. Övriga är verifierade genom kodläsning. Testsviten kunde **inte** köras i genomgångsmiljön (varken `pytest`, `fastapi`, `pymysql` eller `cryptography` fanns installerat och pip nådde inte PyPI) – **Antigravity ska köra `pytest` före och efter varje åtgärd** för att fånga regressioner.
 
 **Arbetsordning:** ta `B-1`, `B-2`, `B-3`, `B-4`, `UI-1` först – de är små, avgränsade och ger direkt märkbar effekt. `S-13`, `S-14` och `S-15` bör tas som ett separat säkerhetspass eftersom de kräver designbeslut. Se även `Q-10` om `.agents/rules/compile.md`.
+
+**Driftsättning är ett eget spår.** `TLS-1` och `TLS-3` är infrastrukturarbete på servern, inte kodändringar, och kan köras parallellt med buggfixarna. `TLS-3` innehåller dessutom ett **committat databaslösenord** som bör roteras omgående, oberoende av allt annat i tavlan.
 
 ---
 
@@ -385,6 +388,115 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 
 ---
 
+## 🔐 Transportkryptering – vad som krävs för att all trafik ska gå över HTTPS/TLS
+
+> Genomgång 2026-09-11. Kartlägger varje nätverkssträcka appen har och vad som saknas för att ingen av dem ska gå i klartext.
+> **Nuläget:** trafiken *ut* till tredjepartstjänster är redan krypterad. De två sträckor som bär användarens hälsodata och inloggningsuppgifter – webbläsare→app och app→MariaDB – går båda **helt okrypterade**.
+
+| # | Sträcka | Status i dag | Uppgift |
+|---|---|---|---|
+| 1 | Webbläsare → app | ❌ Klartext HTTP på `0.0.0.0:8000` | `TLS-1`, `TLS-2` |
+| 2 | App → MariaDB | ❌ Klartext över LAN till `192.168.101.106` | `TLS-3` |
+| 3 | App → Garmin/Strava/Fitbit/Withings | ✅ HTTPS | – |
+| 4 | App → OpenAI/Anthropic/Gemini/xAI | ✅ HTTPS | – |
+| 5 | App → Ollama | ❌ Alltid `http://`, även mot fjärrvärd | `TLS-4` |
+| 6 | Webbläsare → cdn.jsdelivr.net | ⚠️ HTTPS men opinnat och utan SRI | `TLS-5` |
+
+---
+
+### [ ] TLS-1: Ingen TLS-terminering – all webbtrafik går i klartext
+- **Fil:** [healthchat_web.service:15](healthchat_web.service), [server.py:779-781](server.py)
+- **Problem:** Tjänsten startar `uvicorn server:app --host 0.0.0.0 --port 8000` **utan TLS och utan reverse proxy**. Det finns ingen nginx-, Caddy- eller Traefik-konfiguration i repot. Allt som passerar går alltså i klartext över nätet:
+  - **Lösenordet** vid `/api/auth/login` och `/api/auth/register` ([server.py:342](server.py), [server.py:300](server.py)).
+  - **Återställningsnyckeln**, som returneras i klartext i registreringssvaret ([server.py:326](server.py)) och vid rotation ([server.py:730](server.py)). Den nyckeln kan ensam låsa upp kontots DEK.
+  - **Sessionscookien** ([server.py:315-321](server.py)) – den som snappar upp den får full tillgång till kontot i 30 dagar.
+  - **All hälsodata** – `/api/dashboard/summary` returnerar sömn, vikt, puls, HRV och träningspass i klartext-JSON.
+
+  `--host 0.0.0.0` gör dessutom att porten är öppen mot hela nätverket, inte bara mot en lokal proxy. Klientkrypteringen i `crypto.py` skyddar data *i vila* i databasen – den skyddar ingenting på tråden, eftersom servern dekrypterar innan svaret skickas.
+- **Åtgärd:**
+  1. Sätt upp en reverse proxy framför uvicorn som terminerar TLS. **Caddy** är enklast (automatisk Let's Encrypt, automatisk förnyelse, HTTP→HTTPS-redirect out of the box); **nginx + certbot** om det redan finns nginx i miljön. Lägg konfigurationen i repot (`deploy/Caddyfile` eller `deploy/nginx.conf`) så att den versionshanteras.
+  2. Ändra `ExecStart` till `--host 127.0.0.1` så att appen **bara** går att nå via proxyn. Detta är halva säkerhetsvinsten – utan det kan vem som helst kringgå TLS genom att prata direkt med port 8000.
+  3. Lägg till `--proxy-headers --forwarded-allow-ips=127.0.0.1` i uvicorn-kommandot. Utan det ser appen varje request som `http` och loggar proxyns IP i stället för klientens, vilket bryter både rate-limiting per IP och eventuella absoluta URL:er.
+  4. Tvinga HTTP→HTTPS-redirect i proxyn och sätt **HSTS**: `Strict-Transport-Security: max-age=31536000; includeSubDomains`. Vänta med `preload` tills uppsättningen är verifierad – den är svår att backa ur.
+  5. Kräv TLS 1.2 som minimum, helst 1.3.
+- **Acceptanskriterier:**
+  1. `curl -I http://<domän>/` svarar `301` till `https://`.
+  2. `curl -I https://<domän>/` svarar `200` med `Strict-Transport-Security`-huvudet satt.
+  3. `curl http://<serverns-IP>:8000/` från en annan maskin får **connection refused**.
+  4. `ssllabs.com`/`testssl.sh` ger minst betyg A.
+
+---
+
+### [ ] TLS-2: Cookie utan `Secure`, och inga säkerhetsheaders
+- **Fil:** [server.py:315-321](server.py), [server.py:353-359](server.py), [server.py:760-773](server.py)
+- **Problem:** Sessionscookien sätts utan `secure=True`, så webbläsaren skickar den även över ren HTTP. Så länge `TLS-1` inte är på plats spelar det ingen roll, men efteråt är det den enda kvarvarande vägen för att läcka cookien (t.ex. via en felaktig `http://`-länk). Appen sätter heller inga av de headers som gör HTTPS meningsfullt i praktiken: `Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`.
+  Detta överlappar med `S-15` (CORS) – ta gärna båda i samma pass.
+- **Åtgärd:**
+  1. Sätt `secure=True` på cookien, styrt av en miljövariabel (`COOKIE_SECURE`, default `1`) så att lokal HTTP-utveckling fortsatt fungerar.
+  2. Överväg att byta `samesite="lax"` till `"strict"` – appen har inga inkommande cross-site-flöden som behöver `lax`.
+  3. Lägg till en middleware i [server.py](server.py) som sätter säkerhetsheaders på alla svar. Sätt `Strict-Transport-Security` **antingen** i proxyn eller i appen, inte båda.
+  4. `Content-Security-Policy` behöver tillåta `cdn.jsdelivr.net` för Chart.js (se `TLS-5`) – eller så flyttas Chart.js lokalt och policyn kan bli `default-src 'self'`.
+- **Acceptanskriterier:**
+  1. `Set-Cookie`-huvudet innehåller `Secure; HttpOnly; SameSite=…`.
+  2. Samtliga fem headers ovan finns i svaret från `/`.
+  3. Sidan fungerar fortfarande – ingen resurs blockeras av CSP:n.
+
+---
+
+### [ ] TLS-3: Databastrafiken går okrypterad över LAN – och lösenordet ligger i repot
+- **Fil:** [healthchat_web.service:13](healthchat_web.service), [garmin_db.py:41-58](garmin_db.py) (`load_db_env`), [garmin_db.py:151-160](garmin_db.py) (`_init_mariadb_pool`), [garmin_db.py:76-97](garmin_db.py) (`get_mariadb_connection`)
+- **Problem:** Tre saker som förstärker varandra:
+  1. **Ingen TLS mot databasen.** `_init_mariadb_pool` har stöd för TLS, men aktiverar det **bara om filen `~/.healthchat/ca.pem` råkar finnas** ([garmin_db.py:157-158](garmin_db.py)). Service-filen sätter varken `MARIADB_SSL_CA` eller `MARIADB_REQUIRE_TLS=1`, så `ssl_config` blir `None` och anslutningen går i klartext. Databasen ligger på `192.168.101.106` – en **annan maskin** – så all trafik passerar nätverket. Innehållet är visserligen envelope-krypterat, men **DEK:en skickas också** över samma anslutning (se `S-13`), liksom e-postadresser, lösenordshashar och hela sessionstabellen.
+  2. **`get_mariadb_connection()` har inget TLS-stöd alls** ([garmin_db.py:90-97](garmin_db.py)) – ingen `ssl`-parameter. Migreringsskriptet [migrate_sqlite_to_mariadb.py](migrate_sqlite_to_mariadb.py) använder den och skickar alltså hela databasen i klartext över nätet.
+  3. **Databaslösenordet är committat i klartext.** Värdet står på [healthchat_web.service:13](healthchat_web.service) och som auto-genererad default på [garmin_db.py:53](garmin_db.py) – samma sträng på båda ställena – och finns i git-historiken sedan `7db86ef`. (Värdet återges inte här; läs det på plats i filerna.) En okrypterad anslutning med ett publikt känt lösenord mot en databas på LAN är en fullständig kompromiss av hälsodatan för vem som helst med nätverksåtkomst.
+- **Åtgärd:**
+  1. **Rotera lösenordet omgående** – det ska betraktas som läckt. Ta bort det ur [healthchat_web.service](healthchat_web.service) (använd `EnvironmentFile=/etc/healthchat/db.env` med `0600` och ägare `healthchat`) och ur defaulten i [garmin_db.py:53](garmin_db.py) – låt `load_db_env` skapa en mall **utan** lösenord och låta appen fela med tydligt meddelande i stället.
+  2. Historikomskrivning (`git filter-repo`) krävs för att få bort det ur gamla commits. Är repot privat och lösenordet roterat kan det vara acceptabelt att bara rotera – ta ett medvetet beslut och skriv ned det.
+  3. Sätt `MARIADB_REQUIRE_TLS=1` och `MARIADB_SSL_CA=/etc/healthchat/ca.pem` i driftmiljön. Koden kastar då redan i dag om certifikatet saknas ([garmin_db.py:159-160](garmin_db.py)) – bra beteende, se till att det används.
+  4. Lägg till `ssl`-stöd i `get_mariadb_connection()` med samma logik som poolen, så att migreringsskriptet inte blir en bakdörr.
+  5. Konfigurera MariaDB-servern med `require_secure_transport=ON` och ge användaren `REQUIRE SSL` (`ALTER USER 'healthchat'@'%' REQUIRE SSL`), så att en felkonfigurerad klient **inte kan** ansluta i klartext.
+  6. Verifiera att `pymysql` faktiskt validerar certifikatet – enbart `{"ca": path}` ger kryptering men inte nödvändigtvis värdnamnsvalidering. Sätt `check_hostname` explicit och testa mot ett felaktigt certifikat.
+- **Acceptanskriterier:**
+  1. `SHOW STATUS LIKE 'Ssl_cipher';` i en session öppnad av appen returnerar en chiffersvit, inte tom sträng.
+  2. En anslutning utan TLS avvisas av servern.
+  3. Inget hårdkodat lösenord kvar i arbetskopian – varken i [healthchat_web.service](healthchat_web.service) eller i `load_db_env` ([garmin_db.py:41-58](garmin_db.py)).
+  4. Migreringsskriptet ansluter med TLS.
+
+---
+
+### [ ] TLS-4: Ollama-trafiken går alltid över `http://`
+- **Fil:** [ai_client.py:196-211](ai_client.py) (`normalize_ollama_url`), [ai_client.py:61](ai_client.py)
+- **Problem:** `normalize_ollama_url` tvingar `http://` på allt som saknar schema ([ai_client.py:203-204](ai_client.py)), och bygger alltid om URL:en till `{scheme}://{host}:{port}/v1`. Pekar användaren Ollama mot en maskin i nätverket – vilket docstringens egna exempel (`192.168.107.15`) uppmuntrar till – går **hela hälsokontexten och AI-svaret** i klartext över LAN. Mot `localhost` är det oproblematiskt.
+- **Åtgärd:**
+  1. Behåll `http://` som default för loopback (`localhost`, `127.0.0.1`, `::1`) men **behåll `https://`** när användaren angett det – det gör funktionen redan, men den kan inte *uppgradera*.
+  2. Logga en varning när schemat är `http` och värden inte är loopback: `"Ollama-trafik till <host> går okrypterad"`.
+  3. Dokumentera i README hur man sätter en TLS-proxy framför Ollama för fjärranvändning.
+- **Acceptanskriterier:**
+  1. `normalize_ollama_url("https://ollama.example.se")` ger `https://ollama.example.se:443/v1`.
+  2. En icke-loopback `http://`-adress ger en loggad varning.
+  3. Befintliga tester i [tests/test_ai_client.py:16-31](tests/test_ai_client.py) uppdateras och är gröna.
+
+---
+
+### [ ] TLS-5: Chart.js laddas opinnat från CDN utan SRI
+- **Fil:** [static/index.html:12](static/index.html)
+- **Problem:** `<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>` – transporten är krypterad, men versionen är **opinnad** (senaste vid varje sidladdning) och saknar `integrity`-attribut. En komprometterad eller utbytt CDN-resurs kör godtycklig kod i en sida som visar hälsodata och håller en inloggad session. Det gör också `Content-Security-Policy` i `TLS-2` svagare, eftersom `cdn.jsdelivr.net` måste tillåtas.
+- **Åtgärd:** Antingen (a) lägg Chart.js lokalt under `static/` – då kan CSP:n bli `default-src 'self'` – eller (b) pinna en exakt version och lägg till `integrity="sha384-…" crossorigin="anonymous"`.
+- **Acceptanskriterier:** Ingen extern resurs laddas utan pinnad version och SRI, alternativt inga externa resurser alls.
+
+---
+
+### [ ] TLS-6: `requirements.txt` saknar webbapplikationens beroenden
+- **Fil:** [requirements.txt](requirements.txt)
+- **Problem:** Filen listar `garth`, `tk`, `pyinstaller` och desktopberoenden – men **varken `fastapi`, `uvicorn`, `pydantic` eller `email-validator`**, trots att [server.py:17-21](server.py) importerar alla fyra (`EmailStr` kräver `email-validator`). Webbappen går alltså inte att installera reproducerbart från repot, och man kan inte pinna den uvicorn-version som TLS-/proxy-uppsättningen i `TLS-1` förutsätter. Filens rubrik säger dessutom fortfarande "HealthChat **Desktop** v4.1.0".
+- **Åtgärd:**
+  1. Lägg till `fastapi`, `uvicorn[standard]`, `pydantic` och `email-validator` med pinnade versioner.
+  2. Dela upp i `requirements.txt` (webb) och `requirements-desktop.txt`, eller markera desktopberoendena tydligt. `tk`, `ttkthemes` och `pyinstaller` hör inte hemma på en webbserver.
+  3. Uppdatera rubriken så att den beskriver webbapplikationen.
+- **Acceptanskriterier:** `pip install -r requirements.txt` i en ren venv räcker för att `uvicorn server:app` ska starta.
+
+---
+
 ## Avfärdat (verifierat som icke-buggar)
 
 - **`crypto.py`** – AES-256-GCM med färsk nonce per operation, korrekt KEK/DEK-separation, `low_level.Type.ID` överallt. Inga fynd.
@@ -393,3 +505,4 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 - **Staplade route-dekoratorer** – `@app.post` / `@app.put` på samma funktion ([server.py:636-638](server.py)) fungerar som avsett i FastAPI; varje dekorator registrerar en route och returnerar funktionen oförändrad.
 - **Nakna `except:`** – inga kvar i kodbasen (`P2-1` håller).
 - **`hr_zones_calc.py`** – hanterar `None` och nollvärden korrekt i samtliga ingångar. Inga fynd.
+- **Utgående trafik till tredjepart** – Garmin (via `garth`), Strava, Fitbit, Withings och samtliga AI-leverantörer anropas över `https://` ([strava_handler.py:25-27](strava_handler.py), [fitbit_handler.py:26-28](fitbit_handler.py), [withings_handler.py:21-23](withings_handler.py)). Inga `verify=False` någonstans i kodbasen. Undantaget är Ollama, se `TLS-4`.
