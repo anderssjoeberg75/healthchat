@@ -107,7 +107,7 @@
     <header class="hub-header">
       <div class="hub-title-group">
         <h1>📊 HealthChat Hub</h1>
-        <span class="hub-sync-status" id="sync-status-text">✅ Ansluten till MariaDB (192.168.101.106)</span>
+        <span class="hub-sync-status" id="sync-status-text"></span>
       </div>
       <div class="hub-range-controls">
         <span class="range-label">Tidsintervall:</span>
@@ -135,12 +135,18 @@
         <button class="nav-tab-btn" id="tab-btn-ai-chat" onclick="showTab('ai-chat')">
           <span>💬</span> Fråga Coachen
         </button>
+        <button class="nav-tab-btn" id="tab-btn-sources" onclick="showTab('sources')">
+          <span>🔗</span> Källor & Synk
+        </button>
         <button class="nav-tab-btn" id="tab-btn-profile" onclick="showTab('profile')">
           <span>👤</span> Profil & Konto
         </button>
       </div>
 
       <div class="nav-tabs-right">
+        <button class="btn btn-primary" id="btn-checkin" onclick="runCheckin(false)" title="Hämta senaste data från alla anslutna källor">📥 Check-in</button>
+        <button class="btn btn-secondary" onclick="openSettings()" title="Inställningar">⚙️ Inställningar</button>
+        <button class="btn btn-secondary" onclick="toggleTheme()" title="Växla mörkt/ljust tema">◐</button>
         <span class="user-tag" id="user-display-email">användare@exempel.se</span>
         <span class="avatar-initial hidden" id="user-avatar-initial">U</span>
         <button class="btn btn-secondary" onclick="handleLogout()">🚪 Logga ut</button>
@@ -312,10 +318,15 @@
                 <option value="xai">xAI (Grok 2)</option>
               </select>
             </div>
+            <div class="quick-chips-row" id="quick-questions-row"></div>
             <div class="quick-chips-row">
-              <button class="chip-btn" onclick="sendQuickPrompt('Ge mig en sammanfattning av min sömn denna vecka.')">🛌 Sömnanalys</button>
-              <button class="chip-btn" onclick="sendQuickPrompt('Hur ser min kaloriförbränning ut i förhållande till min träning?')">🔥 Kalorier</button>
-              <button class="chip-btn" onclick="sendQuickPrompt('Beräkna mina MAF-pulszoner.')">🫀 Pulszoner</button>
+              <button class="chip-btn" onclick="openCustomizeQuestions()" title="Anpassa snabbfrågor">⚙️</button>
+              <button class="chip-btn" onclick="openPrompts()" title="Sparade promptar">📝 Promptar</button>
+              <button class="chip-btn" onclick="openSaveChat()" title="Spara denna chatt">💾 Spara</button>
+              <button class="chip-btn" onclick="openHistory()" title="Sparade chattar">📂 Historik</button>
+              <button class="chip-btn" onclick="openSearch()" title="Sök i chatthistoriken">🔍 Sök</button>
+              <button class="chip-btn" onclick="openExport()" title="Exportera som PDF, DOCX eller TXT">📄 Exportera</button>
+              <button class="chip-btn" onclick="resetChat()" title="Rensa chatten">↺ Rensa</button>
             </div>
           </div>
 
@@ -335,7 +346,71 @@
         </div>
       </section>
 
-      <!-- TAB 5: PROFIL & KONTO -->
+      <!-- TAB 5: KÄLLOR & SYNK -->
+      <section id="tab-sources" class="content-tab hidden">
+        <div class="cards-row" style="margin-bottom:16px;">
+          <div class="summary-card">
+            <div class="summary-status-header">📥 Check-in</div>
+            <div class="summary-subtext">Hämtar senaste data från alla anslutna källor.</div>
+            <button class="btn btn-primary" style="margin-top:10px;" onclick="runCheckin(false)">📥 Kör Check-in (alla källor)</button>
+            <button class="btn btn-secondary" style="margin-top:8px;" onclick="runCheckin(true)">🔄 Synka full historik</button>
+            <div class="summary-subtext" id="sources-sync-text" style="margin-top:10px;"></div>
+          </div>
+        </div>
+
+        <div class="charts-grid-2col">
+          <div class="table-card-box">
+            <h3>⌚ Garmin Connect</h3>
+            <div class="summary-subtext" id="garmin-status">Inte ansluten</div>
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="btn btn-primary" onclick="connectGarmin()">▶ Anslut till Garmin</button>
+              <button class="btn btn-secondary" onclick="runCheckin(false, 'garmin')">📥 Garmin Check-in</button>
+              <button class="btn btn-secondary" onclick="openSettings()">⚙️ Garmin-inloggning</button>
+            </div>
+            <div id="mfa-row" class="input-row hidden" style="margin-top:12px;">
+              <div class="input-group">
+                <label for="mfa-code">🔐 Ange 6-siffrig MFA-kod</label>
+                <input type="text" id="mfa-code" maxlength="6" inputmode="numeric" placeholder="123456">
+              </div>
+              <div class="input-group" style="justify-content:flex-end;">
+                <button class="btn btn-primary" onclick="submitMfa()">Skicka kod</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-card-box">
+            <h3>⌚ Fitbit</h3>
+            <div class="summary-subtext" id="fitbit-status">Inte ansluten</div>
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="btn btn-primary" onclick="connectSource('fitbit')">▶ Anslut till Fitbit</button>
+              <button class="btn btn-secondary" onclick="runCheckin(false, 'fitbit')">📥 Fitbit Check-in</button>
+              <button class="btn btn-secondary" onclick="importFile('fitbit')">📁 Importera export-fil</button>
+            </div>
+          </div>
+
+          <div class="table-card-box">
+            <h3>⚖️ Withings</h3>
+            <div class="summary-subtext" id="withings-status">Inte ansluten</div>
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="btn btn-primary" onclick="connectSource('withings')">▶ Anslut till Withings</button>
+              <button class="btn btn-secondary" onclick="runCheckin(false, 'withings')">📥 Withings Check-in</button>
+              <button class="btn btn-secondary" onclick="importFile('withings')">📁 Importera export-fil</button>
+            </div>
+          </div>
+
+          <div class="table-card-box">
+            <h3>🏃 Strava</h3>
+            <div class="summary-subtext" id="strava-status">Inte ansluten</div>
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="btn btn-primary" onclick="connectSource('strava')">▶ Anslut till Strava</button>
+              <button class="btn btn-secondary" onclick="runCheckin(false, 'strava')">📥 Strava Check-in</button>
+              <button class="btn btn-secondary" onclick="importFile('strava')">📁 Importera export-fil</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: PROFIL & KONTO -->
       <section id="tab-profile" class="content-tab hidden">
         <div class="charts-grid-2col">
           
@@ -390,6 +465,19 @@
     </main>
 
   </div>
+
+  <!-- Reusable dialog (settings, prompts, history, search, export, messages) -->
+  <div class="modal-overlay hidden" id="app-modal">
+    <div class="modal-card" style="max-width:760px;">
+      <div class="modal-header-banner">
+        <h2 id="app-modal-title">HealthChat</h2>
+      </div>
+      <div class="modal-body" id="app-modal-body"></div>
+      <div class="modal-actions" id="app-modal-actions"></div>
+    </div>
+  </div>
+
+  <input type="file" id="import-file-input" class="hidden">
 
   <script src="/static/app.js"></script>
 </body>

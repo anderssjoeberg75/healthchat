@@ -38,21 +38,32 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
 
 
 def load_db_env():
-    """Load key-value environment variables from ~/.healthchat/db.env or local .env into os.environ if missing."""
+    """Load database settings from ./.env or ~/.healthchat/db.env into os.environ.
+
+    Values in these files take precedence over variables already in the
+    environment, so the file stays the single source of truth for a given
+    machine.
+    """
     db_env_file = Path.home() / ".healthchat" / "db.env"
     local_env_file = Path.cwd() / ".env"
 
     if not db_env_file.exists() and not local_env_file.exists():
         try:
             db_env_file.parent.mkdir(parents=True, exist_ok=True)
+            # A template only: the password belongs in this file (or the
+            # environment), never in the source tree.
             db_env_file.write_text(
                 "MARIADB_HOST=192.168.101.106\n"
                 "MARIADB_PORT=3306\n"
                 "MARIADB_USER=healthchat\n"
-                "MARIADB_PASSWORD=powerman\n"
+                "MARIADB_PASSWORD=\n"
                 "MARIADB_DB=healthchat\n",
                 encoding="utf-8"
             )
+            try:
+                db_env_file.chmod(0o600)
+            except OSError:
+                pass
         except Exception as e:
             logger.debug(f"Could not auto-create db.env: {e}")
 
@@ -119,7 +130,7 @@ class GarminDatabase:
                     "host": os.environ.get("MARIADB_HOST", DEFAULT_MARIADB_HOST),
                     "port": int(os.environ.get("MARIADB_PORT", DEFAULT_MARIADB_PORT)),
                     "user": os.environ.get("MARIADB_USER", DEFAULT_MARIADB_USER),
-                    "password": password or "powerman",
+                    "password": password or "",
                     "database": os.environ.get("MARIADB_DB", DEFAULT_MARIADB_DB),
                 }
         self.mariadb_config = mariadb_config
@@ -160,7 +171,12 @@ class GarminDatabase:
             password=password,
             database=config.get("database", DEFAULT_MARIADB_DB),
             charset="utf8mb4",
-            autocommit=True
+            autocommit=True,
+            # Fail fast when the database host is unreachable so the caller can
+            # fall back to SQLite instead of hanging on every request.
+            connect_timeout=int(os.environ.get("MARIADB_CONNECT_TIMEOUT", 5)),
+            read_timeout=int(os.environ.get("MARIADB_READ_TIMEOUT", 30)),
+            write_timeout=int(os.environ.get("MARIADB_WRITE_TIMEOUT", 30)),
         )
 
     def set_user_session(self, user_id: int, dek: bytes):
