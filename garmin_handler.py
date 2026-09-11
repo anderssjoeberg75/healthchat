@@ -19,13 +19,7 @@ logger = logging.getLogger(__name__)
 class GarminDataHandler:
     """Handles Garmin Connect authentication and data retrieval."""
     
-    def __init__(
-        self,
-        email: str,
-        password: str,
-        token_store_path: Optional[str] = None,
-        db: Optional[GarminDatabase] = None,
-    ):
+    def __init__(self, email: str, password: str, token_store_path: Optional[str] = None, db: Optional[Any] = None):
         """
         Initialize Garmin Connect handler.
         
@@ -33,15 +27,14 @@ class GarminDataHandler:
             email: Garmin Connect email
             password: Garmin Connect password
             token_store_path: Directory to store tokens (default: ~/.garmin_tokens)
-            db: Database to write synced data to. Multi-user deployments pass one
-                database per user; omit it for the single-user default location.
+            db: Optional GarminDatabase instance (MariaDB with user encryption)
         """
         self.email = email
         self.password = password
         self.client: Optional[Garmin] = None
         self._authenticated = False
         
-        # Initialize Local SQLite Database
+        # Initialize Database (MariaDB if passed, else fallback)
         self.db = db if db is not None else GarminDatabase()
         
         # Token store directory - garth will create oauth1_token.json and oauth2_token.json files
@@ -66,6 +59,7 @@ class GarminDataHandler:
             
         def _sync_worker():
             try:
+                self._ensure_display_name()
                 from datetime import datetime, timedelta
                 sync_days = days
                 if not force_full:
@@ -106,6 +100,18 @@ class GarminDataHandler:
                         sleep = self.client.get_sleep_data(d)
                         if sleep and "dailySleepDTO" in sleep:
                             sd = sleep["dailySleepDTO"]
+                            scores_dict = sd.get("sleepScores", {})
+                            if isinstance(scores_dict, dict) and "overall" in scores_dict:
+                                overall = scores_dict.get("overall", {})
+                                score_val = overall.get("value", 0) if isinstance(overall, dict) else 0
+                            else:
+                                score_val = sd.get("sleepQualityScore") or sd.get("overallSleepScore", {}).get("value") or sleep.get("sleepScores", {}).get("overall", {}).get("value") or 0
+
+                            try:
+                                score_val = int(score_val or 0)
+                            except (TypeError, ValueError):
+                                score_val = 0
+
                             self.db.upsert_sleep(
                                 date=d,
                                 total_hours=(sd.get("sleepTimeSeconds", 0) or 0) / 3600.0,
@@ -113,7 +119,7 @@ class GarminDataHandler:
                                 light_hours=(sd.get("lightSleepSeconds", 0) or 0) / 3600.0,
                                 rem_hours=(sd.get("remSleepSeconds", 0) or 0) / 3600.0,
                                 awake_hours=(sd.get("awakeSleepSeconds", 0) or 0) / 3600.0,
-                                score=sd.get("sleepQualityScore", 0) or 0,
+                                score=score_val,
                                 raw_data=sleep
                             )
                     except Exception as e:
@@ -206,9 +212,50 @@ class GarminDataHandler:
                 except Exception as e:
                     logger.debug(f"Sync Body Composition range failed: {e}")
 
+                # Try fetching configured Max HR from Garmin settings/zones
+                try:
+                    g_max = None
+                    try:
+                        settings = self.client.get_userprofile_settings()
+                        if isinstance(settings, dict):
+                            udata = settings.get("userData", {})
+                            if isinstance(udata, dict):
+                                g_max = udata.get("maxHeartRate") or udata.get("defaultMaxHeartRate")
+                    except Exception:
+                        pass
+
+                    if not g_max:
+                        try:
+                            prof = self.client.get_user_profile()
+                            if isinstance(prof, dict):
+                                udata = prof.get("userData", {})
+                                if isinstance(udata, dict):
+                                    g_max = udata.get("maxHeartRate") or udata.get("defaultMaxHeartRate")
+                        except Exception:
+                            pass
+
+                    if not g_max:
+                        try:
+                            zones = self.client.get_heart_rate_zones()
+                            if isinstance(zones, list):
+                                for z in zones:
+                                    if isinstance(z, dict) and z.get("maxHeartRate"):
+                                        g_max = z["maxHeartRate"]
+                                        break
+                            elif isinstance(zones, dict) and zones.get("maxHeartRate"):
+                                g_max = zones["maxHeartRate"]
+                        except Exception:
+                            pass
+
+                    if g_max and int(g_max) > 0:
+                        self.db.set_metadata("garmin_max_hr", str(int(g_max)))
+                except Exception as e:
+                    logger.debug(f"Sync Garmin Max HR settings failed: {e}")
+
                 # Save metadata for last sync
                 self.db.set_metadata("last_garmin_sync", datetime.now().strftime("%Y-%m-%d"))
                 self.db.set_metadata("last_garmin_sync_timestamp", datetime.now().isoformat())
+
 
                 logger.info("Garmin DB background sync completed successfully!")
                 if on_complete:
@@ -1045,7 +1092,7 @@ class GarminDataHandler:
         }
 
     @staticmethod
-    def parse_body_composition_records(data: Any) -> List[Dict]:
+    def parse_body_composition_records(data: Any, default_date: Optional[str] = None) -> List[Dict]:
         """
         Parse Garmin body composition response (e.g. from dateRange) into a list of daily metric dicts.
         Handles dateWeightList arrays and totalAverage dicts.
@@ -1100,7 +1147,7 @@ class GarminDataHandler:
         if not records:
             tot = data.get("totalAverage") or {}
             if isinstance(tot, dict) and tot.get("weight"):
-                date_str = data.get("date") or data.get("startDate") or datetime.now().strftime("%Y-%m-%d")
+                date_str = data.get("date") or data.get("startDate") or default_date or datetime.now().strftime("%Y-%m-%d")
                 raw_weight = tot.get("weight", 0)
                 weight_kg = raw_weight / 1000.0 if raw_weight > 300 else float(raw_weight)
                 muscle = tot.get("muscleMass", 0.0)
@@ -1125,7 +1172,7 @@ class GarminDataHandler:
     @staticmethod
     def extract_body_composition(data: Any, date_str: str) -> Dict:
         """Robustly extract body composition metrics (weight, fat, muscle, etc.) from Garmin API response schemas."""
-        records = GarminDataHandler.parse_body_composition_records(data)
+        records = GarminDataHandler.parse_body_composition_records(data, default_date=date_str)
         if records:
             return records[-1]
         return {}

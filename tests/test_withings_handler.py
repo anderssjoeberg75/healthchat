@@ -104,3 +104,27 @@ def test_sync_withings_incremental(tmp_path):
         res = handler.sync_withings_data(days=365, force_full=False)
         mock_fetch.assert_called_once_with(days=365)
 
+
+def test_sync_profile_weight_from_db(tmp_path):
+    from HealthChatDesktop import HealthChatApp
+    test_db = GarminDatabase(db_path=tmp_path / "weight_sync_test.db")
+    test_db.upsert_body_composition(
+        date="2026-09-01",
+        weight_kg=96.54,
+        source="withings"
+    )
+
+    app = HealthChatApp.__new__(HealthChatApp)
+    app.db = test_db
+    app.user_weight_kg = 98.0
+    app.save_config = MagicMock()
+    app.charts_view = MagicMock()
+    app.get_user_profile = MagicMock(return_value={'weight_kg': 96.5})
+
+    app._sync_profile_weight_from_db()
+
+    assert app.user_weight_kg == 96.5
+    app.save_config.assert_called_once()
+    app.charts_view.set_profile.assert_called_once()
+
+

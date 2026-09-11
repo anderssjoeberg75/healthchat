@@ -11,7 +11,7 @@ venv/
 env/
 ENV/
 
-# --- Build artifacts ---
+# --- PyInstaller build artifacts ---
 build/
 dist/
 *.manifest
@@ -37,14 +37,18 @@ config.json
 .healthchat/
 .garmin_chat/
 
-# --- Web server state (accounts, per-user databases, OAuth tokens, secret key) ---
-data/
-webapp/.env
-secret_key
-
 # --- IDE / OS ---
 .idea/
 .vscode/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Graphify local output
+graphify-out/
+
+# Environment files & Recovery keys
+.env
+*.env
+db.env
+recovery_key_*.txt

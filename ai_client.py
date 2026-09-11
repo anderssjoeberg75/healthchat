@@ -153,7 +153,8 @@ class AIClient:
                     http_options={'api_version': 'v1'}
                 )
                 logger.info("Initialized Gemini client with API version v1")
-            except:
+            except Exception as e:
+                logger.debug(f"Gemini v1 init failed, using default API version: {e}")
                 # Fallback to default (v1beta)
                 client = genai.Client(api_key=self.api_key)
                 logger.info("Initialized Gemini client with default API version")
@@ -358,7 +359,7 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                 if 'please use' in error_str:
                     try:
                         suggested_model = error_str.split('please use ')[1].split(' ')[0].strip('.')
-                    except:
+                    except (IndexError, ValueError):
                         pass
                 
                 msg = (f"🔄 Model Deprecated\n\n"
@@ -391,7 +392,7 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                             match = re.search(r'seconds:\s*(\d+)', error_str)
                             if match:
                                 retry_seconds = int(match.group(1))
-                        except:
+                        except (ValueError, AttributeError):
                             pass
                     
                     msg = (f"⚠️ Gemini Rate Limit Reached\n\n"
