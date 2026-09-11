@@ -499,14 +499,30 @@ function renderHealthCharts() {
     datasets: [{ label: 'Vilo-puls (bpm)', data: rhrData, borderColor: '#0284C7', tension: 0.3 }]
   });
 
-  // 4. HRV Chart (Rose/Pink line)
+  // 4. Nattlig HRV Trend (Emerald line with triangle markers matching Desktop app)
   const hrv = history.hrv || [];
-  const hrvExt = extractChartData(hrv, 'date', item => item.weekly_avg || item.last_night_avg || 68);
+  const hrvExt = extractChartData(hrv, 'date', item => {
+    if (item.last_night_avg !== undefined && item.last_night_avg !== null) {
+      return Number(item.last_night_avg);
+    }
+    return 0;
+  });
   const hrvLabels = hrvExt ? hrvExt.labels : fallbackDates;
-  const hrvData = hrvExt ? hrvExt.data : generateMockSeries(68, 6, count, 6, days);
+  const hrvData = hrvExt ? hrvExt.data : generateMockSeries(25, 6, count, 6, days);
   createChart('chart-hrv', 'line', {
     labels: hrvLabels,
-    datasets: [{ label: 'Vilo-HRV (ms)', data: hrvData, borderColor: '#EC4899', tension: 0.3 }]
+    datasets: [{
+      label: 'Nattlig HRV (ms)',
+      data: hrvData,
+      borderColor: '#10B981',
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      pointBackgroundColor: '#10B981',
+      pointBorderColor: '#10B981',
+      pointStyle: 'triangle',
+      pointRadius: hrvLabels.length > 50 ? 3 : 4,
+      borderWidth: 2,
+      tension: 0.15
+    }]
   });
 
   // 5. Sleep Duration Bar Chart (Purple bars)
