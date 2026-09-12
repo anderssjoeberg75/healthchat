@@ -42,14 +42,45 @@ app = FastAPI(
     version="4.1.0"
 )
 
-# CORS Middleware
+def get_allowed_origins() -> List[str]:
+    raw = os.getenv("ALLOWED_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return ["http://localhost:8000", "http://127.0.0.1:8000"]
+
+def get_cookie_secure() -> bool:
+    return os.getenv("COOKIE_SECURE", "1").lower() not in ("0", "false", "no")
+
+_allowed_origins = get_allowed_origins()
+_allow_credentials = "*" not in _allowed_origins
+
+# CORS Middleware (S-15)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
 )
+
+# Security Headers Middleware (TLS-2)
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    return response
+
 
 # In-memory active user sessions keyed by session_id token
 _active_sessions: Dict[str, UserSession] = {}
@@ -331,6 +362,7 @@ def register(req: RegisterRequest, response: Response):
             key=SESSION_COOKIE_NAME,
             value=session_id,
             httponly=True,
+            secure=get_cookie_secure(),
             samesite="lax",
             max_age=86400 * 30
         )
@@ -369,6 +401,7 @@ def login(req: LoginRequest, response: Response):
             key=SESSION_COOKIE_NAME,
             value=session_id,
             httponly=True,
+            secure=get_cookie_secure(),
             samesite="lax",
             max_age=86400 * 30
         )
@@ -410,7 +443,12 @@ def logout(response: Response, healthchat_session: Optional[str] = Cookie(None))
                     conn.close()
                 except Exception:
                     pass
-    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=get_cookie_secure(),
+        samesite="lax"
+    )
     return {"status": "success", "message": "Utloggad!"}
 
 
@@ -769,7 +807,12 @@ def delete_account(response: Response, healthchat_session: Optional[str] = Cooki
             _active_sessions.pop(healthchat_session)
         if healthchat_session:
             delete_session_from_db(conn, healthchat_session)
-        response.delete_cookie(SESSION_COOKIE_NAME)
+        response.delete_cookie(
+            key=SESSION_COOKIE_NAME,
+            httponly=True,
+            secure=get_cookie_secure(),
+            samesite="lax"
+        )
         return {"status": "success", "message": "Konto raderat!"}
     finally:
         if conn:

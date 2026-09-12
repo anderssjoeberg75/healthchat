@@ -9,7 +9,7 @@ from garmin_db import GarminDatabase
 from fastapi.testclient import TestClient
 from server import app, _active_sessions
 
-client = TestClient(app)
+client = TestClient(app, base_url="https://testserver")
 
 
 def test_root_endpoint_serves_html():

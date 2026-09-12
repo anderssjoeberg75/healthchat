@@ -60,11 +60,11 @@ Ingen av dessa kräver designbeslut. Alla fyra har reproducerbara felfall beskri
 Gör dem tillsammans – de rör samma renderingsfunktioner. `UI-2` blir enklare efter `UI-1`, eftersom
 flera `innerHTML`-block försvinner helt när fallbackvärdena tas bort.
 
-### Omgång 3 – Webbsäkerhet i appen
+### Omgång 3 – Webbsäkerhet i appen (✅ Klart)
 | Ordning | ID | Fil | Omfattning |
 |---|---|---|---|
-| 7 | `S-15` | `server.py:44-51` | CORS-lista ur miljövariabel. |
-| 8 | `TLS-2` | `server.py` | `secure=True` på cookien + säkerhetsheaders som middleware. |
+| 7 | `S-15` | `server.py:44-51` | ✅ Åtgärdad: CORS-lista ur ALLOWED_ORIGINS + credentials-skydd |
+| 8 | `TLS-2` | `server.py` | ✅ Åtgärdad: secure=True på cookien via COOKIE_SECURE + säkerhetsheaders som middleware |
 
 Samma fil och samma uppstartsblock – gör dem i en omgång. **`TLS-2` punkt 1 (`COOKIE_SECURE`) får inte
 slås på i produktion förrän `TLS-1` är klar**, annars slutar inloggningen fungera över HTTP. Låt
@@ -286,7 +286,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] S-15: CORS tillåter alla origins tillsammans med credentials
+### [x] S-15: CORS tillåter alla origins tillsammans med credentials
 - **Fil:** [server.py:44-51](server.py), cookie-sättningen på [server.py:315-321](server.py) och [server.py:353-359](server.py)
 - **Problem:** `allow_origins=["*"]` i kombination med `allow_credentials=True`. Starlettes `CORSMiddleware` **speglar tillbaka anropande origin** när begäran bär cookie, så skyddet blir i praktiken obefintligt mot en webbplats som lyckas få cookien medskickad. `SameSite=Lax` mildrar det mot vanliga cross-site-XHR, men kombinationen är fel och gör skyddet beroende av en enda inställning.
   Cookien saknar dessutom `secure=True` – sessions-ID:t skickas i klartext över HTTP. `healthchat_web.service` kör bakom reverse proxy, så flaggan bör vara på i produktion.
@@ -552,7 +552,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] TLS-2: Cookie utan `Secure`, och inga säkerhetsheaders
+### [x] TLS-2: Cookie utan `Secure`, och inga säkerhetsheaders
 - **Fil:** [server.py:315-321](server.py), [server.py:353-359](server.py), [server.py:760-773](server.py)
 - **Problem:** Sessionscookien sätts utan `secure=True`, så webbläsaren skickar den även över ren HTTP. Så länge `TLS-1` inte är på plats spelar det ingen roll, men efteråt är det den enda kvarvarande vägen för att läcka cookien (t.ex. via en felaktig `http://`-länk). Appen sätter heller inga av de headers som gör HTTPS meningsfullt i praktiken: `Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`.
   Detta överlappar med `S-15` (CORS) – ta gärna båda i samma pass.
