@@ -206,9 +206,9 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    # AI-leverantören är inte valbar från klienten - all chatt går till den
-    # lokala Ollama-servern. Eventuella extrafält från äldre klienter ignoreras.
     message: str
+    provider: Optional[str] = "openai"
+    model: Optional[str] = None
 
 
 # --- HELPER DEPENDENCIES ---
@@ -622,35 +622,6 @@ def recover_account(req: RecoverRequest):
             conn.close()
 
 
-def _pick_latest_body_battery(bb_hist: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
-    """Return the most recent Body Battery row that actually carries a value.
-
-    Garmin writes a row for the current day as soon as it is synced, often
-    before it has computed any levels. Blindly taking the last row therefore
-    blanks out the Recovery card even when the preceding days hold good data,
-    so walk backwards to the newest row with a usable metric.
-    """
-    rows = bb_hist or []
-    for entry in reversed(rows):
-        if not isinstance(entry, dict):
-            continue
-        for key in ("highest", "highest_level", "current", "charged"):
-            try:
-                if float(entry.get(key) or 0) > 0:
-                    return {
-                        **entry,
-                        "highest_level": entry.get("highest") or entry.get("highest_level"),
-                    }
-            except (TypeError, ValueError):
-                continue
-    if rows and isinstance(rows[-1], dict):
-        return {
-            **rows[-1],
-            "highest_level": rows[-1].get("highest") or rows[-1].get("highest_level"),
-        }
-    return None
-
-
 # --- DASHBOARD & HEALTH DATA ENDPOINTS ---
 
 @app.get("/api/dashboard/summary")
@@ -757,7 +728,7 @@ def get_dashboard_summary(
         "latest_body_comp": body_comp_latest,
         "calorie_burn_today": burn_estimate,
         "sleep_latest": sleep_hist[-1] if sleep_hist else None,
-        "bb_latest": _pick_latest_body_battery(bb_hist),
+        "bb_latest": bb_hist[-1] if bb_hist else None,
         "stress_latest": stress_hist[-1] if stress_hist else None,
         "hrv_latest": hrv_hist[-1] if hrv_hist else None,
         "activities_recent": activities_hist[:10],
@@ -803,15 +774,14 @@ async def chat_stream(
     
     garmin_context = "\n".join(context_lines)
     
-    # All AI-chatt körs mot den lokala Ollama-servern. Ingen leverantörsväljare
-    # finns i gränssnittet och klienten kan inte styra om anropet.
+    provider = (req.provider or "openai").lower()
+    api_key = secret_store.get_secret(f"{provider}_api_key") or ""
     ollama_url = secret_store.get_secret("ollama_base_url") or os.environ.get("OLLAMA_BASE_URL")
-    ollama_model = secret_store.get_secret("ollama_model") or os.environ.get("OLLAMA_MODEL")
 
     client = AIClient(
-        provider="ollama",
-        api_key="",
-        model=ollama_model,
+        provider=provider,
+        api_key=api_key,
+        model=req.model,
         ollama_base_url=ollama_url
     )
 

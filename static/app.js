@@ -372,24 +372,6 @@ function formatNumber(num) {
   return Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
-function bbHasValue(entry) {
-  if (!entry) return false;
-  return ['highest', 'highest_level', 'current', 'charged']
-    .some(k => entry[k] !== undefined && entry[k] !== null && Number(entry[k]) > 0);
-}
-
-// Garmin writes today's Body Battery row before it has computed any levels, so
-// the newest row is regularly empty. Walk backwards to the newest row that
-// actually holds a value instead of blanking the card out.
-function pickLatestBodyBattery(history, fallback) {
-  const rows = (history && history.body_battery) || [];
-  for (let i = rows.length - 1; i >= 0; i--) {
-    if (bbHasValue(rows[i])) return rows[i];
-  }
-  if (bbHasValue(fallback)) return fallback;
-  return rows[rows.length - 1] || fallback || {};
-}
-
 function getRecoveryAiAdvice(recVal) {
   if (recVal >= 80) {
     return "🤖 AI-Analys: Återhämtning " + recVal + "% – Kroppen är i toppform och redo för högre ansträngning!\n" +
@@ -423,10 +405,9 @@ function updateDashboardCards(data) {
   const daysLabel = days < 365 ? `${days} d` : (days > 365 ? 'alla d' : '1 år');
 
   // 1. Recovery Score Card
-  const bb = pickLatestBodyBattery(data.history, data.bb_latest);
-  const recCandidates = [bb.highest, bb.highest_level, bb.current, bb.charged];
-  const rawRec = recCandidates.find(v => v !== undefined && v !== null && Number(v) > 0);
-  const recVal = rawRec !== undefined ? Math.round(Number(rawRec)) : null;
+  const bb = data.bb_latest || {};
+  const hasRec = bb.highest_level !== undefined && bb.highest_level !== null && Number(bb.highest_level) > 0;
+  const recVal = hasRec ? Number(bb.highest_level) : null;
   const recColor = recVal !== null ? (recVal >= 75 ? '#10B981' : (recVal >= 45 ? '#F59E0B' : '#EF4444')) : '#9CA3AF';
   
   const recValEl = document.getElementById('val-bb-level');
@@ -442,14 +423,8 @@ function updateDashboardCards(data) {
     "Låg återhämtning – prioritera vila och återhämtning"))
   ) : "Ingen återhämtningsdata för perioden";
   
-  const recDate = String(bb.date || '').slice(0, 10);
-  const recIsStale = recVal !== null && recDate && data.today_date && recDate !== data.today_date;
   const recStatusEl = document.getElementById('val-recovery-status');
-  if (recStatusEl) {
-    recStatusEl.innerText = recIsStale
-      ? `${recStatusSummary} (mätning ${recDate})`
-      : recStatusSummary;
-  }
+  if (recStatusEl) recStatusEl.innerText = recStatusSummary;
 
   const aiBoxEl = document.getElementById('val-recovery-ai-box');
   if (aiBoxEl) {
@@ -995,7 +970,7 @@ function renderTrainingCharts() {
   }
 
   // Card 2: Training Status & Load Impact
-  const latestBb = pickLatestBodyBattery(history, cachedSummary && cachedSummary.bb_latest);
+  const latestBb = (history.body_battery && history.body_battery.length) ? history.body_battery[history.body_battery.length - 1] : {};
   const hasCharged = latestBb.charged !== undefined && latestBb.charged !== null && Number(latestBb.charged) > 0;
   const charged = hasCharged ? Number(latestBb.charged) : null;
   const statusTitleEl = document.getElementById('val-train-status-title');
@@ -1323,6 +1298,7 @@ async function handleSendChatMessage(event) {
   const message = input.value.trim();
   if (!message) return;
 
+  const provider = document.getElementById('ai-provider-select').value;
   input.value = '';
 
   appendChatMessage('user', message);
@@ -1332,7 +1308,7 @@ async function handleSendChatMessage(event) {
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message, provider })
     });
 
     if (!res.ok) {
