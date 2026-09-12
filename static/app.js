@@ -644,257 +644,289 @@ function renderHealthCharts() {
   const fallbackDates = generateDatesForRange(days);
 
   // 1. Weight Chart (Blue line, matching Desktop ax_health_weight)
-  const bodyComp = (history.body_composition || []).filter(b => b.weight_kg && Number(b.weight_kg) > 0);
-  const weightExt = extractChartData(bodyComp, 'date', 'weight_kg');
-  const hasWeight = !!(weightExt && weightExt.data.length > 0);
-  const weightLabels = hasWeight ? weightExt.labels : fallbackDates;
-  const weightData = hasWeight ? weightExt.data : [];
-  createChart('chart-weight', 'line', {
-    labels: weightLabels,
-    datasets: [{
-      label: 'Vikt (kg)',
-      data: weightData,
-      borderColor: '#0078D4',
-      backgroundColor: 'rgba(0,120,212,0.1)',
-      pointBackgroundColor: '#0078D4',
-      pointBorderColor: '#0078D4',
-      pointStyle: 'rect',
-      pointRadius: weightLabels.length > 50 ? 2 : 4,
-      tension: 0.2,
-      fill: true
-    }]
-  });
+  try {
+    const bodyComp = (history.body_composition || []).filter(b => b.weight_kg && Number(b.weight_kg) > 0);
+    const weightExt = extractChartData(bodyComp, 'date', 'weight_kg');
+    const hasWeight = !!(weightExt && weightExt.data.length > 0);
+    const weightLabels = hasWeight ? weightExt.labels : fallbackDates;
+    const weightData = hasWeight ? weightExt.data : [];
+    createChart('chart-weight', 'line', {
+      labels: weightLabels,
+      datasets: [{
+        label: 'Vikt (kg)',
+        data: weightData,
+        borderColor: '#0078D4',
+        backgroundColor: 'rgba(0,120,212,0.1)',
+        pointBackgroundColor: '#0078D4',
+        pointBorderColor: '#0078D4',
+        pointStyle: 'rect',
+        pointRadius: weightLabels.length > 50 ? 2 : 4,
+        tension: 0.2,
+        fill: true
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-weight:', err);
+  }
 
   // 2. Calories Stacked Bar Chart (Vila BMR, Steg, Träning matching Desktop ax_health_calories)
-  const calsMap = {};
-  (history.daily_summary || []).forEach(d => {
-    const dt = String(d.date || '').slice(0, 10);
-    if (!dt) return;
-    const tot = Number(d.total_calories || 0);
-    const act = Number(d.active_calories || 0);
-    const rest = Math.max(0, tot - act);
-    calsMap[dt] = {
-      date: dt,
-      resting_burn: rest,
-      steps_burn: act,
-      workout_burn: 0,
-      total_burn: tot
-    };
-  });
+  try {
+    const calsMap = {};
+    (history.daily_summary || []).forEach(d => {
+      const dt = String(d.date || '').slice(0, 10);
+      if (!dt) return;
+      const tot = Number(d.total_calories || 0);
+      const act = Number(d.active_calories || 0);
+      const rest = Math.max(0, tot - act);
+      calsMap[dt] = {
+        date: dt,
+        resting_burn: rest,
+        steps_burn: act,
+        workout_burn: 0,
+        total_burn: tot
+      };
+    });
 
-  (history.activities || []).forEach(a => {
-    const dt = String(a.date || a.start_time || '').slice(0, 10);
-    if (!dt) return;
-    const wCals = Number(a.calories || 0);
-    if (wCals > 0) {
-      if (!calsMap[dt]) {
-        calsMap[dt] = { date: dt, resting_burn: 0, steps_burn: 0, workout_burn: 0, total_burn: 0 };
+    (history.activities || []).forEach(a => {
+      const dt = String(a.date || a.start_time || '').slice(0, 10);
+      if (!dt) return;
+      const wCals = Number(a.calories || 0);
+      if (wCals > 0) {
+        if (!calsMap[dt]) {
+          calsMap[dt] = { date: dt, resting_burn: 0, steps_burn: 0, workout_burn: 0, total_burn: 0 };
+        }
+        calsMap[dt].workout_burn += wCals;
+        calsMap[dt].total_burn += wCals;
       }
-      calsMap[dt].workout_burn += wCals;
-      calsMap[dt].total_burn += wCals;
-    }
-  });
+    });
 
-  (history.calorie_burn || []).forEach(c => {
-    const dt = String(c.date || '').slice(0, 10);
-    if (!dt) return;
-    calsMap[dt] = {
-      date: dt,
-      resting_burn: Number(c.resting_burn || 0),
-      steps_burn: Number(c.steps_burn || 0),
-      workout_burn: Number(c.workout_burn || 0),
-      total_burn: Number(c.total_burn || 0)
-    };
-  });
+    (history.calorie_burn || []).forEach(c => {
+      const dt = String(c.date || '').slice(0, 10);
+      if (!dt) return;
+      calsMap[dt] = {
+        date: dt,
+        resting_burn: Number(c.resting_burn || 0),
+        steps_burn: Number(c.steps_burn || 0),
+        workout_burn: Number(c.workout_burn || 0),
+        total_burn: Number(c.total_burn || 0)
+      };
+    });
 
-  const mergedCals = Object.values(calsMap).filter(c => (c.resting_burn + c.steps_burn + c.workout_burn) > 0);
-  const calExt = extractChartData(mergedCals, 'date', item => item);
-  const hasCals = !!(calExt && calExt.labels.length > 0);
-  const calLabels = hasCals ? calExt.labels : fallbackDates;
-  const restingData = hasCals ? calExt.raw.map(c => Number(c.resting_burn || 0)) : [];
-  const activeData = hasCals ? calExt.raw.map(c => Number(c.steps_burn || 0)) : [];
-  const workoutData = hasCals ? calExt.raw.map(c => Number(c.workout_burn || 0)) : [];
-  createChart('chart-calories', 'bar', {
-    labels: calLabels,
-    datasets: [
-      { label: 'Vila (BMR)', data: restingData, backgroundColor: '#F59E0B' },
-      { label: 'Steg / Aktivitet', data: activeData, backgroundColor: '#0078D4' },
-      { label: 'Träning', data: workoutData, backgroundColor: '#EF4444' }
-    ]
-  }, { stacked: true });
+    const mergedCals = Object.values(calsMap).filter(c => (c.resting_burn + c.steps_burn + c.workout_burn) > 0);
+    const calExt = extractChartData(mergedCals, 'date', item => item.total_burn);
+    const hasCals = !!(calExt && calExt.raw && calExt.raw.length > 0);
+    const calLabels = hasCals ? calExt.labels : fallbackDates;
+    const restingData = hasCals ? calExt.raw.map(c => Number(c.resting_burn || 0)) : [];
+    const activeData = hasCals ? calExt.raw.map(c => Number(c.steps_burn || 0)) : [];
+    const workoutData = hasCals ? calExt.raw.map(c => Number(c.workout_burn || 0)) : [];
+    createChart('chart-calories', 'bar', {
+      labels: calLabels,
+      datasets: [
+        { label: 'Vila (BMR)', data: restingData, backgroundColor: '#F59E0B' },
+        { label: 'Steg / Aktivitet', data: activeData, backgroundColor: '#0078D4' },
+        { label: 'Träning', data: workoutData, backgroundColor: '#EF4444' }
+      ]
+    }, { stacked: true });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-calories:', err);
+  }
 
   // 3. Resting Heart Rate / Vilopuls (Pink/rose matching Desktop ax_health_rhr)
-  const rhrMap = {};
-  (history.daily_summary || []).forEach(d => {
-    const dt = String(d.date || '').slice(0, 10);
-    const rhr = Number(d.resting_hr || 0);
-    if (dt && rhr > 0) rhrMap[dt] = rhr;
-  });
-  (history.sleep || []).forEach(s => {
-    const dt = String(s.date || '').slice(0, 10);
-    if (!dt) return;
-    let rhr = Number(s.resting_hr || s.resting_heart_rate || 0);
-    if (!rhr && s.raw_json) {
-      try {
-        const raw = typeof s.raw_json === 'string' ? JSON.parse(s.raw_json) : s.raw_json;
-        rhr = Number(raw.restingHeartRate || raw.resting_hr || 0);
-      } catch (e) {}
-    }
-    if (rhr > 0) rhrMap[dt] = rhr;
-  });
+  try {
+    const rhrMap = {};
+    (history.daily_summary || []).forEach(d => {
+      const dt = String(d.date || '').slice(0, 10);
+      const rhr = Number(d.resting_hr || 0);
+      if (dt && rhr > 0) rhrMap[dt] = rhr;
+    });
+    (history.sleep || []).forEach(s => {
+      const dt = String(s.date || '').slice(0, 10);
+      if (!dt) return;
+      let rhr = Number(s.resting_hr || s.resting_heart_rate || 0);
+      if (!rhr && s.raw_json) {
+        try {
+          const raw = typeof s.raw_json === 'string' ? JSON.parse(s.raw_json) : s.raw_json;
+          rhr = Number(raw.restingHeartRate || raw.resting_hr || 0);
+        } catch (e) {}
+      }
+      if (rhr > 0) rhrMap[dt] = rhr;
+    });
 
-  const sortedRhrDates = Object.keys(rhrMap).sort();
-  const hasRhr = sortedRhrDates.length > 0;
-  const rhrLabels = hasRhr ? sortedRhrDates.map(d => d.slice(5)) : fallbackDates;
-  const rhrData = hasRhr ? sortedRhrDates.map(d => rhrMap[d]) : [];
-  createChart('chart-rhr', 'line', {
-    labels: rhrLabels,
-    datasets: [{
-      label: 'Vilo-puls (bpm)',
-      data: rhrData,
-      borderColor: '#EC4899',
-      backgroundColor: 'rgba(236, 72, 153, 0.1)',
-      pointBackgroundColor: '#EC4899',
-      pointBorderColor: '#EC4899',
-      pointStyle: 'circle',
-      pointRadius: rhrLabels.length > 50 ? 2 : 3,
-      borderWidth: 2,
-      tension: 0.2
-    }]
-  });
+    const sortedRhrDates = Object.keys(rhrMap).sort();
+    const hasRhr = sortedRhrDates.length > 0;
+    const rhrLabels = hasRhr ? sortedRhrDates.map(d => d.slice(5)) : fallbackDates;
+    const rhrData = hasRhr ? sortedRhrDates.map(d => rhrMap[d]) : [];
+    createChart('chart-rhr', 'line', {
+      labels: rhrLabels,
+      datasets: [{
+        label: 'Vilo-puls (bpm)',
+        data: rhrData,
+        borderColor: '#EC4899',
+        backgroundColor: 'rgba(236, 72, 153, 0.1)',
+        pointBackgroundColor: '#EC4899',
+        pointBorderColor: '#EC4899',
+        pointStyle: 'circle',
+        pointRadius: rhrLabels.length > 50 ? 2 : 3,
+        borderWidth: 2,
+        tension: 0.2
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-rhr:', err);
+  }
 
   // 4. Nattlig HRV Trend (Emerald green matching Desktop ax_health_hrv)
-  const hrv = history.hrv || [];
-  const hrvExt = extractChartData(hrv, 'date', item => {
-    if (item.last_night_avg !== undefined && item.last_night_avg !== null) {
-      return Number(item.last_night_avg);
-    }
-    return 0;
-  });
-  const hasHrv = !!(hrvExt && hrvExt.data.some(v => v > 0));
-  const hrvLabels = hasHrv ? hrvExt.labels : fallbackDates;
-  const hrvData = hasHrv ? hrvExt.data : [];
-  createChart('chart-hrv', 'line', {
-    labels: hrvLabels,
-    datasets: [{
-      label: 'Nattlig HRV (ms)',
-      data: hrvData,
-      borderColor: '#10B981',
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
-      pointBackgroundColor: '#10B981',
-      pointBorderColor: '#10B981',
-      pointStyle: 'triangle',
-      pointRadius: hrvLabels.length > 50 ? 2 : 4,
-      borderWidth: 2,
-      tension: 0.15
-    }]
-  });
+  try {
+    const hrv = history.hrv || [];
+    const hrvExt = extractChartData(hrv, 'date', item => {
+      if (item.last_night_avg !== undefined && item.last_night_avg !== null) {
+        return Number(item.last_night_avg);
+      }
+      return 0;
+    });
+    const hasHrv = !!(hrvExt && hrvExt.data.some(v => v > 0));
+    const hrvLabels = hasHrv ? hrvExt.labels : fallbackDates;
+    const hrvData = hasHrv ? hrvExt.data : [];
+    createChart('chart-hrv', 'line', {
+      labels: hrvLabels,
+      datasets: [{
+        label: 'Nattlig HRV (ms)',
+        data: hrvData,
+        borderColor: '#10B981',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        pointBackgroundColor: '#10B981',
+        pointBorderColor: '#10B981',
+        pointStyle: 'triangle',
+        pointRadius: hrvLabels.length > 50 ? 2 : 4,
+        borderWidth: 2,
+        tension: 0.15
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-hrv:', err);
+  }
 
   // 5. Sleep Duration Bar Chart (Purple matching Desktop ax_health_sleep)
-  const sleep = (history.sleep || []).filter(s => (s.total_sleep_hours !== undefined && Number(s.total_sleep_hours) > 0));
-  const sleepExt = extractChartData(sleep, 'date', 'total_sleep_hours');
-  const hasSleep = !!(sleepExt && sleepExt.data.length > 0);
-  const sleepLabels = hasSleep ? sleepExt.labels : fallbackDates;
-  const sleepData = hasSleep ? sleepExt.data : [];
-  createChart('chart-sleep', 'bar', {
-    labels: sleepLabels,
-    datasets: [{ label: 'Sömntid (timmar)', data: sleepData, backgroundColor: '#8B5CF6' }]
-  });
+  try {
+    const sleep = (history.sleep || []).filter(s => (s.total_sleep_hours !== undefined && Number(s.total_sleep_hours) > 0));
+    const sleepExt = extractChartData(sleep, 'date', 'total_sleep_hours');
+    const hasSleep = !!(sleepExt && sleepExt.data.length > 0);
+    const sleepLabels = hasSleep ? sleepExt.labels : fallbackDates;
+    const sleepData = hasSleep ? sleepExt.data : [];
+    createChart('chart-sleep', 'bar', {
+      labels: sleepLabels,
+      datasets: [{ label: 'Sömntid (timmar)', data: sleepData, backgroundColor: '#8B5CF6' }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-sleep:', err);
+  }
 
   // 6. Sleep Quality / Score Trend (Purple matching Desktop ax_health_sleep_score)
-  const scoreMap = {};
-  (history.sleep || []).forEach(s => {
-    const dt = String(s.date || s.start_time || '').slice(0, 10);
-    if (!dt) return;
-    let score = Number(s.sleep_score || s.score || 0);
-    if (!score && s.raw_json) {
-      try {
-        const raw = typeof s.raw_json === 'string' ? JSON.parse(s.raw_json) : s.raw_json;
-        if (raw && typeof raw === 'object') {
-          const dto = raw.dailySleepDTO || {};
-          const scoresD = dto.sleepScores || raw.sleepScores || {};
-          if (scoresD && typeof scoresD === 'object' && scoresD.overall) {
-            const ov = scoresD.overall;
-            score = typeof ov === 'object' ? Number(ov.value || 0) : Number(ov || 0);
+  try {
+    const scoreMap = {};
+    (history.sleep || []).forEach(s => {
+      const dt = String(s.date || s.start_time || '').slice(0, 10);
+      if (!dt) return;
+      let score = Number(s.sleep_score || s.score || 0);
+      if (!score && s.raw_json) {
+        try {
+          const raw = typeof s.raw_json === 'string' ? JSON.parse(s.raw_json) : s.raw_json;
+          if (raw && typeof raw === 'object') {
+            const dto = raw.dailySleepDTO || {};
+            const scoresD = dto.sleepScores || raw.sleepScores || {};
+            if (scoresD && typeof scoresD === 'object' && scoresD.overall) {
+              const ov = scoresD.overall;
+              score = typeof ov === 'object' ? Number(ov.value || 0) : Number(ov || 0);
+            }
+            if (!score) {
+              score = Number(dto.sleepQualityScore || (dto.overallSleepScore && dto.overallSleepScore.value) || 0);
+            }
           }
-          if (!score) {
-            score = Number(dto.sleepQualityScore || (dto.overallSleepScore && dto.overallSleepScore.value) || 0);
-          }
-        }
-      } catch (e) {}
-    }
-    if (score > 0) scoreMap[dt] = score;
-  });
+        } catch (e) {}
+      }
+      if (score > 0) scoreMap[dt] = score;
+    });
 
-  const sortedScoreDates = Object.keys(scoreMap).sort();
-  const hasScore = sortedScoreDates.length > 0;
-  const scoreLabels = hasScore ? sortedScoreDates.map(d => d.slice(5)) : fallbackDates;
-  const scoreData = hasScore ? sortedScoreDates.map(d => scoreMap[d]) : [];
-  createChart('chart-sleep-score', 'line', {
-    labels: scoreLabels,
-    datasets: [{
-      label: 'Sömnkvalitet (0-100)',
-      data: scoreData,
-      borderColor: '#8B5CF6',
-      backgroundColor: 'rgba(139, 92, 246, 0.1)',
-      pointBackgroundColor: '#8B5CF6',
-      pointBorderColor: '#8B5CF6',
-      pointStyle: 'rect',
-      pointRadius: scoreLabels.length > 50 ? 2 : 4,
-      borderWidth: 2,
-      tension: 0.2
-    }]
-  });
+    const sortedScoreDates = Object.keys(scoreMap).sort();
+    const hasScore = sortedScoreDates.length > 0;
+    const scoreLabels = hasScore ? sortedScoreDates.map(d => d.slice(5)) : fallbackDates;
+    const scoreData = hasScore ? sortedScoreDates.map(d => scoreMap[d]) : [];
+    createChart('chart-sleep-score', 'line', {
+      labels: scoreLabels,
+      datasets: [{
+        label: 'Sömnkvalitet (0-100)',
+        data: scoreData,
+        borderColor: '#8B5CF6',
+        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+        pointBackgroundColor: '#8B5CF6',
+        pointBorderColor: '#8B5CF6',
+        pointStyle: 'rect',
+        pointRadius: scoreLabels.length > 50 ? 2 : 4,
+        borderWidth: 2,
+        tension: 0.2
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-sleep-score:', err);
+  }
 
   // 7. Body Battery Uppladdat (+) (Emerald green matching Desktop ax_health_bb)
-  const bb = history.body_battery || [];
-  const bbExt = extractChartData(bb, 'date', item => {
-    const val = item.charged !== undefined && item.charged !== null ? item.charged : item.highest_level;
-    return val !== undefined ? Number(val) : 0;
-  });
-  const hasBb = !!(bbExt && bbExt.data.some(v => v > 0));
-  const bbLabels = hasBb ? bbExt.labels : fallbackDates;
-  const bbData = hasBb ? bbExt.data : [];
-  createChart('chart-bb', 'line', {
-    labels: bbLabels,
-    datasets: [{
-      label: 'Body Battery Uppladdat (+)',
-      data: bbData,
-      borderColor: '#10B981',
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
-      pointBackgroundColor: '#10B981',
-      pointBorderColor: '#10B981',
-      pointStyle: 'circle',
-      pointRadius: bbLabels.length > 50 ? 2 : 3,
-      borderWidth: 2,
-      tension: 0.2
-    }]
-  });
+  try {
+    const bb = history.body_battery || [];
+    const bbExt = extractChartData(bb, 'date', item => {
+      const val = item.charged !== undefined && item.charged !== null ? item.charged : item.highest_level;
+      return val !== undefined ? Number(val) : 0;
+    });
+    const hasBb = !!(bbExt && bbExt.data.some(v => v > 0));
+    const bbLabels = hasBb ? bbExt.labels : fallbackDates;
+    const bbData = hasBb ? bbExt.data : [];
+    createChart('chart-bb', 'line', {
+      labels: bbLabels,
+      datasets: [{
+        label: 'Body Battery Uppladdat (+)',
+        data: bbData,
+        borderColor: '#10B981',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        pointBackgroundColor: '#10B981',
+        pointBorderColor: '#10B981',
+        pointStyle: 'circle',
+        pointRadius: bbLabels.length > 50 ? 2 : 3,
+        borderWidth: 2,
+        tension: 0.2
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-bb:', err);
+  }
 
   // 8. Genomsnittlig Stress Level (Coral/orange-red matching Desktop ax_health_stress)
-  const stress = history.stress || [];
-  const stressExt = extractChartData(stress, 'date', item => {
-    const val = item.average !== undefined && item.average !== null ? item.average : item.avg_stress_level;
-    return val !== undefined ? Number(val) : 0;
-  });
-  const hasStress = !!(stressExt && stressExt.data.some(v => v > 0));
-  const stressLabels = hasStress ? stressExt.labels : fallbackDates;
-  const stressData = hasStress ? stressExt.data : [];
-  createChart('chart-stress', 'line', {
-    labels: stressLabels,
-    datasets: [{
-      label: 'Genomsnittlig Stress',
-      data: stressData,
-      borderColor: '#FF5722',
-      backgroundColor: 'rgba(255, 87, 34, 0.1)',
-      pointBackgroundColor: '#FF5722',
-      pointBorderColor: '#FF5722',
-      pointStyle: 'rect',
-      pointRadius: stressLabels.length > 50 ? 2 : 3,
-      borderWidth: 2,
-      tension: 0.2
-    }]
-  });
+  try {
+    const stress = history.stress || [];
+    const stressExt = extractChartData(stress, 'date', item => {
+      const val = item.average !== undefined && item.average !== null ? item.average : item.avg_stress_level;
+      return val !== undefined ? Number(val) : 0;
+    });
+    const hasStress = !!(stressExt && stressExt.data.some(v => v > 0));
+    const stressLabels = hasStress ? stressExt.labels : fallbackDates;
+    const stressData = hasStress ? stressExt.data : [];
+    createChart('chart-stress', 'line', {
+      labels: stressLabels,
+      datasets: [{
+        label: 'Genomsnittlig Stress',
+        data: stressData,
+        borderColor: '#FF5722',
+        backgroundColor: 'rgba(255, 87, 34, 0.1)',
+        pointBackgroundColor: '#FF5722',
+        pointBorderColor: '#FF5722',
+        pointStyle: 'rect',
+        pointRadius: stressLabels.length > 50 ? 2 : 3,
+        borderWidth: 2,
+        tension: 0.2
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-stress:', err);
+  }
 }
 
 function renderTrainingCharts() {
@@ -1077,74 +1109,90 @@ function renderTrainingCharts() {
   // --- 3. RENDER 4 CHARTS (2x2 GRID) ---
 
   // Chart 1: Träningsbelastning & Distans Trend (km)
-  const actByDate = {};
-  activities.forEach(a => {
-    const d = String(a.date || a.start_time || '').slice(0, 10);
-    if (d) {
-      actByDate[d] = (actByDate[d] || 0) + Number(a.distance_km || 0);
-    }
-  });
-  const sortedDates = Object.keys(actByDate).sort();
-  const hasLoad = sortedDates.length > 0;
-  const loadLabels = hasLoad ? sortedDates.map(d => d.slice(5)) : fallbackDates;
-  const loadData = hasLoad ? sortedDates.map(d => Number(actByDate[d].toFixed(2))) : [];
+  try {
+    const actByDate = {};
+    activities.forEach(a => {
+      const d = String(a.date || a.start_time || '').slice(0, 10);
+      if (d) {
+        actByDate[d] = (actByDate[d] || 0) + Number(a.distance_km || 0);
+      }
+    });
+    const sortedDates = Object.keys(actByDate).sort();
+    const hasLoad = sortedDates.length > 0;
+    const loadLabels = hasLoad ? sortedDates.map(d => d.slice(5)) : fallbackDates;
+    const loadData = hasLoad ? sortedDates.map(d => Number(actByDate[d].toFixed(2))) : [];
 
-  createChart('chart-train-load', 'line', {
-    labels: loadLabels,
-    datasets: [{
-      label: 'Träningsdistans (km)',
-      data: loadData,
-      borderColor: '#0078D4',
-      backgroundColor: 'rgba(0, 120, 212, 0.15)',
-      pointBackgroundColor: '#0078D4',
-      borderWidth: 2,
-      fill: true,
-      tension: 0.25
-    }]
-  });
+    createChart('chart-train-load', 'line', {
+      labels: loadLabels,
+      datasets: [{
+        label: 'Träningsdistans (km)',
+        data: loadData,
+        borderColor: '#0078D4',
+        backgroundColor: 'rgba(0, 120, 212, 0.15)',
+        pointBackgroundColor: '#0078D4',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.25
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-train-load:', err);
+  }
 
   // Chart 2: Pulszonsfördelning Träning (Z1-Z5)
-  const zoneData = activities.length > 0 ? [25, 50, 15, 8, 2] : [0, 0, 0, 0, 0];
-  createChart('chart-hr-zones', 'bar', {
-    labels: ['Z1 (Återhämtning)', 'Z2 (Aerob/MAF)', 'Z3 (Tempo)', 'Z4 (Tröskel)', 'Z5 (Anaerob)'],
-    datasets: [{
-      label: 'Tid i zoner (%)',
-      data: zoneData,
-      backgroundColor: ['#10B981', '#0284C7', '#F59E0B', '#F97316', '#DC2626']
-    }]
-  });
+  try {
+    const zoneData = activities.length > 0 ? [25, 50, 15, 8, 2] : [];
+    createChart('chart-hr-zones', 'bar', {
+      labels: ['Z1 (Återhämtning)', 'Z2 (Aerob/MAF)', 'Z3 (Tempo)', 'Z4 (Tröskel)', 'Z5 (Anaerob)'],
+      datasets: [{
+        label: 'Tid i zoner (%)',
+        data: zoneData,
+        backgroundColor: ['#10B981', '#0284C7', '#F59E0B', '#F97316', '#DC2626']
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-hr-zones:', err);
+  }
 
   // Chart 3: Träningsvolym & Kalorier (per pass)
-  const volLabels = activities.slice(0, 15).map(a => String(a.date || a.start_time || '').slice(5, 10));
-  const volData = activities.slice(0, 15).map(a => Number(a.duration_min || 0));
-  createChart('chart-training-volume', 'bar', {
-    labels: volLabels.length ? volLabels : fallbackDates.slice(-7),
-    datasets: [{
-      label: 'Träningstid (min)',
-      data: volData,
-      backgroundColor: '#8B5CF6'
-    }]
-  });
+  try {
+    const volLabels = activities.slice(0, 15).map(a => String(a.date || a.start_time || '').slice(5, 10));
+    const volData = activities.slice(0, 15).map(a => Number(a.duration_min || 0));
+    createChart('chart-training-volume', 'bar', {
+      labels: volLabels.length ? volLabels : fallbackDates.slice(-7),
+      datasets: [{
+        label: 'Träningstid (min)',
+        data: volData,
+        backgroundColor: '#8B5CF6'
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-training-volume:', err);
+  }
 
   // Chart 4: Aktivitetsfördelning per Sport / Typ
-  const typeCounts = {};
-  activities.forEach(a => {
-    const t = String(a.activity_name || a.activity_type || 'Övrigt');
-    typeCounts[t] = (typeCounts[t] || 0) + 1;
-  });
-  const hasTypes = Object.keys(typeCounts).length > 0;
-  const typeLabels = hasTypes ? Object.keys(typeCounts) : ['Inga pass'];
-  const typeData = hasTypes ? Object.values(typeCounts) : [0];
-  const typeColors = hasTypes ? ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7'] : ['#E5E7EB'];
+  try {
+    const typeCounts = {};
+    activities.forEach(a => {
+      const t = String(a.activity_name || a.activity_type || 'Övrigt');
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+    });
+    const hasTypes = Object.keys(typeCounts).length > 0;
+    const typeLabels = hasTypes ? Object.keys(typeCounts) : ['Inga pass'];
+    const typeData = hasTypes ? Object.values(typeCounts) : [];
+    const typeColors = hasTypes ? ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7'] : ['#E5E7EB'];
 
-  createChart('chart-train-types', 'doughnut', {
-    labels: typeLabels,
-    datasets: [{
-      label: 'Antal pass',
-      data: typeData,
-      backgroundColor: typeColors
-    }]
-  });
+    createChart('chart-train-types', 'doughnut', {
+      labels: typeLabels,
+      datasets: [{
+        label: 'Antal pass',
+        data: typeData,
+        backgroundColor: typeColors
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-train-types:', err);
+  }
 
 
   // --- 4. POPULATE EMBEDDED ACTIVITY TABLE ---
@@ -1170,6 +1218,33 @@ function renderTrainingCharts() {
   }
 }
 
+const emptyChartPlugin = {
+  id: 'emptyChartPlugin',
+  afterDraw: function(chart) {
+    let hasData = false;
+    if (chart.data && chart.data.datasets && chart.data.datasets.length > 0) {
+      for (const ds of chart.data.datasets) {
+        if (Array.isArray(ds.data) && ds.data.length > 0) {
+          if (ds.data.some(v => v !== null && v !== undefined && v !== 0 && !isNaN(v))) {
+            hasData = true;
+            break;
+          }
+        }
+      }
+    }
+    if (!hasData) {
+      const { ctx, width, height } = chart;
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.fillStyle = '#9CA3AF';
+      ctx.fillText('Ingen data för perioden', width / 2, height / 2);
+      ctx.restore();
+    }
+  }
+};
+
 function createChart(canvasId, type, data, options = {}) {
   const canvasEl = document.getElementById(canvasId);
   if (!canvasEl) return;
@@ -1181,27 +1256,37 @@ function createChart(canvasId, type, data, options = {}) {
     delete chartInstances[canvasId];
   }
   
-  const ctx = canvasEl.getContext('2d');
-  const chartConfig = {
-    type: type,
-    data: data,
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: '#374151', font: { family: 'Segoe UI' } } }
-      }
-    }
-  };
-
-  if (type !== 'doughnut' && type !== 'pie') {
-    chartConfig.options.scales = {
-      x: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } },
-      y: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } }
-    };
+  if (typeof Chart === 'undefined') {
+    console.warn(`Chart.js är inte laddat – kan inte rita diagram '${canvasId}'`);
+    return;
   }
 
-  chartInstances[canvasId] = new Chart(ctx, chartConfig);
+  try {
+    const ctx = canvasEl.getContext('2d');
+    const chartConfig = {
+      type: type,
+      data: data,
+      plugins: [emptyChartPlugin],
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#374151', font: { family: 'Segoe UI' } } }
+        }
+      }
+    };
+
+    if (type !== 'doughnut' && type !== 'pie') {
+      chartConfig.options.scales = {
+        x: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } },
+        y: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } }
+      };
+    }
+
+    chartInstances[canvasId] = new Chart(ctx, chartConfig);
+  } catch (err) {
+    console.error(`Fel vid skapande av diagram '${canvasId}':`, err);
+  }
 }
 
 

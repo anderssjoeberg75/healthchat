@@ -168,4 +168,17 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         app.dependency_overrides.pop(get_current_session, None)
 
 
+def test_chart_js_static_served():
+    """Verify that local Chart.js bundle is served from /static/chart.umd.min.js and loaded in index.html."""
+    res_static = client.get("/static/chart.umd.min.js")
+    assert res_static.status_code == 200
+    assert len(res_static.content) > 100_000
+    assert b"Chart" in res_static.content
+
+    res_root = client.get("/")
+    assert res_root.status_code == 200
+    assert "/static/chart.umd.min.js" in res_root.text
+
+
+
 
