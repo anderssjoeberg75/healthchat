@@ -11,6 +11,7 @@ import uuid
 import json
 import logging
 import asyncio
+import threading
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from contextlib import contextmanager
@@ -82,9 +83,77 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-# In-memory active user sessions keyed by session_id token
+# In-memory active user sessions (S-13 Path A: DEK held strictly in memory, never in DB)
 _active_sessions: Dict[str, UserSession] = {}
+_session_expirations: Dict[str, datetime] = {}
+_sessions_lock = threading.Lock()
+
 SESSION_COOKIE_NAME = "healthchat_session"
+SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(86400 * 30)))  # 30 days
+
+
+def store_active_session(session_id: str, session: UserSession, max_age: int = SESSION_MAX_AGE_SECONDS):
+    """Store session in memory with TTL. DEK is never stored on disk or DB (S-13)."""
+    now = datetime.now()
+    expires_at = now + timedelta(seconds=max_age)
+    with _sessions_lock:
+        _active_sessions[session_id] = session
+        _session_expirations[session_id] = expires_at
+
+
+def remove_active_session(session_id: str) -> Optional[UserSession]:
+    """Remove and zeroize session from memory."""
+    with _sessions_lock:
+        _session_expirations.pop(session_id, None)
+        sess = _active_sessions.pop(session_id, None)
+        if sess:
+            sess.clear()
+        return sess
+
+
+def get_valid_session(session_id: str) -> Optional[UserSession]:
+    """Retrieve active session if not expired, otherwise clean it up and return None."""
+    with _sessions_lock:
+        if session_id not in _active_sessions:
+            return None
+        expires_at = _session_expirations.get(session_id)
+        if expires_at and datetime.now() > expires_at:
+            sess = _active_sessions.pop(session_id, None)
+            _session_expirations.pop(session_id, None)
+            if sess:
+                sess.clear()
+            return None
+        return _active_sessions[session_id]
+
+
+def cleanup_expired_sessions(conn=None):
+    """Clean up expired sessions from memory and database metadata."""
+    now = datetime.now()
+    with _sessions_lock:
+        expired_ids = [sid for sid, exp in list(_session_expirations.items()) if now > exp]
+        for sid in expired_ids:
+            sess = _active_sessions.pop(sid, None)
+            _session_expirations.pop(sid, None)
+            if sess:
+                sess.clear()
+
+    if conn:
+        try:
+            is_mariadb = hasattr(conn, "ping")
+            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            if is_mariadb:
+                sql = "DELETE FROM user_sessions WHERE expires_at < NOW()"
+                params = ()
+            else:
+                sql = "DELETE FROM user_sessions WHERE expires_at < ?"
+                params = (now_str,)
+            with _db_cursor(conn) as cur:
+                cur.execute(sql, params)
+            if hasattr(conn, "commit"):
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"Failed to prune expired user_sessions table rows: {e}")
+
 
 
 # --- PYDANTIC SCHEMAS ---
@@ -211,7 +280,7 @@ def _db_cursor(conn):
 
 
 def init_sessions_table(conn):
-    """Ensure user_sessions table exists in DB."""
+    """Ensure user_sessions table exists in DB (WITHOUT DEK column per S-13)."""
     try:
         is_mariadb = hasattr(conn, "ping")
         sql = """
@@ -219,18 +288,18 @@ def init_sessions_table(conn):
             session_id VARCHAR(64) PRIMARY KEY,
             user_id BIGINT NOT NULL,
             email VARCHAR(255) NOT NULL,
-            dek VARBINARY(256) NOT NULL,
-            encrypted_profile TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            INDEX idx_sessions_expires (expires_at),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         """ if is_mariadb else """
         CREATE TABLE IF NOT EXISTS user_sessions (
             session_id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             email TEXT NOT NULL,
-            dek BLOB NOT NULL,
-            encrypted_profile TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL
         );
         """
         with _db_cursor(conn) as cur:
@@ -244,75 +313,84 @@ def init_sessions_table(conn):
         logger.warning(f"Could not init user_sessions table: {e}")
 
 
-def save_session_to_db(conn, session_id: str, session: UserSession):
-    """Save session object to shared database table across Uvicorn workers."""
+def save_session_to_db(conn, session_id: str, session: UserSession, max_age: int = SESSION_MAX_AGE_SECONDS):
+    """Store session in memory with TTL and persist metadata (without DEK) to DB (S-13)."""
+    store_active_session(session_id, session, max_age=max_age)
+    if not conn:
+        return
     try:
         init_sessions_table(conn)
+        cleanup_expired_sessions(conn)
         is_mariadb = hasattr(conn, "ping")
         placeholder = "%s" if is_mariadb else "?"
-        prof_json = json.dumps(session.encrypted_profile) if session.encrypted_profile else None
-        dek_bytes = bytes(session.dek)
-        
+        expires_at = datetime.now() + timedelta(seconds=max_age)
+        expires_val = expires_at if is_mariadb else expires_at.strftime("%Y-%m-%d %H:%M:%S")
+
         sql = (
-            f"REPLACE INTO user_sessions (session_id, user_id, email, dek, encrypted_profile) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})"
+            f"REPLACE INTO user_sessions (session_id, user_id, email, expires_at) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})"
             if is_mariadb else
-            f"INSERT OR REPLACE INTO user_sessions (session_id, user_id, email, dek, encrypted_profile) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})"
+            f"INSERT OR REPLACE INTO user_sessions (session_id, user_id, email, expires_at) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})"
         )
         with _db_cursor(conn) as cur:
-            cur.execute(sql, (session_id, session.user_id, session.email, dek_bytes, prof_json))
+            cur.execute(sql, (session_id, session.user_id, session.email, expires_val))
         if hasattr(conn, "commit"):
             try:
                 conn.commit()
             except Exception:
                 pass
     except Exception as e:
-        logger.warning(f"Failed saving session {session_id} to DB: {e}")
+        logger.warning(f"Failed saving session metadata {session_id} to DB: {e}")
 
 
 def load_session_from_db(conn, session_id: str) -> Optional[UserSession]:
-    """Retrieve session object from shared database table across Uvicorn workers."""
-    try:
-        init_sessions_table(conn)
-        is_mariadb = hasattr(conn, "ping")
-        placeholder = "%s" if is_mariadb else "?"
-        sql = f"SELECT user_id, email, dek, encrypted_profile FROM user_sessions WHERE session_id = {placeholder}"
-        with _db_cursor(conn) as cur:
-            cur.execute(sql, (session_id,))
-            row = cur.fetchone()
-            if not row:
-                return None
-            if isinstance(row, dict):
-                uid = row["user_id"]
-                email = row["email"]
-                dek_raw = row["dek"]
-                prof_raw = row["encrypted_profile"]
-            else:
-                uid = row[0]
-                email = row[1]
-                dek_raw = row[2]
-                prof_raw = row[3]
-            
-            dek_bytes = bytearray(dek_raw)
-            prof_dict = json.loads(prof_raw) if prof_raw else None
-            if not prof_dict:
-                try:
-                    cur.execute(f"SELECT encrypted_profile, profile_nonce FROM users WHERE id = {placeholder}", (uid,))
-                    u_row = cur.fetchone()
-                    if u_row:
-                        enc_p = u_row["encrypted_profile"] if isinstance(u_row, dict) else u_row[0]
-                        p_n = u_row["profile_nonce"] if isinstance(u_row, dict) else u_row[1]
-                        if enc_p and p_n:
-                            prof_dict = crypto.decrypt_payload(dek_bytes, enc_p, p_n)
-                except Exception as ex:
-                    logger.warning(f"Failed fallback profile decrypt from users table: {ex}")
-            return UserSession(user_id=uid, email=email, dek=dek_bytes, encrypted_profile=prof_dict)
-    except Exception as e:
-        logger.warning(f"Failed loading session {session_id} from DB: {e}")
+    """Retrieve session from in-memory cache and verify DB expiration if present (S-13)."""
+    session = get_valid_session(session_id)
+    if not session:
         return None
+
+    # Check DB expiration if record exists in user_sessions
+    if conn:
+        try:
+            is_mariadb = hasattr(conn, "ping")
+            placeholder = "%s" if is_mariadb else "?"
+            sql = f"SELECT expires_at FROM user_sessions WHERE session_id = {placeholder}"
+            with _db_cursor(conn) as cur:
+                cur.execute(sql, (session_id,))
+                row = cur.fetchone()
+                if row:
+                    exp = row["expires_at"] if isinstance(row, dict) else row[0]
+                    if isinstance(exp, str):
+                        exp = datetime.fromisoformat(exp.replace(" ", "T"))
+                    if exp and datetime.now() > exp:
+                        remove_active_session(session_id)
+                        delete_session_from_db(conn, session_id)
+                        return None
+        except Exception as e:
+            logger.debug(f"Error checking DB session expiration: {e}")
+
+    # If profile is missing, fallback decrypt from users table
+    if not session.encrypted_profile and conn:
+        try:
+            is_mariadb = hasattr(conn, "ping")
+            placeholder = "%s" if is_mariadb else "?"
+            with _db_cursor(conn) as cur:
+                cur.execute(f"SELECT encrypted_profile, profile_nonce FROM users WHERE id = {placeholder}", (session.user_id,))
+                u_row = cur.fetchone()
+                if u_row:
+                    enc_p = u_row["encrypted_profile"] if isinstance(u_row, dict) else u_row[0]
+                    p_n = u_row["profile_nonce"] if isinstance(u_row, dict) else u_row[1]
+                    if enc_p and p_n:
+                        session.encrypted_profile = crypto.decrypt_payload(session.dek, enc_p, p_n)
+        except Exception as ex:
+            logger.warning(f"Failed fallback profile decrypt from users table: {ex}")
+
+    return session
 
 
 def delete_session_from_db(conn, session_id: str):
-    """Delete session from shared database table."""
+    """Delete session metadata from database table."""
+    if not conn:
+        return
     try:
         is_mariadb = hasattr(conn, "ping")
         placeholder = "%s" if is_mariadb else "?"
@@ -335,42 +413,30 @@ def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> Use
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Ej inloggad eller sessionen har löpt ut."
         )
-    if healthchat_session in _active_sessions:
-        cached_session = _active_sessions[healthchat_session]
-        if not cached_session.encrypted_profile:
-            db = get_db()
-            conn = None
-            try:
-                conn = get_db_conn(db)
-                fresh = load_session_from_db(conn, healthchat_session)
-                if fresh and fresh.encrypted_profile:
-                    _active_sessions[healthchat_session] = fresh
-                    return fresh
-            finally:
-                if conn:
-                    conn.close()
-        return cached_session
-    
-    # Fallback to shared database session store across Uvicorn worker processes
-    db = get_db()
-    conn = None
-    try:
-        conn = get_db_conn(db)
-        session = load_session_from_db(conn, healthchat_session)
-        if session:
-            _active_sessions[healthchat_session] = session
-            return session
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Ej inloggad eller sessionen har löpt ut."
-    )
+    session = get_valid_session(healthchat_session)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ej inloggad eller sessionen har löpt ut."
+        )
+
+    if not session.encrypted_profile:
+        db = get_db()
+        conn = None
+        try:
+            conn = get_db_conn(db)
+            fresh = load_session_from_db(conn, healthchat_session)
+            if fresh and fresh.encrypted_profile:
+                return fresh
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    return session
 
 
 
@@ -392,7 +458,6 @@ def register(req: RegisterRequest, response: Response):
             conn, req.email, req.password, initial_profile=initial_profile
         )
         session_id = str(uuid.uuid4())
-        _active_sessions[session_id] = session
         save_session_to_db(conn, session_id, session)
         
         response.set_cookie(
@@ -401,7 +466,7 @@ def register(req: RegisterRequest, response: Response):
             httponly=True,
             secure=get_cookie_secure(),
             samesite="lax",
-            max_age=86400 * 30
+            max_age=SESSION_MAX_AGE_SECONDS
         )
         return {
             "status": "success",
@@ -431,7 +496,6 @@ def login(req: LoginRequest, response: Response):
         conn = get_db_conn(db)
         session = auth.authenticate_user(conn, req.email, req.password)
         session_id = str(uuid.uuid4())
-        _active_sessions[session_id] = session
         save_session_to_db(conn, session_id, session)
 
         response.set_cookie(
@@ -440,7 +504,7 @@ def login(req: LoginRequest, response: Response):
             httponly=True,
             secure=get_cookie_secure(),
             samesite="lax",
-            max_age=86400 * 30
+            max_age=SESSION_MAX_AGE_SECONDS
         )
         return {
             "status": "success",
@@ -465,9 +529,8 @@ def login(req: LoginRequest, response: Response):
 @app.post("/api/auth/logout")
 def logout(response: Response, healthchat_session: Optional[str] = Cookie(None)):
     if healthchat_session:
-        if healthchat_session in _active_sessions:
-            session = _active_sessions.pop(healthchat_session)
-            session.clear()
+        session = remove_active_session(healthchat_session)
+        if session:
             auth.clear_remembered_session(session.email)
         db = get_db()
         conn = None
@@ -840,9 +903,8 @@ def delete_account(response: Response, healthchat_session: Optional[str] = Cooki
     try:
         if conn:
             auth.delete_user_account(conn, session.user_id)
-        if healthchat_session and healthchat_session in _active_sessions:
-            _active_sessions.pop(healthchat_session)
         if healthchat_session:
+            remove_active_session(healthchat_session)
             delete_session_from_db(conn, healthchat_session)
         response.delete_cookie(
             key=SESSION_COOKIE_NAME,

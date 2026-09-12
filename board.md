@@ -81,10 +81,10 @@ default vara `1` men dokumentera flaggan.
 `GarminDatabase.__init__`. `TLS-3`:s serverdel (certifikat, `require_secure_transport`) är
 operatörsarbete, se nedan.
 
-### Omgång 5 – Sessionshantering
+### Omgång 5 – Sessionshantering (✅ Klart)
 | Ordning | ID | Fil | Omfattning |
 |---|---|---|---|
-| 12 | `S-13` | `server.py`, `init_mariadb.sql` | DEK:en ur databasen + sessionsförfallotid. **Designbeslut – välj väg A eller B i uppgiften och stäm av med ägaren innan du börjar.** |
+| 12 | `S-13` | `server.py`, `init_mariadb.sql` | ✅ Åtgärdad (Väg A): DEK ur DB, endast i RAM med TTL och minnes-nollställning, expires_at & städjobb, 1 worker i service, säkerhetsbeskrivning i README |
 
 Största enskilda ändringen i tavlan. Ta den separat, inte ihop med något annat.
 
@@ -152,7 +152,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] S-13: DEK:en lagras i klartext i databasen – envelope-krypteringen blir verkningslös
+### [x] S-13: DEK:en lagras i klartext i databasen – envelope-krypteringen blir verkningslös (Väg A genomförd)
 - **Fil:** [server.py:156-180](server.py) (`save_session_to_db`), [server.py:121-150](server.py) (`init_sessions_table`), [init_mariadb.sql:22-29](init_mariadb.sql)
 - **Problem:** `save_session_to_db` skriver sessionens **råa DEK** till kolumnen `user_sessions.dek` ([server.py:167](server.py)). Nyckeln som dekrypterar användarens samtliga hälsotabeller ligger därmed i klartext i **samma databas** som chiffertexten. Hela poängen med envelope-designen (lösenord → Argon2id → KEK → wrapped DEK) försvinner: den som får läsrättigheter på databasen – backup, dump, SQL-injektion, en DBA – kan dekryptera allt utan att någonsin se ett lösenord. Argon2, rate-limiting och återställningsnyckeln kringgås fullständigt.
   Dessutom: tabellen har en `created_at`-kolumn men **ingen kod läser den**. `load_session_from_db` ([server.py:182-228](server.py)) kontrollerar ingen ålder, det finns inget städjobb, och rader tas bara bort vid explicit utloggning ([server.py:232](server.py)). Sessioner gäller i praktiken för evigt på serversidan, medan cookien sätts med `max_age=86400 * 30`.

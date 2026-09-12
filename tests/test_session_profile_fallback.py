@@ -33,13 +33,16 @@ def test_load_session_from_db_decrypts_profile_from_users_table():
         (uid, email, ciphertext, nonce)
     )
 
-    # Insert session without encrypted_profile
+    # S-13: DEK is stored in-memory, user_sessions stores session metadata with expires_at
+    from datetime import datetime, timezone, timedelta
+    from auth import UserSession
+    from server import store_active_session, save_session_to_db
+
     session_id = "test-session-fallback-123"
-    conn.execute(
-        "INSERT INTO user_sessions (session_id, user_id, email, dek, encrypted_profile) VALUES (?, ?, ?, ?, ?)",
-        (session_id, uid, email, dek, None)
-    )
-    conn.commit()
+    # Store session in memory with empty profile
+    mem_session = UserSession(user_id=uid, email=email, dek=bytearray(dek), encrypted_profile=None)
+    store_active_session(session_id, mem_session, max_age=3600)
+    save_session_to_db(conn, session_id, mem_session, max_age=3600)
 
     session = load_session_from_db(conn, session_id)
     assert session is not None

@@ -195,10 +195,12 @@ See the detailed [Ollama Setup Guide](OLLAMA_SETUP_GUIDE.md) for troubleshooting
 
 ## Privacy & Data Security
 
-- **Local Storage**: All health data and chat logs are stored locally on your computer
-- **Protected Credentials**: API keys and session tokens stored locally in `~/.healthchat/` (protected by Windows OS user profile permissions)
-- **No Telemetry**: We don't collect usage data or analytics
-- **Ollama Option**: Keep everything 100% on your machine
+- **Zero-Knowledge Architecture (Web Mode)**: User health data is encrypted client-side or envelope-encrypted with per-user Data Encryption Keys (DEK). The DEK is derived on login via Argon2id.
+- **In-Memory DEK Lifecycle (S-13)**: The plaintext DEK exists strictly within application process memory (`_active_sessions`) during an active session and is NEVER written to database tables or persistent disk storage. When logging out, deleting an account, or when a session expires (TTL), the DEK bytearray is explicitly zeroized in memory.
+- **Local Storage (Desktop Mode)**: All health data and chat logs are stored locally on your computer.
+- **Protected Credentials**: API keys and session tokens stored locally in `~/.healthchat/` (protected by OS user profile permissions).
+- **No Telemetry**: We don't collect usage data or analytics.
+- **Ollama Option**: Keep everything 100% on your machine with a local AI model.
 
 ## Building from Source
 

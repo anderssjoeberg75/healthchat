@@ -23,9 +23,9 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     session_id VARCHAR(64) PRIMARY KEY,
     user_id BIGINT NOT NULL,
     email VARCHAR(255) NOT NULL,
-    dek VARBINARY(256) NOT NULL,
-    encrypted_profile TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    INDEX idx_sessions_expires (expires_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

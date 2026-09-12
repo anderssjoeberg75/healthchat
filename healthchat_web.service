@@ -24,7 +24,9 @@ EnvironmentFile=/etc/healthchat/db.env
 # NOTE: --host 0.0.0.0 exponerar appen okrypterad mot hela nätverket.
 # Se TLS-1 i board.md: när en reverse proxy med TLS är på plats ska detta
 # ändras till --host 127.0.0.1 --proxy-headers --forwarded-allow-ips=127.0.0.1
-ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4
+# S-13 (Väg A): --workers 1 krävs eftersom användarens DEK hålls strikt i processens RAM-minne.
+# Vid flera uvicorn-arbetare delas inte processminnet utan IPC/extern broker.
+ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 
