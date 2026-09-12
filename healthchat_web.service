@@ -21,10 +21,23 @@ Environment="PATH=/opt/healthchat/venv/bin"
 # exponeras inte på samma sätt.
 EnvironmentFile=/etc/healthchat/db.env
 
-# NOTE: --host 0.0.0.0 exponerar appen okrypterad mot hela nätverket.
-# Se TLS-1 i board.md: när en reverse proxy med TLS är på plats ska detta
-# ändras till --host 127.0.0.1 --proxy-headers --forwarded-allow-ips=127.0.0.1
-ExecStart=/opt/healthchat/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4
+# Appen lyssnar enbart på loopback. TLS termineras av Caddy på port 443,
+# som proxar hit - se deploy/README.md och deploy/Caddyfile.
+#
+# --host 127.0.0.1 är en säkerhetsåtgärd, inte en detalj: så länge appen
+# svarar på en utåtriktad port går det att kringgå TLS:en genom att ange
+# portnumret.
+#
+# --proxy-headers får uvicorn att läsa X-Forwarded-Proto/-For från Caddy.
+# Utan den ser appen varje request som http och loggar proxyns IP i stället
+# för klientens.
+#
+# VIKTIGT vid uppgradering från en okrypterad uppsättning: installera inte
+# den här filen förrän proxyn är uppe och verifierad. Ordningen står i
+# deploy/README.md - görs stegen i fel ordning blir appen onåbar däremellan.
+ExecStart=/opt/healthchat/venv/bin/uvicorn server:app \
+          --host 127.0.0.1 --port 8001 --workers 4 \
+          --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=always
 RestartSec=5
 

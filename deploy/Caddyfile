@@ -1,0 +1,55 @@
+# HealthChat – TLS-terminering framför uvicorn (TLS-1 i board.md)
+#
+# Installera som /etc/caddy/Caddyfile och ladda om med:
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Se deploy/README.md för i vilken ordning stegen ska köras – proxyn måste
+# verifieras INNAN uvicorn flyttas till loopback, annars blir appen onåbar.
+
+{
+	# E-post för Let's Encrypts utgångs- och problemnotiser. Fyll i innan
+	# första körningen; utan den utfärdas certifikatet ändå, men du får
+	# ingen varning om förnyelsen slutar fungera.
+	email din@adress.se
+}
+
+healthchat.andrix.se {
+	# Certifikat, förnyelse och HTTP->HTTPS-redirect sköts automatiskt.
+	# Kräver att port 80 är nåbar utifrån vid utfärdandet och därefter
+	# var 60:e dag när Caddy förnyar. Öppnas inte 80 misslyckas förnyelsen
+	# tyst efter tre månader – se bevakningstipset i deploy/README.md.
+
+	encode zstd gzip
+
+	# HSTS. Se TLS-2 i board.md: sätt denna HÄR eller i appen, inte båda.
+	# Lägg till `preload` först när uppsättningen är verifierad – den är
+	# svår att backa ur och gäller hela andrix.se med includeSubDomains.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	reverse_proxy 127.0.0.1:8001 {
+		# X-Forwarded-For / -Proto / -Host skickas automatiskt av Caddy.
+		# Uvicorn måste startas med --proxy-headers för att läsa dem,
+		# annars ser appen varje request som http och loggar proxyns IP.
+
+		# SSE: /api/ai/chat svarar med Content-Type: text/event-stream.
+		# Caddy upptäcker det och flushar löpande – ingen inställning behövs.
+		#
+		# AI-svaret genereras dock i sin helhet innan första SSE-byten
+		# skickas (server.py, event_generator) och kan ta över en minut.
+		# Caddy har ingen läs-timeout som standard, så det fungerar.
+		# Lägger du till en egen timeout: håll den över 300s, annars
+		# klipps långsamma AI-svar mitt i.
+	}
+}
+
+# --- Variant: behålla port 8000 utåt i stället för 443 ---
+#
+# Fungerar tekniskt, men användarna måste skriva porten och den som av
+# gammal vana skriver http://healthchat.andrix.se:8000 får ett TLS-fel
+# i stället för en redirect. Let's Encrypt kräver ändå port 80 öppen för
+# utmaningen. Byt i så fall ut blocket ovan mot:
+#
+# https://healthchat.andrix.se:8000 {
+#     reverse_proxy 127.0.0.1:8001
+# }

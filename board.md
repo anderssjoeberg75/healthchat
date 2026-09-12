@@ -23,7 +23,7 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 - **3 kritiska:** AI-chatten är helt trasig i UI:t (`B-1`), DEK:en lagras i **klartext** i databasen bredvid chiffertexten (`S-13`), och all hälsodata delas mellan användare så fort MariaDB inte svarar (`S-14`).
 - **6 allvarliga:** felaktig dedupliceringslogik som slår ihop olika träningspass (`B-2`), BMR som tyst blir 0 (`B-3`), omkastade argument som tömmer profilen mellan workers (`B-4`), påhittade hälsovärden i UI:t (`UI-1`), öppen CORS med credentials (`S-15`) och stored XSS i aktivitetstabellen (`UI-2`).
 - Därtill tolv mindre fynd kring OAuth-tokenhantering, connection pooling och kodkvalitet.
-- **Ingen transportkryptering:** webbläsare→app och app→MariaDB går båda i klartext (`TLS-1`, `TLS-3`). Klientkrypteringen skyddar data i vila – inte på tråden. Se avsnittet *Transportkryptering*.
+- **Ingen transportkryptering:** webbläsare→app och app→MariaDB går båda i klartext (`TLS-1`, `TLS-3`). Klientkrypteringen skyddar data i vila – inte på tråden. Se avsnittet *Transportkryptering*. För `TLS-1` finns färdig konfiguration i [deploy/](deploy/) – den behöver driftsättas, inte skrivas.
 
 **Verifieringsstatus:** `B-2`, `B-3` och `B-6` är reproducerade med körbara skript. Övriga fynd är verifierade genom kodläsning. Testsviten går att köra: `118 passed, 6 skipped` med ett **känt fel som fanns före genomgången** (`test_withings_handler.py::test_sync_profile_weight_from_db`) plus en testmodul som inte kan samlas in headless (`test_charts_view_tabs.py`) – se `Q-9` punkt 7. **Antigravity ska köra `pytest` före och efter varje åtgärd** för att fånga regressioner.
 
@@ -108,7 +108,7 @@ Dessa kräver åtkomst till servern och databasen. De blockerar inte kodarbetet 
 
 - [ ] **Rotera databaslösenordet.** Kvarstår från `S-17`; värdet ligger i git-historiken sedan `7db86ef`. Se checklistan i `TLS-3`.
 - [x] **Skapa `/etc/healthchat/db.env`** med rättigheterna `0600` och ägare `healthchat`. Klart.
-- [ ] **`TLS-1`: reverse proxy med TLS** framför uvicorn, plus `--host 127.0.0.1` i unit-filen.
+- [ ] **`TLS-1`: reverse proxy med TLS** framför uvicorn för `healthchat.andrix.se`. Konfigurationen är **redan skriven** – [deploy/Caddyfile](deploy/Caddyfile), uppdaterad [healthchat_web.service](healthchat_web.service) och steg-för-steg i [deploy/README.md](deploy/README.md). Återstår: att köra stegen på servern. Ordningen är kritisk, se uppgiften.
 - [ ] **`TLS-3`: TLS mot MariaDB** – CA-certifikat på plats, `MARIADB_REQUIRE_TLS=1`, `require_secure_transport=ON` på servern.
 
 ---
@@ -530,25 +530,48 @@ av `Q-9` punkt 7.
 ---
 
 ### [ ] TLS-1: Ingen TLS-terminering – all webbtrafik går i klartext
-- **Fil:** [healthchat_web.service:15](healthchat_web.service), [server.py:779-781](server.py)
-- **Problem:** Tjänsten startar `uvicorn server:app --host 0.0.0.0 --port 8000` **utan TLS och utan reverse proxy**. Det finns ingen nginx-, Caddy- eller Traefik-konfiguration i repot. Allt som passerar går alltså i klartext över nätet:
+- **Fil:** [healthchat_web.service](healthchat_web.service), [deploy/Caddyfile](deploy/Caddyfile), [deploy/nginx-healthchat.conf](deploy/nginx-healthchat.conf), [deploy/README.md](deploy/README.md)
+- **Domän:** `healthchat.andrix.se` (publik) · **Certifikat:** Let's Encrypt via Caddy, automatisk förnyelse
+- **Problem:** Tjänsten startar uvicorn direkt på `0.0.0.0:8000` **utan TLS och utan reverse proxy**. Allt som passerar går i klartext över nätet:
   - **Lösenordet** vid `/api/auth/login` och `/api/auth/register` ([server.py:342](server.py), [server.py:300](server.py)).
   - **Återställningsnyckeln**, som returneras i klartext i registreringssvaret ([server.py:326](server.py)) och vid rotation ([server.py:730](server.py)). Den nyckeln kan ensam låsa upp kontots DEK.
   - **Sessionscookien** ([server.py:315-321](server.py)) – den som snappar upp den får full tillgång till kontot i 30 dagar.
   - **All hälsodata** – `/api/dashboard/summary` returnerar sömn, vikt, puls, HRV och träningspass i klartext-JSON.
 
-  `--host 0.0.0.0` gör dessutom att porten är öppen mot hela nätverket, inte bara mot en lokal proxy. Klientkrypteringen i `crypto.py` skyddar data *i vila* i databasen – den skyddar ingenting på tråden, eftersom servern dekrypterar innan svaret skickas.
-- **Åtgärd:**
-  1. Sätt upp en reverse proxy framför uvicorn som terminerar TLS. **Caddy** är enklast (automatisk Let's Encrypt, automatisk förnyelse, HTTP→HTTPS-redirect out of the box); **nginx + certbot** om det redan finns nginx i miljön. Lägg konfigurationen i repot (`deploy/Caddyfile` eller `deploy/nginx.conf`) så att den versionshanteras.
-  2. Ändra `ExecStart` till `--host 127.0.0.1` så att appen **bara** går att nå via proxyn. Detta är halva säkerhetsvinsten – utan det kan vem som helst kringgå TLS genom att prata direkt med port 8000.
-  3. Lägg till `--proxy-headers --forwarded-allow-ips=127.0.0.1` i uvicorn-kommandot. Utan det ser appen varje request som `http` och loggar proxyns IP i stället för klientens, vilket bryter både rate-limiting per IP och eventuella absoluta URL:er.
-  4. Tvinga HTTP→HTTPS-redirect i proxyn och sätt **HSTS**: `Strict-Transport-Security: max-age=31536000; includeSubDomains`. Vänta med `preload` tills uppsättningen är verifierad – den är svår att backa ur.
-  5. Kräv TLS 1.2 som minimum, helst 1.3.
+  Klientkrypteringen i `crypto.py` skyddar data **i vila** i databasen. Servern dekrypterar innan svaret skickas, så den gör ingenting för trafiken.
+
+- **Konfigurationen är redan skriven** och ligger i [deploy/](deploy/). Uppgiften består i att driftsätta den och verifiera resultatet – **inte** i att skriva ny konfiguration.
+
+- **Portlayout.** Uvicorn flyttar till `127.0.0.1:8001`; Caddy tar 443 och 80:
+  ```
+  Före:  Webbläsare ──http──>  uvicorn 0.0.0.0:8000
+  Efter: Webbläsare ──https──> Caddy :443 ──http──> uvicorn 127.0.0.1:8001
+                               Caddy :80  ──redirect──> :443
+  ```
+
+- **Åtgärd:** Följ [deploy/README.md](deploy/README.md) steg 1–6. Sammanfattat:
+  1. Öppna port 80 och 443. **Port 80 måste förbli öppen** – Let's Encrypt förnyar var 60:e dag och misslyckas tyst annars.
+  2. Installera Caddy, kopiera [deploy/Caddyfile](deploy/Caddyfile) till `/etc/caddy/Caddyfile`, fyll i `email`, kör `caddy validate`.
+  3. Starta en **tillfällig** uvicorn på `127.0.0.1:8001` medan den gamla tjänsten på 8000 fortfarande betjänar användarna.
+  4. `systemctl reload caddy`, verifiera med `curl -I` mot både http och https, **logga in i webbläsaren** och testa AI-chatten.
+  5. Först nu: installera den uppdaterade [healthchat_web.service](healthchat_web.service) och starta om.
+  6. Stäng port 8000 utifrån och bekräfta att den inte svarar.
+
+- ⚠️ **Ordningen är inte valfri.** Flyttas uvicorn till loopback innan proxyn är verifierad blir appen onåbar däremellan: proxyn pekar på en port ingen lyssnar på, samtidigt som den gamla porten är stängd. Steg 3 finns just för att undvika det glappet.
+
+- **Två fallgropar som är lätta att missa:**
+  1. **SSE.** `/api/ai/chat` svarar med `text/event-stream` ([server.py:631](server.py)). Caddy upptäcker det och flushar automatiskt. **nginx gör det inte** – utan `proxy_buffering off` ser chatten ut att hänga tills hela svaret är klart.
+  2. **Timeout.** AI-svaret genereras i sin helhet innan första byten skickas ([server.py:614-626](server.py)) och kan ta över en minut. Caddy har ingen läs-timeout som standard. **nginx default är 60 sekunder**, vilket klipper långsamma svar mitt i.
+
 - **Acceptanskriterier:**
-  1. `curl -I http://<domän>/` svarar `301` till `https://`.
-  2. `curl -I https://<domän>/` svarar `200` med `Strict-Transport-Security`-huvudet satt.
-  3. `curl http://<serverns-IP>:8000/` från en annan maskin får **connection refused**.
-  4. `ssllabs.com`/`testssl.sh` ger minst betyg A.
+  1. `curl -I http://healthchat.andrix.se/` svarar `301` till `https://`.
+  2. `curl -I https://healthchat.andrix.se/` svarar `200` med `Strict-Transport-Security`-huvudet satt.
+  3. `curl --max-time 5 http://<publik-ip>:8000/` ger timeout eller connection refused **från en annan maskin**.
+  4. Inloggning fungerar i webbläsare, och AI-chatten strömmar svar löpande – inte allt på en gång när det är klart.
+  5. `testssl.sh` eller ssllabs.com ger minst betyg A.
+  6. Certifikatets utgångsdatum ligger ~90 dagar fram: `echo | openssl s_client -connect healthchat.andrix.se:443 2>/dev/null | openssl x509 -noout -enddate`
+
+- **Följdarbete:** `TLS-2` (`COOKIE_SECURE` + resterande säkerhetsheaders) kan göras först när detta är klart – med HTTP kvar hade `Secure`-flaggan stoppat inloggningen. HSTS sätts i Caddy, **inte** även i appen.
 
 ---
 
