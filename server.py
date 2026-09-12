@@ -216,6 +216,7 @@ class ProfileUpdateRequest(BaseModel):
     bone_mass_kg: Optional[float] = None
     water_pct: Optional[float] = None
     bmi: Optional[float] = None
+    injuries: Optional[str] = None
 
 
 
@@ -800,8 +801,29 @@ async def chat_stream(
     body_comp = db.get_latest_body_composition() or {}
     
     context_lines = [f"Användar-ID: {session.user_id}"]
+    
+    profile = session.encrypted_profile or {}
+    if profile.get("injuries"):
+        context_lines.append(f"⚠️ KÄNDA SKADOR / FYSISKA BEGRÄNSNINGAR: {profile.get('injuries')}")
+        context_lines.append(
+            "VIKTIGT OM SKADOR & TRÄNINGSPASS: Användaren har ovanstående skador/begränsningar angivna. "
+            "Du MÅSTE ta särskild hänsyn till detta vid ALLA tränings-, pass- och övningsrekommendationer! "
+            "Föreslå skonsamma alternativ, anpassa intensitet/volym och varna uttryckligen för övningar "
+            "eller rörelser som kan belasta det skadade området negativt."
+        )
+    if profile.get("age"):
+        context_lines.append(f"Ålder: {profile.get('age')} år")
+    if profile.get("resting_hr"):
+        context_lines.append(f"Vilopuls: {profile.get('resting_hr')} bpm")
+    if profile.get("max_hr"):
+        context_lines.append(f"Maxpuls: {profile.get('max_hr')} bpm")
+    if profile.get("bmi"):
+        context_lines.append(f"BMI: {profile.get('bmi')}")
+
     if body_comp.get("weight_kg"):
         context_lines.append(f"Vikt: {body_comp.get('weight_kg')} kg (Fett%: {body_comp.get('fat_ratio_pct', 'N/A')}%)")
+    elif profile.get("weight_kg"):
+        context_lines.append(f"Vikt: {profile.get('weight_kg')} kg")
     if activities:
         context_lines.append(f"Senaste aktiviteter (30d): {len(activities)} st. Senaste: {activities[0].get('activity_name', 'Träning')} ({activities[0].get('distance_km', 0)} km, {activities[0].get('duration_min', 0)} min)")
     if sleep:
@@ -891,6 +913,8 @@ def update_profile(
             current_profile["water_pct"] = req.water_pct
         if req.bmi is not None:
             current_profile["bmi"] = req.bmi
+        if req.injuries is not None:
+            current_profile["injuries"] = req.injuries.strip()
 
         if (not current_profile.get("bmi") or float(current_profile.get("bmi") or 0) == 0) and current_profile.get("height_cm") and current_profile.get("weight_kg"):
             try:

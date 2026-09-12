@@ -67,13 +67,14 @@ def test_register_login_and_me_flow(monkeypatch):
     # Test update profile
     update_res = client.post(
         "/api/profile/update",
-        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "resting_hr": 55.0, "max_hr": 185.0},
+        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "resting_hr": 55.0, "max_hr": 185.0, "injuries": "Känning i höger hälsena"},
         cookies=reg_res.cookies
     )
     assert update_res.status_code == 200
     assert update_res.json()["profile"]["weight_kg"] == 68.0
     assert update_res.json()["profile"]["resting_hr"] == 55.0
     assert update_res.json()["profile"]["max_hr"] == 185.0
+    assert update_res.json()["profile"]["injuries"] == "Känning i höger hälsena"
 
     # Test fetch external profile endpoint
     fetch_ext_res = client.get("/api/user/profile/fetch_external", cookies=reg_res.cookies)
@@ -85,6 +86,7 @@ def test_register_login_and_me_flow(monkeypatch):
     assert me_updated.status_code == 200
     assert me_updated.json()["profile"]["weight_kg"] == 68.0
     assert me_updated.json()["profile"]["age"] == 30
+    assert me_updated.json()["profile"]["injuries"] == "Känning i höger hälsena"
 
     # Test rotate recovery key
     monkeypatch.setattr("auth.rotate_recovery_key", lambda conn, uid, pwd: "NEW-REC-KEY-999")
@@ -145,16 +147,21 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         user_id=102,
         email=test_email,
         dek=bytearray(b"0123456789abcdef0123456789abcdef"),
-        encrypted_profile={"sex": "male", "age": 35}
+        encrypted_profile={"sex": "male", "age": 35, "injuries": "Känning i höger hälsena"}
     )
 
     test_db = GarminDatabase(db_path=tmp_path / "test_chat.db")
+
+    captured_context = {}
+    def mock_chat(self, *args, **kwargs):
+        captured_context["garmin_context"] = kwargs.get("garmin_context")
+        return "Det här är ett AI-svar med åäö."
 
     from server import get_current_session
     app.dependency_overrides[get_current_session] = lambda: dummy_session
     monkeypatch.setattr("server.bind_user_db", lambda *args, **kwargs: test_db)
     monkeypatch.setattr("server.get_db_conn", lambda *args, **kwargs: None)
-    monkeypatch.setattr("server.AIClient.chat", lambda self, *args, **kwargs: "Det här är ett AI-svar med åäö.")
+    monkeypatch.setattr("server.AIClient.chat", mock_chat)
 
     try:
         res = client.post("/api/ai/chat", json={"message": "Hur mår jag?", "provider": "openai"})
@@ -164,6 +171,8 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         assert '{"chunk":' in body
         assert '{"done": true}' in body
         assert "åäö" in body
+        assert "Känning i höger hälsena" in captured_context["garmin_context"]
+        assert "SKADOR" in captured_context["garmin_context"]
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 

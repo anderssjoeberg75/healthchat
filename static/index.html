@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=9.2.0">
+  <link rel="stylesheet" href="/static/styles.css?v=9.3.0">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -444,6 +444,7 @@
               <button class="chip-btn" onclick="sendQuickPrompt('Ge mig en sammanfattning av min sömn denna vecka.')">🛌 Sömnanalys</button>
               <button class="chip-btn" onclick="sendQuickPrompt('Hur ser min kaloriförbränning ut i förhållande till min träning?')">🔥 Kalorier</button>
               <button class="chip-btn" onclick="sendQuickPrompt('Beräkna mina MAF-pulszoner.')">🫀 Pulszoner</button>
+              <button class="chip-btn" onclick="sendQuickPrompt('Föreslå ett anpassat träningspass baserat på min dagsform och mina angivna skador.')">🏃 Anpassat träningspass</button>
             </div>
           </div>
 
@@ -534,6 +535,15 @@
                   <input type="number" id="prof-bmi" step="0.1" min="10" max="60" placeholder="t.ex. 24.2">
                 </div>
               </div>
+              <div class="input-row">
+                <div class="input-group" style="flex: 1 1 100%;">
+                  <label for="prof-injuries">🩹 Skador & fysiska begränsningar</label>
+                  <textarea id="prof-injuries" rows="3" placeholder="t.ex. Känning i höger hälsena vid löpning, ont i ländryggen vid marklyft, opererat knä (undvik djupa benböj)..."></textarea>
+                  <span style="font-size:0.75rem; color:#6b7280; margin-top:4px; display:block; line-height:1.4;">
+                    Beskriv skador eller begränsningar här. Dessa sparas krypterat och matas automatiskt till AI-coachen för skonsamma och anpassade träningspass.
+                  </span>
+                </div>
+              </div>
 
               <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
                 <button type="submit" class="btn btn-primary">💾 Spara personliga mått</button>
@@ -620,7 +630,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=9.2.1"></script>
+  <script src="/static/app.js?v=9.3.0"></script>
 
 </body>
 </html>

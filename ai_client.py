@@ -280,6 +280,7 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
    - **Slutsats & Mål**
 
 6. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
+7. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
 """
         
         # Store ONLY user_message in history (not duplicated garmin_context) to prevent token explosion

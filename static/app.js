@@ -260,6 +260,10 @@ async function populateProfileInputs(profile) {
   if (bmiEl && bmiVal !== undefined && bmiVal !== null && bmiVal !== '') {
     bmiEl.value = bmiVal;
   }
+  const injEl = document.getElementById('prof-injuries');
+  if (injEl) {
+    injEl.value = p.injuries !== undefined && p.injuries !== null ? p.injuries : '';
+  }
 
   updateLiveBmi();
   bindLiveBmiCalculator();
@@ -404,30 +408,34 @@ function formatNumber(num) {
 }
 
 function getRecoveryAiAdvice(recVal) {
+  const p = (currentUser && currentUser.profile) || (cachedSummary && cachedSummary.profile) || {};
+  const inj = (p.injuries && typeof p.injuries === 'string') ? p.injuries.trim() : '';
+  const injNote = inj ? `\n🩹 Hänsyn till skador/begränsningar: "${inj}" – anpassa övningsval och intensitet så att skadan inte belastas negativt.` : '';
+
   if (recVal >= 80) {
     return "🤖 AI-Analys: Återhämtning " + recVal + "% – Kroppen är i toppform och redo för högre ansträngning!\n" +
       "🎯 Rekommenderad träning: Högintensivt kvalitetspass (intervaller, tröskel/tempo eller snabbdistans).\n" +
       "❤️ Pulsnivå: Sikta på Zon 3–4 (140–170 bpm) med möjliga toppar i Zon 5.\n" +
       "🏃 Träningsfokus: Utnyttja höga energidepåer för maximal träningseffekt och utveckling.\n" +
-      "💡 Tips: Värm upp grundligt i Zon 1 (10–15 min) och prioritera god återhämtning efteråt.";
+      "💡 Tips: Värm upp grundligt i Zon 1 (10–15 min) och prioritera god återhämtning efteråt." + injNote;
   } else if (recVal >= 60) {
     return "🤖 AI-Analys: Återhämtning " + recVal + "% – God energibalans och fin form för träning idag.\n" +
       "🎯 Rekommenderad träning: Aerobt distanspass, basbygge eller medeltung styrketräning.\n" +
       "❤️ Pulsnivå: Håll pulsen i Zon 2 (125–140 bpm) eller kring din MAF-puls (140 bpm).\n" +
       "🏃 Träningsfokus: Utveckla den aeroba uthålligheten och fettförbränningen utan mjölksyra.\n" +
-      "💡 Tips: Håll ett stabilt och kontrollerat tempo – undvik onödiga pulstoppar.";
+      "💡 Tips: Håll ett stabilt och kontrollerat tempo – undvik onödiga pulstoppar." + injNote;
   } else if (recVal >= 40) {
     return "🤖 AI-Analys: Återhämtning " + recVal + "% – Måttlig återhämtning med viss kvarvarande trötthet.\n" +
       "🎯 Rekommenderad träning: Lätt återhämtningspass, lugn aerob cykling/löpning eller rörlighet.\n" +
       "❤️ Pulsnivå: Håll pulsen i Zon 1–2 (110–135 bpm), max 140 bpm.\n" +
       "🏃 Träningsfokus: Öka blodcirkulationen för att påskynda återhämtningen utan överbelastning.\n" +
-      "💡 Tips: Undvik tunga lyft och tuffa intervaller i Zon 4–5 (>155 bpm) idag.";
+      "💡 Tips: Undvik tunga lyft och tuffa intervaller i Zon 4–5 (>155 bpm) idag." + injNote;
   } else {
     return "🤖 AI-Analys: Återhämtning " + recVal + "% – Låga energireserver, kroppen behöver återhämta sig.\n" +
       "🎯 Rekommenderad träning: Aktiv vila, lugn promenad, rörlighet eller helt träningsfri dag.\n" +
       "❤️ Pulsnivå: Undvik ansträngning, håll pulsen mycket låg i Zon 1 (<120 bpm).\n" +
       "🏃 Träningsfokus: Prioritera god sömn, hydrering och näring för att ladda om batterierna.\n" +
-      "💡 Tips: Hård träning idag ökar risken för överträning och skador – prioritera vila.";
+      "💡 Tips: Hård träning idag ökar risken för överträning och skador – prioritera vila." + injNote;
   }
 }
 
@@ -1432,6 +1440,7 @@ async function handleUpdateProfile(event) {
   const boneVal = document.getElementById('prof-bone') ? document.getElementById('prof-bone').value.trim() : '';
   const watVal = document.getElementById('prof-water') ? document.getElementById('prof-water').value.trim() : '';
   const bmiVal = document.getElementById('prof-bmi') ? document.getElementById('prof-bmi').value.trim() : '';
+  const injuriesVal = document.getElementById('prof-injuries') ? document.getElementById('prof-injuries').value.trim() : '';
 
   const age = ageVal ? parseFloat(ageVal) : null;
   const height_cm = heightVal ? parseFloat(heightVal.replace(',', '.')) : null;
@@ -1446,16 +1455,17 @@ async function handleUpdateProfile(event) {
   if ((!bmi || bmi === 0) && height_cm > 0 && weight_kg > 0) {
     bmi = parseFloat((weight_kg / ((height_cm / 100.0) ** 2)).toFixed(1));
   }
+  const injuries = injuriesVal;
 
   try {
     const res = await apiFetch('/api/profile/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi })
+      body: JSON.stringify({ sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi, injuries })
     });
     const data = await res.json();
     if (res.ok) {
-      const updated = data.profile || { sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi };
+      const updated = data.profile || { sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi, injuries };
       if (currentUser) currentUser.profile = updated;
       if (cachedSummary) cachedSummary.profile = updated;
       populateProfileInputs(updated);

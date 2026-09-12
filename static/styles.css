@@ -145,6 +145,7 @@ body {
 }
 
 .input-group input,
+.input-group textarea,
 .select-input {
   width: 100%;
   padding: 8px 12px;
@@ -157,7 +158,13 @@ body {
   outline: none;
 }
 
+.input-group textarea {
+  resize: vertical;
+  min-height: 70px;
+}
+
 .input-group input:focus,
+.input-group textarea:focus,
 .select-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.2);
