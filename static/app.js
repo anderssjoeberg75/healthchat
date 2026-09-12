@@ -1342,7 +1342,6 @@ async function handleSendChatMessage(event) {
   const message = input.value.trim();
   if (!message) return;
 
-  const provider = document.getElementById('ai-provider-select').value;
   input.value = '';
 
   appendChatMessage('user', message);
@@ -1352,7 +1351,7 @@ async function handleSendChatMessage(event) {
     const res = await apiFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, provider })
+      body: JSON.stringify({ message })
     });
 
     if (!res.ok) {

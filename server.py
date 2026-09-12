@@ -223,7 +223,7 @@ class ProfileUpdateRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    provider: Optional[str] = "openai"
+    provider: Optional[str] = "ollama"
     model: Optional[str] = None
 
 
@@ -833,14 +833,22 @@ async def chat_stream(
     
     garmin_context = "\n".join(context_lines)
     
-    provider = (req.provider or "openai").lower()
-    api_key = secret_store.get_secret(f"{provider}_api_key") or ""
-    ollama_url = secret_store.get_secret("ollama_base_url") or os.environ.get("OLLAMA_BASE_URL")
+    # All AI-chatt körs mot lokal Ollama-server på 192.168.107.15 (eller OLLAMA_BASE_URL i miljövariabler)
+    ollama_url = (
+        secret_store.get_secret("ollama_base_url")
+        or os.environ.get("OLLAMA_BASE_URL")
+        or "http://192.168.107.15:11434"
+    )
+    ollama_model = (
+        secret_store.get_secret("ollama_model")
+        or os.environ.get("OLLAMA_MODEL")
+        or "qwen3.5:9b-q8_0"
+    )
 
     client = AIClient(
-        provider=provider,
-        api_key=api_key,
-        model=req.model,
+        provider="ollama",
+        api_key="",
+        model=ollama_model,
         ollama_base_url=ollama_url
     )
 

@@ -152,9 +152,12 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
 
     test_db = GarminDatabase(db_path=tmp_path / "test_chat.db")
 
-    captured_context = {}
+    captured = {}
     def mock_chat(self, *args, **kwargs):
-        captured_context["garmin_context"] = kwargs.get("garmin_context")
+        captured["provider"] = self.provider
+        captured["model"] = self.model
+        captured["ollama_base_url"] = getattr(self, "ollama_base_url", None)
+        captured["garmin_context"] = kwargs.get("garmin_context")
         return "Det här är ett AI-svar med åäö."
 
     from server import get_current_session
@@ -164,15 +167,17 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
     monkeypatch.setattr("server.AIClient.chat", mock_chat)
 
     try:
-        res = client.post("/api/ai/chat", json={"message": "Hur mår jag?", "provider": "openai"})
+        res = client.post("/api/ai/chat", json={"message": "Hur mår jag?"})
         assert res.status_code == 200
         assert "text/event-stream" in res.headers["content-type"]
         body = res.text
         assert '{"chunk":' in body
         assert '{"done": true}' in body
         assert "åäö" in body
-        assert "Känning i höger hälsena" in captured_context["garmin_context"]
-        assert "SKADOR" in captured_context["garmin_context"]
+        assert "Känning i höger hälsena" in captured["garmin_context"]
+        assert "SKADOR" in captured["garmin_context"]
+        assert captured["provider"] == "ollama"
+        assert "192.168.107.15" in captured["ollama_base_url"]
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 
