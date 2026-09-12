@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=9.1.0">
+  <link rel="stylesheet" href="/static/styles.css?v=9.3.0">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -428,14 +428,7 @@
         <div class="ai-chat-card-box">
           <div class="chat-controls-bar">
             <div style="display:flex; align-items:center; gap:8px;">
-              <label for="ai-provider-select" style="font-size:0.85rem; font-weight:600;">AI-leverantör:</label>
-              <select id="ai-provider-select" class="select-input" style="width:auto;">
-                <option value="openai">OpenAI (GPT-4o)</option>
-                <option value="anthropic">Anthropic (Claude 3.7)</option>
-                <option value="gemini" selected>Google Gemini 1.5/2.0</option>
-                <option value="ollama">Ollama (Lokal AI)</option>
-                <option value="xai">xAI (Grok 2)</option>
-              </select>
+              <span class="ai-engine-badge" title="All AI-analys körs mot din egen Ollama-server. Inga hälsodata lämnar ditt nätverk.">🖥️ Lokal AI (Ollama)</span>
             </div>
             <div class="quick-chips-row">
               <button class="chip-btn" onclick="sendQuickPrompt('Ge mig en sammanfattning av min sömn denna vecka.')">🛌 Sömnanalys</button>
@@ -596,7 +589,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=9.1.0"></script>
+  <script src="/static/app.js?v=9.3.0"></script>
 
 </body>
 </html>

@@ -180,5 +180,52 @@ def test_chart_js_static_served():
     assert "/static/chart.umd.min.js" in res_root.text
 
 
+# --- Recovery-kortets Body Battery-val ---
+
+def test_pick_latest_body_battery_skips_empty_today_row():
+    """Dagens rad saknar ofta nivåer strax efter synk - välj senaste rad med värde."""
+    from server import _pick_latest_body_battery
+
+    hist = [
+        {"date": "2026-09-10", "highest": 71, "charged": 40, "current": 55},
+        {"date": "2026-09-11", "highest": 83, "charged": 52, "current": 60},
+        {"date": "2026-09-12", "highest": 0, "charged": 0, "current": 0},
+    ]
+    picked = _pick_latest_body_battery(hist)
+    assert picked["date"] == "2026-09-11"
+    assert picked["highest_level"] == 83
 
 
+def test_pick_latest_body_battery_prefers_newest_with_value():
+    from server import _pick_latest_body_battery
+
+    hist = [
+        {"date": "2026-09-11", "highest": 83},
+        {"date": "2026-09-12", "highest": 64},
+    ]
+    assert _pick_latest_body_battery(hist)["date"] == "2026-09-12"
+
+
+def test_pick_latest_body_battery_falls_back_when_all_empty():
+    """Utan användbara värden returneras senaste raden så datumet bevaras."""
+    from server import _pick_latest_body_battery
+
+    hist = [{"date": "2026-09-11", "highest": 0}, {"date": "2026-09-12", "highest": 0}]
+    picked = _pick_latest_body_battery(hist)
+    assert picked["date"] == "2026-09-12"
+
+
+def test_pick_latest_body_battery_handles_empty_history():
+    from server import _pick_latest_body_battery
+
+    assert _pick_latest_body_battery([]) is None
+    assert _pick_latest_body_battery(None) is None
+
+
+def test_chat_request_ignores_client_supplied_provider():
+    """Klienten får inte längre styra AI-leverantör - fältet finns inte kvar."""
+    from server import ChatRequest
+
+    req = ChatRequest(message="hej", provider="openai", model="gpt-4o")
+    assert not hasattr(req, "provider")
+    assert not hasattr(req, "model")

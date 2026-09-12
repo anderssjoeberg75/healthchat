@@ -23,6 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Garmin sync now also stores the daily summary (steps / calories / BMR),
     which previously had a table but was never populated.
 
+### Changed
+- **All AI chat now goes to your own Ollama server**: the "AI-leverantor" dropdown
+  is gone from the chat tab, replaced by a static "Lokal AI (Ollama)" badge.
+  `POST /api/ai/chat` no longer reads `provider` or `model` from the request body,
+  so a client can no longer redirect the conversation to a cloud provider. The
+  server reads `ollama_base_url` / `ollama_model` from the OS keyring, falling back
+  to `OLLAMA_BASE_URL` / `OLLAMA_MODEL` (both documented in `.env.example`).
+  `ai_client.py` keeps its multi-provider support for the desktop app.
+
+### Fixed
+- **Recovery Score card stayed empty even with synced data**: both the dashboard
+  API and the frontend took the newest Body Battery row unconditionally. Garmin
+  writes today's row as soon as it is synced, often before it has computed any
+  levels, so a zero-valued row for today blanked out the whole card (and the
+  Training Status card) although the preceding days held good data. Both now walk
+  backwards to the newest row that actually carries a value, and the card notes
+  the measurement date when the reading is not from today.
+
 ## [4.0.5] - 2026-08-20
 
 ### Added
