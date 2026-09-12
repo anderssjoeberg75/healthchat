@@ -49,7 +49,22 @@ class StravaHandler:
         self.load_stored_tokens()
 
     def load_stored_tokens(self) -> bool:
-        """Load stored OAuth tokens from disk if available."""
+        """Load stored OAuth tokens from secret_store or fallback disk."""
+        try:
+            import secret_store
+            at = secret_store.get_secret("strava_access_token")
+            rt = secret_store.get_secret("strava_refresh_token")
+            cs = secret_store.get_secret("strava_client_secret")
+            if at and rt:
+                self.access_token = at
+                self.refresh_token = rt
+                if cs:
+                    self.client_secret = cs
+                self._authenticated = True
+                return True
+        except Exception as ss_err:
+            logger.debug(f"Could not load Strava tokens from secret_store: {ss_err}")
+
         if not self.token_file.exists():
             return False
         try:
@@ -62,23 +77,53 @@ class StravaHandler:
             self.client_secret = data.get("client_secret")
             if self.access_token and self.refresh_token:
                 self._authenticated = True
+                # Migrate to secret_store
+                try:
+                    import secret_store
+                    secret_store.set_secret("strava_access_token", self.access_token)
+                    secret_store.set_secret("strava_refresh_token", self.refresh_token)
+                    if self.client_secret:
+                        secret_store.set_secret("strava_client_secret", self.client_secret)
+                except Exception:
+                    pass
                 return True
         except Exception as e:
             logger.error(f"Failed to read Strava tokens: {e}")
         return False
 
     def save_tokens(self, tokens: Dict) -> None:
-        """Save active OAuth tokens to disk."""
+        """Save active OAuth tokens to secret_store and restricted disk file (B-7)."""
         try:
-            tokens["client_id"] = self.client_id
-            tokens["client_secret"] = self.client_secret
-            with open(self.token_file, "w", encoding="utf-8") as f:
-                json.dump(tokens, f, indent=2)
             self.access_token = tokens.get("access_token")
             self.refresh_token = tokens.get("refresh_token")
             self.expires_at = tokens.get("expires_at")
+            if tokens.get("client_id"):
+                self.client_id = tokens.get("client_id")
+            if tokens.get("client_secret"):
+                self.client_secret = tokens.get("client_secret")
+
+            # Persist to secret_store
+            try:
+                import secret_store
+                if self.access_token:
+                    secret_store.set_secret("strava_access_token", self.access_token)
+                if self.refresh_token:
+                    secret_store.set_secret("strava_refresh_token", self.refresh_token)
+                if self.client_secret:
+                    secret_store.set_secret("strava_client_secret", self.client_secret)
+            except Exception as ss_err:
+                logger.debug(f"Could not save Strava tokens to secret_store: {ss_err}")
+
+            # Safe disk fallback with 0o600 permissions
+            tokens["client_id"] = self.client_id
+            tokens["client_secret"] = self.client_secret
+            self.token_file.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(self.token_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(tokens, f, indent=2)
+
             self._authenticated = True
-            logger.info("Saved Strava tokens to disk.")
+            logger.info("Saved Strava tokens.")
         except Exception as e:
             logger.error(f"Failed to save Strava tokens: {e}")
             self.last_error = str(e)
@@ -179,10 +224,12 @@ class StravaHandler:
     def _get_headers(self) -> Dict[str, str]:
         # Check if expired and refresh if possible
         if self.expires_at and time.time() > self.expires_at - 300:
-            self.refresh_access_token()
-            
+            success = self.refresh_access_token()
+            if not success:
+                raise RuntimeError("Strava-anslutningen har gått ut – koppla om i inställningarna")
+
         if not self.access_token:
-            raise Exception("Strava not authenticated")
+            raise RuntimeError("Strava inte autentiserad – koppla om i inställningarna")
         return {"Authorization": f"Bearer {self.access_token}"}
 
     def fetch_athlete_profile(self) -> Dict[str, Any]:

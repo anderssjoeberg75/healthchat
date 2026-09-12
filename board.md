@@ -88,10 +88,10 @@ operatörsarbete, se nedan.
 
 Största enskilda ändringen i tavlan. Ta den separat, inte ihop med något annat.
 
-### Omgång 6 – Integrationer och robusthet
+### Omgång 6 – Integrationer och robusthet (✅ Klart)
 `B-5` (Garmin-MFA) · `B-6` (Withings felmeddelande) · `B-7` (OAuth-tokens) · `S-16` (keyring vid kontoradering)
 
-Fristående från varandra; kan tas i valfri ordning eller delas upp.
+✅ Samtliga åtgärdade och verifierade med automatiserade tester.
 
 ### Omgång 7 – Kodkvalitet
 `Q-1` … `Q-10` samt `TLS-4`, `TLS-5`, `TLS-6`.
@@ -315,7 +315,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] B-5: Garmin-MFA kapplöpning – inloggning misslyckas när prompten dröjer
+### [x] B-5: Garmin-MFA kapplöpning – inloggning misslyckas när prompten dröjer (åtgärdad med mfa_requested och konfigurerbar timeout)
 - **Fil:** [garmin_handler.py:391-455](garmin_handler.py), specifikt [garmin_handler.py:433](garmin_handler.py)
 - **Problem:** `login_done.wait(timeout=3)` ger garth exakt 3 sekunder på sig att antingen bli klar eller nå fram till MFA-prompten. Vid långsam uppkoppling hinner `_prompt_mfa` inte köra inom fönstret, så `mfa_needed[0]` är fortfarande `False` och koden faller igenom till `login_thread.join(timeout=30)` ([garmin_handler.py:447](garmin_handler.py)). `self.client_state` sätts aldrig, så inget UI kan leverera koden – tråden blir hängande i `mfa_event.wait(timeout=300)`. Efter 30 sekunder är `login_error[0]` `None` och `login_success[0]` `False`, vilket ger `RuntimeError("Login did not complete successfully")` ([garmin_handler.py:453](garmin_handler.py)) i stället för MFA-dialogen. Användaren ser ett obegripligt fel och en tråd ligger kvar och väntar i fem minuter.
 - **Åtgärd:**
@@ -331,7 +331,7 @@ av `Q-9` punkt 7.
 
 ## 🟡 P2 – Kodkvalitet & underhåll
 
-### [ ] B-6: Operator-precedens sväljer Withings riktiga felmeddelande
+### [x] B-6: Operator-precedens sväljer Withings riktiga felmeddelande (åtgärdad med explicit parenteser)
 - **Fil:** [withings_handler.py:115](withings_handler.py)
 - **Status:** ✅ Reproducerat.
 - **Problem:**
@@ -354,7 +354,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] B-7: OAuth-tokens roteras bort och lagras i klartext på disk
+### [x] B-7: OAuth-tokens roteras bort och lagras i klartext på disk (åtgärdad med secret_store, 0o600 och refresh-validering)
 - **Fil:** [withings_handler.py:140-151](withings_handler.py), [strava_handler.py:70-83](strava_handler.py), [fitbit_handler.py:73-88](fitbit_handler.py), [secret_store.py:28-36](secret_store.py)
 - **Problem:**
   1. **Withings tappar sin refresh-token.** Uppdaterade tokens skrivs bara till `~/.healthchat/config.json`, och bara **om filen redan finns** ([withings_handler.py:143](withings_handler.py)). `secret_store.py` har redan nycklarna `withings_refresh_token` och `withings_access_token` definierade – de används aldrig. Withings **roterar refresh-token vid varje användning**, så när config.json saknas går integrationen sönder vid nästa körning utan att någon får veta varför (felet loggas på `debug`).
@@ -387,7 +387,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] S-16: Keyring-posten överlever kontoradering
+### [x] S-16: Keyring-posten överlever kontoradering (åtgärdad: email slås upp och keyring rensas)
 - **Fil:** [auth.py:466-475](auth.py) (`delete_user_account`), [auth.py:506-517](auth.py) (`clear_remembered_session`)
 - **Problem:** `delete_user_account` anropar `clear_remembered_session()` **utan argument** ([auth.py:474](auth.py)). Med `email=None` gör funktionen ingenting alls utom loggar `"Cleared keyring session."` ([auth.py:510-515](auth.py)) – loggraden ljuger. Användarens DEK ligger kvar i OS-keyringen efter att kontot raderats. Databasraden är visserligen borta (så `get_remembered_user_session` returnerar `None`), men en hemlighet som användaren uttryckligen bett att få raderad finns kvar på disken.
 - **Åtgärd:**

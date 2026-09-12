@@ -463,15 +463,50 @@ def update_user_profile(db_conn, session_or_user_id, *args):
     logger.info(f"Updated encrypted profile for user id {user_id}")
 
 
+from contextlib import contextmanager
+
+@contextmanager
+def _db_cursor(conn):
+    """Context manager for database cursors supporting PyMySQL and sqlite3."""
+    cur = conn.cursor()
+    try:
+        yield cur
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
 def delete_user_account(db_conn, user_id: int):
     """
-    Permanently delete user account and all cascading health data.
+    Permanently delete user account, sessions, and all cascading health data (S-16).
     """
-    with db_conn.cursor() as cur:
+    email = None
+    is_mariadb = hasattr(db_conn, "ping")
+    placeholder = "%s" if is_mariadb else "?"
+    with _db_cursor(db_conn) as cur:
+        # Fetch email before deletion to clean up OS keyring (S-16)
+        cur.execute(f"SELECT email FROM users WHERE id = {placeholder}", (user_id,))
+        row = cur.fetchone()
+        if row:
+            email = row["email"] if isinstance(row, dict) else row[0]
+
+        # Explicitly clean up session records (handles SQLite without CASCADE)
+        try:
+            cur.execute(f"DELETE FROM user_sessions WHERE user_id = {placeholder}", (user_id,))
+        except Exception:
+            pass
+
         # Delete user row (cascades to all health data tables via FOREIGN KEY ON DELETE CASCADE)
-        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        db_conn.commit()
-    clear_remembered_session()
+        cur.execute(f"DELETE FROM users WHERE id = {placeholder}", (user_id,))
+        if hasattr(db_conn, "commit"):
+            db_conn.commit()
+
+    if email:
+        clear_remembered_session(email)
+    else:
+        logger.warning(f"Could not retrieve email for user {user_id} during account deletion; keyring not cleared.")
     logger.info(f"Permanently deleted user id {user_id} and all related health data.")
 
 
@@ -505,14 +540,16 @@ def load_remembered_session(email: str) -> Optional[bytes]:
 
 def clear_remembered_session(email: Optional[str] = None):
     """Remove user's DEK from OS Keyring."""
+    if not email:
+        logger.warning("clear_remembered_session called without email; no keyring session was cleared.")
+        return
     try:
         import keyring
-        if email:
-            try:
-                keyring.delete_password(KEYRING_SERVICE_NAME, email.lower().strip())
-            except Exception:
-                pass
-        logger.info("Cleared keyring session.")
+        try:
+            keyring.delete_password(KEYRING_SERVICE_NAME, email.lower().strip())
+            logger.info(f"Cleared keyring session for {mask_email(email)}.")
+        except Exception:
+            pass
     except Exception as e:
         logger.debug(f"Keyring clear exception: {e}")
 

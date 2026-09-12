@@ -112,7 +112,7 @@ class WithingsDataHandler:
 
         err_detail = data.get("error") if isinstance(data, dict) else None
         status_code = data.get("status") if isinstance(data, dict) else None
-        err_msg = err_detail or f"Withings API-status {status_code}" if status_code else "Ogiltig kod"
+        err_msg = err_detail or (f"Withings API-status {status_code}" if status_code is not None else "Ogiltig kod")
         raise ValueError(f"{err_msg}. Koden kan vara utgången (gäller enstaka sekunder/minuter) eller redan förverkad. Klicka på '▶ Öppna Inloggning i Webbläsare' i dialogen för automatisk anslutning.")
 
     def refresh_access_token(self) -> Dict[str, Any]:
@@ -138,15 +138,25 @@ class WithingsDataHandler:
                 self.access_token = body.get("access_token", self.access_token)
                 self.refresh_token = body.get("refresh_token", self.refresh_token)
                 
-                # Persist updated tokens to disk config.json if possible
+                # Persist updated tokens to secret_store and disk config.json (B-7)
                 try:
-                    cfg_path = Path.home() / ".healthchat" / "config.json"
+                    import secret_store
+                    secret_store.set_secret("withings_access_token", self.access_token)
+                    secret_store.set_secret("withings_refresh_token", self.refresh_token)
+                except Exception as ss_err:
+                    logger.debug(f"Could not persist Withings tokens to secret_store: {ss_err}")
+
+                try:
+                    from pathlib import Path
+                    cfg_dir = Path.home() / ".healthchat"
+                    cfg_path = cfg_dir / "config.json"
                     if cfg_path.exists():
                         with open(cfg_path, "r", encoding="utf-8") as f:
                             cfg_data = json.load(f)
                         cfg_data["withings_access_token"] = self.access_token
                         cfg_data["withings_refresh_token"] = self.refresh_token
-                        with open(cfg_path, "w", encoding="utf-8") as f:
+                        fd = os.open(str(cfg_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
                             json.dump(cfg_data, f, indent=2)
                 except Exception as save_err:
                     logger.debug(f"Could not persist refreshed Withings tokens: {save_err}")

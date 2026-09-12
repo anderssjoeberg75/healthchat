@@ -51,19 +51,42 @@ class FitbitHandler:
         self.load_stored_tokens()
 
     def load_stored_tokens(self) -> bool:
-        """Load stored OAuth tokens from disk if available."""
+        """Load stored OAuth tokens from secret_store or fallback disk."""
+        try:
+            import secret_store
+            at = secret_store.get_secret("fitbit_access_token")
+            rt = secret_store.get_secret("fitbit_refresh_token")
+            cs = secret_store.get_secret("fitbit_client_secret")
+            if at and rt:
+                self.access_token = at
+                self.refresh_token = rt
+                if cs:
+                    self.client_secret = cs
+                self._authenticated = True
+                return True
+        except Exception as ss_err:
+            logger.debug(f"Could not load Fitbit tokens from secret_store: {ss_err}")
+
         if self.token_file.exists():
             try:
                 with open(self.token_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.access_token = data.get("access_token")
                     self.refresh_token = data.get("refresh_token")
+                    self.expires_at = data.get("expires_at")
                     self.client_id = data.get("client_id")
                     self.client_secret = data.get("client_secret")
-                    self.expires_at = data.get("expires_at")
-                    if self.access_token or self.refresh_token:
+                    if self.access_token and self.refresh_token:
                         self._authenticated = True
                         logger.info("Fitbit tokens loaded successfully from disk.")
+                        try:
+                            import secret_store
+                            secret_store.set_secret("fitbit_access_token", self.access_token)
+                            secret_store.set_secret("fitbit_refresh_token", self.refresh_token)
+                            if self.client_secret:
+                                secret_store.set_secret("fitbit_client_secret", self.client_secret)
+                        except Exception:
+                            pass
                         return True
             except Exception as e:
                 logger.error(f"Error loading stored Fitbit tokens: {e}")
@@ -71,19 +94,38 @@ class FitbitHandler:
         return False
 
     def save_tokens(self, tokens: Dict) -> None:
-        """Save OAuth tokens to disk."""
+        """Save OAuth tokens to secret_store and restricted disk file (B-7)."""
         try:
-            tokens["client_id"] = self.client_id or tokens.get("client_id")
-            tokens["client_secret"] = self.client_secret or tokens.get("client_secret")
-            if "expires_in" in tokens and "expires_at" not in tokens:
-                tokens["expires_at"] = time.time() + float(tokens["expires_in"])
-            with open(self.token_file, "w", encoding="utf-8") as f:
-                json.dump(tokens, f, indent=2)
+            self.client_id = self.client_id or tokens.get("client_id")
+            self.client_secret = self.client_secret or tokens.get("client_secret")
             self.access_token = tokens.get("access_token")
             self.refresh_token = tokens.get("refresh_token")
+            if "expires_in" in tokens and "expires_at" not in tokens:
+                tokens["expires_at"] = time.time() + float(tokens["expires_in"])
             self.expires_at = tokens.get("expires_at")
+
+            # Persist to secret_store
+            try:
+                import secret_store
+                if self.access_token:
+                    secret_store.set_secret("fitbit_access_token", self.access_token)
+                if self.refresh_token:
+                    secret_store.set_secret("fitbit_refresh_token", self.refresh_token)
+                if self.client_secret:
+                    secret_store.set_secret("fitbit_client_secret", self.client_secret)
+            except Exception as ss_err:
+                logger.debug(f"Could not save Fitbit tokens to secret_store: {ss_err}")
+
+            # Safe disk fallback with 0o600 permissions
+            tokens["client_id"] = self.client_id
+            tokens["client_secret"] = self.client_secret
+            self.token_file.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(self.token_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(tokens, f, indent=2)
+
             self._authenticated = True
-            logger.info("Saved Fitbit tokens to disk.")
+            logger.info("Saved Fitbit tokens.")
         except Exception as e:
             logger.error(f"Failed to save Fitbit tokens: {e}")
 
@@ -188,10 +230,12 @@ class FitbitHandler:
     def _get_headers(self) -> Dict[str, str]:
         # Check if expired and refresh if possible (5 min buffer)
         if self.expires_at and time.time() > self.expires_at - 300:
-            self.refresh_access_token()
+            success = self.refresh_access_token()
+            if not success:
+                raise RuntimeError("Fitbit-anslutningen har gått ut – koppla om i inställningarna")
 
         if not self.access_token:
-            raise Exception("Fitbit not authenticated")
+            raise RuntimeError("Fitbit inte autentiserad – koppla om i inställningarna")
         return {"Authorization": f"Bearer {self.access_token}"}
 
     def fetch_user_profile(self) -> Dict[str, Any]:

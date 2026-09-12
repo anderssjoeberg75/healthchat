@@ -8,8 +8,9 @@ from garminconnect import Garmin
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
+import os
+import time
 import logging
-
 from garmin_db import GarminDatabase
 
 logging.basicConfig(level=logging.INFO)
@@ -339,7 +340,6 @@ class GarminDataHandler:
                     # Try manual token loading
                     logger.info("Attempting manual token load...")
                     import json
-                    import os
                     
                     token_dir = str(self.token_store)
                     oauth1_path = os.path.join(token_dir, "oauth1_token.json")
@@ -398,6 +398,7 @@ class GarminDataHandler:
                 mfa_event = threading.Event()       # set when MFA code is ready
                 mfa_result = [None]                  # holds the MFA code
                 mfa_needed = [False]                 # set if MFA was requested
+                mfa_requested = threading.Event()    # set immediately when MFA prompt starts
                 login_done = threading.Event()        # set when login thread finishes
                 login_error = [None]                  # holds any login exception
                 login_success = [False]               # set if login completed cleanly
@@ -405,6 +406,7 @@ class GarminDataHandler:
                 def _prompt_mfa():
                     """Called by garth when MFA code is needed (runs inside login thread)."""
                     mfa_needed[0] = True
+                    mfa_requested.set()
                     logger.info("garth is requesting MFA code...")
                     mfa_event.wait(timeout=300)  # wait up to 5 min for user
                     code = mfa_result[0] or ''
@@ -429,10 +431,15 @@ class GarminDataHandler:
                 login_thread = threading.Thread(target=_do_login, daemon=True)
                 login_thread.start()
 
-                # Wait briefly to see if MFA is triggered or login completes quickly
-                login_done.wait(timeout=3)
+                # Wait for MFA trigger or login completion (up to 20s for slow connections)
+                mfa_timeout = float(os.environ.get("GARMIN_MFA_WAIT_TIMEOUT", "20.0"))
+                start_wait = time.time()
+                while time.time() - start_wait < mfa_timeout:
+                    if login_done.is_set() or mfa_requested.is_set():
+                        break
+                    time.sleep(0.1)
 
-                if not login_done.is_set() and mfa_needed[0]:
+                if not login_done.is_set() and (mfa_needed[0] or mfa_requested.is_set()):
                     # Login is paused waiting for MFA code
                     self.client_state = {
                         'mfa_event': mfa_event,
@@ -447,6 +454,22 @@ class GarminDataHandler:
 
                 # Login completed (or failed) without needing MFA
                 login_thread.join(timeout=30)
+
+                # Check if MFA was requested late
+                if not login_done.is_set() and (mfa_needed[0] or mfa_requested.is_set()):
+                    self.client_state = {
+                        'mfa_event': mfa_event,
+                        'mfa_result': mfa_result,
+                        'login_done': login_done,
+                        'login_error': login_error,
+                        'login_success': login_success,
+                        'login_thread': login_thread,
+                    }
+                    return {'mfa_required': True}
+
+                # If thread is still alive without MFA, unblock it so it doesn't leak
+                if login_thread.is_alive():
+                    mfa_event.set()
 
                 if login_error[0]:
                     raise login_error[0]
