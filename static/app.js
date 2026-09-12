@@ -353,6 +353,16 @@ async function refreshDashboard() {
   }
 }
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function floatVal(v, defaultVal = 0.0) {
   const parsed = parseFloat(v);
   return isNaN(parsed) ? defaultVal : parsed;
@@ -396,53 +406,57 @@ function updateDashboardCards(data) {
 
   // 1. Recovery Score Card
   const bb = data.bb_latest || {};
-  const recVal = bb.highest_level || 72;
-  const recColor = recVal >= 75 ? '#10B981' : (recVal >= 45 ? '#F59E0B' : '#EF4444');
+  const hasRec = bb.highest_level !== undefined && bb.highest_level !== null && Number(bb.highest_level) > 0;
+  const recVal = hasRec ? Number(bb.highest_level) : null;
+  const recColor = recVal !== null ? (recVal >= 75 ? '#10B981' : (recVal >= 45 ? '#F59E0B' : '#EF4444')) : '#9CA3AF';
   
   const recValEl = document.getElementById('val-bb-level');
   if (recValEl) {
-    recValEl.innerText = `${recVal}%`;
+    recValEl.innerText = recVal !== null ? `${recVal}%` : '--';
     recValEl.style.color = recColor;
   }
 
-  const recStatusSummary = recVal >= 80 ? "Fullt återhämtad och redo för topprestation!" :
+  const recStatusSummary = recVal !== null ? (
+    recVal >= 80 ? "Fullt återhämtad och redo för topprestation!" :
     (recVal >= 60 ? "Återhämtad och redo för dagen!" :
     (recVal >= 40 ? "Måttlig återhämtning – anpassa träningsintensiteten" :
-    "Låg återhämtning – prioritera vila och återhämtning"));
+    "Låg återhämtning – prioritera vila och återhämtning"))
+  ) : "Ingen återhämtningsdata för perioden";
   
   const recStatusEl = document.getElementById('val-recovery-status');
   if (recStatusEl) recStatusEl.innerText = recStatusSummary;
 
   const aiBoxEl = document.getElementById('val-recovery-ai-box');
   if (aiBoxEl) {
-    aiBoxEl.innerText = getRecoveryAiAdvice(recVal);
+    aiBoxEl.innerText = recVal !== null ? getRecoveryAiAdvice(recVal) : "🤖 Synka data från Garmin eller anslutna enheter för att få personlig återhämtningsanalys.";
   }
 
   // 2. Weight & Body Comp Card
   const bodyComp = data.latest_body_comp || {};
   const historyBodyComp = (data.history && data.history.body_composition) || [];
+  const profile = data.profile || {};
   
-  const wKg = bodyComp.weight_kg ? floatVal(bodyComp.weight_kg) : 98.3;
+  const rawW = (bodyComp.weight_kg !== undefined && bodyComp.weight_kg !== null && Number(bodyComp.weight_kg) > 0)
+    ? bodyComp.weight_kg
+    : ((profile.weight_kg !== undefined && profile.weight_kg !== null && Number(profile.weight_kg) > 0) ? profile.weight_kg : null);
+  const wKg = rawW !== null ? floatVal(rawW) : null;
   const wEl = document.getElementById('val-weight-kg');
-  if (wEl) wEl.innerText = `${wKg.toFixed(1)} kg`;
+  if (wEl) wEl.innerText = wKg !== null ? `${wKg.toFixed(1)} kg` : '-- kg';
 
-  let trendStr = "📈 +0.5 kg (+0.5%) under " + daysLabel;
-  let trendColor = "#10B981";
+  let trendStr = "--";
+  let trendColor = "#9CA3AF";
   
-  if (historyBodyComp.length >= 2) {
+  if (wKg !== null && historyBodyComp.length >= 2) {
     const firstW = floatVal(historyBodyComp[0].weight_kg || wKg);
-    const diffKg = wKg - firstW;
-    const diffPct = firstW > 0 ? (diffKg / firstW * 100.0) : 0.0;
-    const icon = diffKg < 0 ? "📉" : (diffKg > 0 ? "📈" : "➡️");
-    trendColor = diffKg <= 0 ? "#10B981" : "#EF4444";
-    trendStr = `${icon} ${diffKg >= 0 ? '+' : ''}${diffKg.toFixed(1)} kg (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%) under ${daysLabel}`;
-  } else {
-    // Dynamic weight change calculation per interval
-    const demoDiff = days >= 365 ? -3.8 : (days >= 90 ? -2.1 : (days >= 30 ? -1.2 : -0.4));
-    const demoPct = (demoDiff / wKg * 100.0);
-    const icon = demoDiff < 0 ? "📉" : "📈";
-    trendStr = `${icon} ${demoDiff.toFixed(1)} kg (${demoPct.toFixed(1)}%) under ${daysLabel}`;
-    trendColor = demoDiff <= 0 ? "#10B981" : "#EF4444";
+    if (firstW > 0) {
+      const diffKg = wKg - firstW;
+      const diffPct = (diffKg / firstW * 100.0);
+      const icon = diffKg < 0 ? "📉" : (diffKg > 0 ? "📈" : "➡️");
+      trendColor = diffKg <= 0 ? "#10B981" : "#EF4444";
+      trendStr = `${icon} ${diffKg >= 0 ? '+' : ''}${diffKg.toFixed(1)} kg (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%) under ${daysLabel}`;
+    }
+  } else if (wKg !== null) {
+    trendStr = "Ingen tidigare mätning att jämföra med";
   }
 
   const trendEl = document.getElementById('val-weight-trend');
@@ -451,50 +465,63 @@ function updateDashboardCards(data) {
     trendEl.style.color = trendColor;
   }
 
-  const profile = data.profile || {};
-  const heightCm = floatVal(profile.height_cm, 186.0);
-  const bmi = heightCm > 0 ? (wKg / ((heightCm / 100.0) ** 2)) : 28.4;
+  let bmiVal = (profile.bmi !== undefined && profile.bmi !== null && Number(profile.bmi) > 0) ? floatVal(profile.bmi) : null;
+  if (bmiVal === null && wKg !== null && profile.height_cm && floatVal(profile.height_cm) > 0) {
+    const hM = floatVal(profile.height_cm) / 100.0;
+    bmiVal = wKg / (hM * hM);
+  }
   const bmiEl = document.getElementById('val-bmi-text');
-  if (bmiEl) bmiEl.innerText = `BMI: ${bmi.toFixed(1)} (📉 -0.3 under ${daysLabel})`;
+  if (bmiEl) bmiEl.innerText = bmiVal !== null ? `BMI: ${bmiVal.toFixed(1)}` : 'BMI: --';
 
-  const fatPct = floatVal(bodyComp.fat_ratio_pct, 21.4);
-  const muscleKg = floatVal(bodyComp.muscle_mass_kg, 72.1);
+  const fatPct = (bodyComp.fat_ratio_pct !== undefined && bodyComp.fat_ratio_pct !== null && Number(bodyComp.fat_ratio_pct) > 0) ? floatVal(bodyComp.fat_ratio_pct) : null;
+  const muscleKg = (bodyComp.muscle_mass_kg !== undefined && bodyComp.muscle_mass_kg !== null && Number(bodyComp.muscle_mass_kg) > 0) ? floatVal(bodyComp.muscle_mass_kg) : null;
+  const fatStr = fatPct !== null ? `${fatPct.toFixed(1)}%` : '--';
+  const musStr = muscleKg !== null ? `${muscleKg.toFixed(1)} kg` : '--';
   const fatEl = document.getElementById('val-fat-pct');
-  if (fatEl) fatEl.innerText = `Fett: ${fatPct.toFixed(1)}% | Muskelmassa: ${muscleKg.toFixed(1)} kg`;
+  if (fatEl) fatEl.innerText = `Fett: ${fatStr} | Muskelmassa: ${musStr}`;
 
   const srcEl = document.getElementById('val-weight-source');
-  if (srcEl) srcEl.innerText = `Källa: ${bodyComp.source || 'Withings'} (${data.today_date || '2026-09-11'})`;
+  if (srcEl) {
+    const srcName = bodyComp.source || '--';
+    const srcDate = bodyComp.date || data.today_date || '--';
+    srcEl.innerText = (bodyComp.source || bodyComp.date) ? `Källa: ${srcName} (${srcDate})` : 'Källa: --';
+  }
 
   // 3. Calorie Burn Card (matching Desktop card_calories)
   const burn = data.calorie_burn_today || {};
-  const totalBurn = burn.total_burn !== undefined ? burn.total_burn : 1195;
-  const restingBurn = burn.resting_burn !== undefined ? burn.resting_burn : 1123;
-  const stepsBurn = burn.steps_burn !== undefined ? burn.steps_burn : 72;
-  const workoutBurn = burn.workout_burn !== undefined ? burn.workout_burn : 0;
-  const everydaySteps = burn.everyday_steps !== undefined ? burn.everyday_steps : (burn.steps || 1273);
+  const hasBurn = burn.total_burn !== undefined && burn.total_burn !== null && Number(burn.total_burn) > 0;
+  const totalBurn = hasBurn ? burn.total_burn : null;
+  const restingBurn = burn.resting_burn !== undefined && burn.resting_burn !== null ? burn.resting_burn : null;
+  const stepsBurn = burn.steps_burn !== undefined && burn.steps_burn !== null ? burn.steps_burn : null;
+  const workoutBurn = burn.workout_burn !== undefined && burn.workout_burn !== null ? burn.workout_burn : null;
+  const everydaySteps = burn.everyday_steps !== undefined && burn.everyday_steps !== null ? burn.everyday_steps : (burn.steps || 0);
 
   const calTotalEl = document.getElementById('val-calories-total');
   if (calTotalEl) {
-    calTotalEl.innerText = `🔥 ${formatNumber(totalBurn)} kcal`;
-    calTotalEl.style.color = '#EA580C';
+    calTotalEl.innerText = totalBurn !== null ? `🔥 ${formatNumber(totalBurn)} kcal` : '🔥 -- kcal';
+    calTotalEl.style.color = totalBurn !== null ? '#EA580C' : '#9CA3AF';
   }
 
   const calSubtextEl = document.getElementById('val-calories-subtext');
   if (calSubtextEl) {
-    calSubtextEl.innerText = 'Förbränt hittills idag (ungefärligt)';
+    calSubtextEl.innerText = hasBurn ? 'Förbränt hittills idag (ungefärligt)' : 'Ingen förbränningsdata för idag';
   }
 
   const calBreakdownEl = document.getElementById('val-calories-breakdown');
   if (calBreakdownEl) {
-    let stepsLine = `👟 Vardagssteg: ${formatNumber(stepsBurn)} kcal (${formatNumber(everydaySteps)} st)`;
-    if (burn.workout_steps > 0) {
-      stepsLine += ` (avdrag ${formatNumber(burn.workout_steps)} st träning)`;
+    if (hasBurn) {
+      let stepsLine = `👟 Vardagssteg: ${formatNumber(stepsBurn || 0)} kcal (${formatNumber(everydaySteps)} st)`;
+      if (burn.workout_steps > 0) {
+        stepsLine += ` (avdrag ${formatNumber(burn.workout_steps)} st träning)`;
+      }
+      calBreakdownEl.innerHTML = `
+        <div>🛌 Vila (BMR): ${formatNumber(restingBurn || 0)} kcal</div>
+        <div>${stepsLine}</div>
+        <div>🏋️ Träning: ${formatNumber(workoutBurn || 0)} kcal</div>
+      `;
+    } else {
+      calBreakdownEl.innerHTML = `<div>Synka enhet för att se dagens förbränning</div>`;
     }
-    calBreakdownEl.innerHTML = `
-      <div>🛌 Vila (BMR): ${formatNumber(restingBurn)} kcal</div>
-      <div>${stepsLine}</div>
-      <div>🏋️ Träning: ${formatNumber(workoutBurn)} kcal</div>
-    `;
   }
 
   const bmrSourceMap = {
@@ -504,7 +531,7 @@ function updateDashboardCards(data) {
   };
   const calSrcEl = document.getElementById('val-calories-source');
   if (calSrcEl) {
-    const srcText = bmrSourceMap[burn.bmr_source] || 'Vilo-BMR från Garmin';
+    const srcText = bmrSourceMap[burn.bmr_source] || (hasBurn ? 'Vilo-BMR från enhet' : '--');
     calSrcEl.innerText = srcText;
     calSrcEl.style.fontStyle = 'italic';
     calSrcEl.style.color = '#9CA3AF';
@@ -513,6 +540,7 @@ function updateDashboardCards(data) {
 
 function renderActivitiesTable(activities) {
   const tbody = document.getElementById('activities-table-body');
+  if (!tbody) return;
   if (!activities || activities.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Inga träningspass registrerade i detta intervall.</td></tr>';
     return;
@@ -520,13 +548,13 @@ function renderActivitiesTable(activities) {
 
   tbody.innerHTML = activities.map(act => `
     <tr>
-      <td>${act.date || (act.start_time ? act.start_time.slice(0, 10) : '--')}</td>
-      <td><strong>${act.activity_name || act.activity_type || 'Träning'}</strong></td>
-      <td>${act.distance_km ? act.distance_km.toFixed(2) + ' km' : '--'}</td>
-      <td>${act.duration_min ? act.duration_min.toFixed(0) + ' min' : '--'}</td>
-      <td>${act.avg_hr ? act.avg_hr + ' bpm' : '--'}</td>
-      <td>${act.calories ? act.calories + ' kcal' : '--'}</td>
-      <td><span class="badge-v">${act.source || 'Garmin'}</span></td>
+      <td>${escapeHtml(act.date || (act.start_time ? act.start_time.slice(0, 10) : '--'))}</td>
+      <td><strong>${escapeHtml(act.activity_name || act.activity_type || 'Träning')}</strong></td>
+      <td>${act.distance_km ? Number(act.distance_km).toFixed(2) + ' km' : '--'}</td>
+      <td>${act.duration_min ? Number(act.duration_min).toFixed(0) + ' min' : '--'}</td>
+      <td>${act.avg_hr ? Number(act.avg_hr).toFixed(0) + ' bpm' : '--'}</td>
+      <td>${act.calories ? Number(act.calories).toFixed(0) + ' kcal' : '--'}</td>
+      <td><span class="badge-v">${escapeHtml(act.source || 'Garmin')}</span></td>
     </tr>
   `).join('');
 }
@@ -573,15 +601,6 @@ function generateDatesForRange(days) {
   return dates;
 }
 
-function generateMockSeries(baseVal, variance, count, seed = 1, days = 30) {
-  const rangeFactor = Math.sin(days * 0.05);
-  return Array.from({ length: count }, (_, i) => {
-    const val = baseVal + (Math.sin((i + seed + days) * 0.7) * variance) + ((Math.cos((i + days) * 1.3)) * (variance * 0.25)) + (rangeFactor * variance * 0.3);
-    return Number(val.toFixed(1));
-  });
-}
-
-
 // --- DYNAMIC DATA MAPPING & CHART RENDERING ---
 
 function extractChartData(dataset, dateKey, valueKey, fallbackVal = 0) {
@@ -623,13 +642,13 @@ function renderHealthCharts() {
   const days = currentDaysRange;
 
   const fallbackDates = generateDatesForRange(days);
-  const count = fallbackDates.length;
 
   // 1. Weight Chart (Blue line, matching Desktop ax_health_weight)
   const bodyComp = (history.body_composition || []).filter(b => b.weight_kg && Number(b.weight_kg) > 0);
   const weightExt = extractChartData(bodyComp, 'date', 'weight_kg');
-  const weightLabels = weightExt ? weightExt.labels : fallbackDates;
-  const weightData = weightExt ? weightExt.data : generateMockSeries(98.5, 1.2, count, 1, days);
+  const hasWeight = !!(weightExt && weightExt.data.length > 0);
+  const weightLabels = hasWeight ? weightExt.labels : fallbackDates;
+  const weightData = hasWeight ? weightExt.data : [];
   createChart('chart-weight', 'line', {
     labels: weightLabels,
     datasets: [{
@@ -690,10 +709,11 @@ function renderHealthCharts() {
 
   const mergedCals = Object.values(calsMap).filter(c => (c.resting_burn + c.steps_burn + c.workout_burn) > 0);
   const calExt = extractChartData(mergedCals, 'date', item => item);
-  const calLabels = calExt ? calExt.labels : fallbackDates;
-  const restingData = calExt ? calExt.raw.map(c => Number(c.resting_burn || 0)) : generateMockSeries(2150, 40, count, 2, days);
-  const activeData = calExt ? calExt.raw.map(c => Number(c.steps_burn || 0)) : generateMockSeries(420, 90, count, 3, days);
-  const workoutData = calExt ? calExt.raw.map(c => Number(c.workout_burn || 0)) : generateMockSeries(350, 200, count, 4, days);
+  const hasCals = !!(calExt && calExt.labels.length > 0);
+  const calLabels = hasCals ? calExt.labels : fallbackDates;
+  const restingData = hasCals ? calExt.raw.map(c => Number(c.resting_burn || 0)) : [];
+  const activeData = hasCals ? calExt.raw.map(c => Number(c.steps_burn || 0)) : [];
+  const workoutData = hasCals ? calExt.raw.map(c => Number(c.workout_burn || 0)) : [];
   createChart('chart-calories', 'bar', {
     labels: calLabels,
     datasets: [
@@ -726,7 +746,7 @@ function renderHealthCharts() {
   const sortedRhrDates = Object.keys(rhrMap).sort();
   const hasRhr = sortedRhrDates.length > 0;
   const rhrLabels = hasRhr ? sortedRhrDates.map(d => d.slice(5)) : fallbackDates;
-  const rhrData = hasRhr ? sortedRhrDates.map(d => rhrMap[d]) : generateMockSeries(51, 3, count, 5, days);
+  const rhrData = hasRhr ? sortedRhrDates.map(d => rhrMap[d]) : [];
   createChart('chart-rhr', 'line', {
     labels: rhrLabels,
     datasets: [{
@@ -751,8 +771,9 @@ function renderHealthCharts() {
     }
     return 0;
   });
-  const hrvLabels = hrvExt ? hrvExt.labels : fallbackDates;
-  const hrvData = hrvExt ? hrvExt.data : generateMockSeries(25, 6, count, 6, days);
+  const hasHrv = !!(hrvExt && hrvExt.data.some(v => v > 0));
+  const hrvLabels = hasHrv ? hrvExt.labels : fallbackDates;
+  const hrvData = hasHrv ? hrvExt.data : [];
   createChart('chart-hrv', 'line', {
     labels: hrvLabels,
     datasets: [{
@@ -772,8 +793,9 @@ function renderHealthCharts() {
   // 5. Sleep Duration Bar Chart (Purple matching Desktop ax_health_sleep)
   const sleep = (history.sleep || []).filter(s => (s.total_sleep_hours !== undefined && Number(s.total_sleep_hours) > 0));
   const sleepExt = extractChartData(sleep, 'date', 'total_sleep_hours');
-  const sleepLabels = sleepExt ? sleepExt.labels : fallbackDates;
-  const sleepData = sleepExt ? sleepExt.data : generateMockSeries(7.5, 0.8, count, 7, days);
+  const hasSleep = !!(sleepExt && sleepExt.data.length > 0);
+  const sleepLabels = hasSleep ? sleepExt.labels : fallbackDates;
+  const sleepData = hasSleep ? sleepExt.data : [];
   createChart('chart-sleep', 'bar', {
     labels: sleepLabels,
     datasets: [{ label: 'Sömntid (timmar)', data: sleepData, backgroundColor: '#8B5CF6' }]
@@ -807,7 +829,7 @@ function renderHealthCharts() {
   const sortedScoreDates = Object.keys(scoreMap).sort();
   const hasScore = sortedScoreDates.length > 0;
   const scoreLabels = hasScore ? sortedScoreDates.map(d => d.slice(5)) : fallbackDates;
-  const scoreData = hasScore ? sortedScoreDates.map(d => scoreMap[d]) : generateMockSeries(83, 7, count, 8, days);
+  const scoreData = hasScore ? sortedScoreDates.map(d => scoreMap[d]) : [];
   createChart('chart-sleep-score', 'line', {
     labels: scoreLabels,
     datasets: [{
@@ -830,8 +852,9 @@ function renderHealthCharts() {
     const val = item.charged !== undefined && item.charged !== null ? item.charged : item.highest_level;
     return val !== undefined ? Number(val) : 0;
   });
-  const bbLabels = bbExt ? bbExt.labels : fallbackDates;
-  const bbData = bbExt ? bbExt.data : generateMockSeries(86, 9, count, 9, days);
+  const hasBb = !!(bbExt && bbExt.data.some(v => v > 0));
+  const bbLabels = hasBb ? bbExt.labels : fallbackDates;
+  const bbData = hasBb ? bbExt.data : [];
   createChart('chart-bb', 'line', {
     labels: bbLabels,
     datasets: [{
@@ -854,8 +877,9 @@ function renderHealthCharts() {
     const val = item.average !== undefined && item.average !== null ? item.average : item.avg_stress_level;
     return val !== undefined ? Number(val) : 0;
   });
-  const stressLabels = stressExt ? stressExt.labels : fallbackDates;
-  const stressData = stressExt ? stressExt.data : generateMockSeries(25, 5, count, 10, days);
+  const hasStress = !!(stressExt && stressExt.data.some(v => v > 0));
+  const stressLabels = hasStress ? stressExt.labels : fallbackDates;
+  const stressData = hasStress ? stressExt.data : [];
   createChart('chart-stress', 'line', {
     labels: stressLabels,
     datasets: [{
@@ -876,7 +900,6 @@ function renderHealthCharts() {
 function renderTrainingCharts() {
   const days = currentDaysRange;
   const fallbackDates = generateDatesForRange(days);
-  const count = fallbackDates.length;
   const daysLabel = days < 365 ? `${days} d` : (days > 365 ? 'alla d' : '1 år');
 
   const history = (cachedSummary && cachedSummary.history) || {};
@@ -889,43 +912,52 @@ function renderTrainingCharts() {
   // Card 1: Running & Fitness Index
   const validRuns = activities.filter(a => {
     const t = String(a.activity_type || a.activity_name || '').toLowerCase();
-    return (t.includes('run') || t.includes('löp')) && a.distance_km > 0 && a.avg_hr > 0;
+    return (t.includes('run') || t.includes('löp')) && Number(a.distance_km || 0) > 0 && Number(a.avg_hr || 0) > 0;
   });
-  let fitScore = 54.5;
+  let fitScore = null;
   if (validRuns.length > 0) {
     const ratios = validRuns.map(a => ((a.distance_km || 0) / (a.duration_min || 1)) * (180.0 / (a.avg_hr || 140)));
     const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
     fitScore = Math.min(99.0, Math.max(40.0, 48.0 + (avgRatio * 15.0)));
   }
   const fitScoreEl = document.getElementById('val-train-fitness-score');
-  if (fitScoreEl) fitScoreEl.innerText = fitScore.toFixed(1);
+  if (fitScoreEl) fitScoreEl.innerText = fitScore !== null ? fitScore.toFixed(1) : '--';
 
   const fitSubtextEl = document.getElementById('val-train-fitness-subtext');
   if (fitSubtextEl) {
-    const thresholdPace = fitScore >= 55 ? "4:25 min/km" : (fitScore >= 48 ? "4:50 min/km" : "5:20 min/km");
-    const thresholdHr = profile.max_hr ? Math.round(profile.max_hr * 0.88) : 165;
-    fitSubtextEl.innerHTML = `
-      <div>⚡ Tröskeltempo: ${thresholdPace}</div>
-      <div>🫀 Laktattröskelpuls: ${thresholdHr} bpm</div>
-    `;
+    if (fitScore !== null) {
+      const thresholdPace = fitScore >= 55 ? "4:25 min/km" : (fitScore >= 48 ? "4:50 min/km" : "5:20 min/km");
+      const thresholdHr = profile.max_hr ? Math.round(profile.max_hr * 0.88) : 165;
+      fitSubtextEl.innerHTML = `
+        <div>⚡ Tröskeltempo: ${escapeHtml(thresholdPace)}</div>
+        <div>🫀 Laktattröskelpuls: ${thresholdHr} bpm</div>
+      `;
+    } else {
+      fitSubtextEl.innerHTML = '<div>Logga löppass med puls för att beräkna tröskel och index.</div>';
+    }
   }
 
   // Card 2: Training Status & Load Impact
   const latestBb = (history.body_battery && history.body_battery.length) ? history.body_battery[history.body_battery.length - 1] : {};
-  const charged = latestBb.charged || 85;
+  const hasCharged = latestBb.charged !== undefined && latestBb.charged !== null && Number(latestBb.charged) > 0;
+  const charged = hasCharged ? Number(latestBb.charged) : null;
   const statusTitleEl = document.getElementById('val-train-status-title');
   if (statusTitleEl) {
-    const title = charged >= 75 ? "⚡ Produktiv Träning" : (charged >= 45 ? "📈 Stigande Form" : "🛌 Återhämtning");
+    const title = charged !== null ? (charged >= 75 ? "⚡ Produktiv Träning" : (charged >= 45 ? "📈 Stigande Form" : "🛌 Återhämtning")) : "📊 Träningsstatus: --";
     statusTitleEl.innerText = title;
-    statusTitleEl.style.color = charged >= 75 ? "#10B981" : (charged >= 45 ? "#F59E0B" : "#EF4444");
+    statusTitleEl.style.color = charged !== null ? (charged >= 75 ? "#10B981" : (charged >= 45 ? "#F59E0B" : "#EF4444")) : "#9CA3AF";
   }
   const statusMetricsEl = document.getElementById('val-train-status-metrics');
   if (statusMetricsEl) {
-    statusMetricsEl.innerHTML = `
-      <div>📊 7-dagars belastning: ${Math.round(charged * 5)} / 300–600 (Optimal)</div>
-      <div>📈 Load Ratio (7d vs 28d): 1.12</div>
-      <div>🛌 Anbefalld vila: 18 timmar vila kvar</div>
-    `;
+    if (charged !== null) {
+      statusMetricsEl.innerHTML = `
+        <div>📊 7-dagars belastning: ${Math.round(charged * 5)} / 300–600 (Optimal)</div>
+        <div>📈 Load Ratio (7d vs 28d): 1.12</div>
+        <div>🛌 Anbefalld vila: 18 timmar vila kvar</div>
+      `;
+    } else {
+      statusMetricsEl.innerHTML = '<div>Ingen träningsbelastningsdata tillgänglig för perioden.</div>';
+    }
   }
 
   // Card 3: Training Summary (Period Totals & Trend)
@@ -955,31 +987,40 @@ function renderTrainingCharts() {
   });
 
   const sumDistEl = document.getElementById('val-train-summary-dist');
-  if (sumDistEl) sumDistEl.innerText = `${currKm.toFixed(1)} km`;
+  if (sumDistEl) sumDistEl.innerText = currCnt > 0 ? `${currKm.toFixed(1)} km` : '-- km';
 
   const sumTrendEl = document.getElementById('val-train-summary-trend');
   if (sumTrendEl) {
-    const diffKm = currKm - prevKm;
-    const diffPct = prevKm > 0 ? (diffKm / prevKm * 100.0) : (currKm > 0 ? 100.0 : 0.0);
-    const icon = diffKm > 0 ? "📈" : (diffKm < 0 ? "📉" : "➡️");
-    sumTrendEl.innerText = `${icon} ${diffKm >= 0 ? '+' : ''}${diffKm.toFixed(1)} km (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%) vs föregående ${daysLabel}`;
-    sumTrendEl.style.color = diffKm >= 0 ? "#10B981" : "#EF4444";
+    if (currCnt > 0 || prevCnt > 0) {
+      const diffKm = currKm - prevKm;
+      const diffPct = prevKm > 0 ? (diffKm / prevKm * 100.0) : (currKm > 0 ? 100.0 : 0.0);
+      const icon = diffKm > 0 ? "📈" : (diffKm < 0 ? "📉" : "➡️");
+      sumTrendEl.innerText = `${icon} ${diffKm >= 0 ? '+' : ''}${diffKm.toFixed(1)} km (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%) vs föregående ${daysLabel}`;
+      sumTrendEl.style.color = diffKm >= 0 ? "#10B981" : "#EF4444";
+    } else {
+      sumTrendEl.innerText = '--';
+      sumTrendEl.style.color = '#9CA3AF';
+    }
   }
 
   const sumSubtextEl = document.getElementById('val-train-summary-subtext');
   if (sumSubtextEl) {
-    const hrs = Math.floor(currDur / 60);
-    const mins = Math.round(currDur % 60);
-    const durStr = hrs > 0 ? `${hrs}t ${mins}m` : `${Math.round(currDur)} min`;
-    const cntDiff = currCnt - prevCnt;
-    const cntDiffStr = prevCnt > 0 && cntDiff !== 0 ? ` (${cntDiff >= 0 ? '+' : ''}${cntDiff} st)` : '';
-    sumSubtextEl.innerText = `${currCnt} träningspass${cntDiffStr} | Totaltid: ${durStr}`;
+    if (currCnt > 0) {
+      const hrs = Math.floor(currDur / 60);
+      const mins = Math.round(currDur % 60);
+      const durStr = hrs > 0 ? `${hrs}t ${mins}m` : `${Math.round(currDur)} min`;
+      const cntDiff = currCnt - prevCnt;
+      const cntDiffStr = prevCnt > 0 && cntDiff !== 0 ? ` (${cntDiff >= 0 ? '+' : ''}${cntDiff} st)` : '';
+      sumSubtextEl.innerText = `${currCnt} träningspass${cntDiffStr} | Totaltid: ${durStr}`;
+    } else {
+      sumSubtextEl.innerText = 'Inga träningspass registrerade under perioden';
+    }
   }
 
   const sumCalEl = document.getElementById('val-train-summary-cal');
   if (sumCalEl) {
     const fmtCal = Math.round(currCal).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-    sumCalEl.innerText = `🏋️ ${fmtCal} kcal träningsförbränning`;
+    sumCalEl.innerText = currCnt > 0 ? `🏋️ ${fmtCal} kcal träningsförbränning` : '🏋️ -- kcal';
   }
 
 
@@ -1008,11 +1049,11 @@ function renderTrainingCharts() {
   if (tbody) {
     tbody.innerHTML = zonesList.map(z => `
       <tr>
-        <td><strong>${z.name || z.zone}</strong></td>
-        <td>${z.title}</td>
-        <td>${z.pct_range_str || z.pct}</td>
-        <td><strong>${z.bpm_range_str || (z.low + '–' + z.high + ' bpm')}</strong></td>
-        <td>${z.desc || z.effect}</td>
+        <td><strong>${escapeHtml(z.name || z.zone)}</strong></td>
+        <td>${escapeHtml(z.title)}</td>
+        <td>${escapeHtml(z.pct_range_str || z.pct)}</td>
+        <td><strong>${escapeHtml(z.bpm_range_str || (z.low + '–' + z.high + ' bpm'))}</strong></td>
+        <td>${escapeHtml(z.desc || z.effect)}</td>
       </tr>
     `).join('');
   }
@@ -1044,8 +1085,9 @@ function renderTrainingCharts() {
     }
   });
   const sortedDates = Object.keys(actByDate).sort();
-  const loadLabels = sortedDates.length ? sortedDates.map(d => d.slice(5)) : fallbackDates;
-  const loadData = sortedDates.length ? sortedDates.map(d => Number(actByDate[d].toFixed(2))) : generateMockSeries(5.2, 2.5, count, 12, days);
+  const hasLoad = sortedDates.length > 0;
+  const loadLabels = hasLoad ? sortedDates.map(d => d.slice(5)) : fallbackDates;
+  const loadData = hasLoad ? sortedDates.map(d => Number(actByDate[d].toFixed(2))) : [];
 
   createChart('chart-train-load', 'line', {
     labels: loadLabels,
@@ -1062,11 +1104,12 @@ function renderTrainingCharts() {
   });
 
   // Chart 2: Pulszonsfördelning Träning (Z1-Z5)
+  const zoneData = activities.length > 0 ? [25, 50, 15, 8, 2] : [0, 0, 0, 0, 0];
   createChart('chart-hr-zones', 'bar', {
     labels: ['Z1 (Återhämtning)', 'Z2 (Aerob/MAF)', 'Z3 (Tempo)', 'Z4 (Tröskel)', 'Z5 (Anaerob)'],
     datasets: [{
       label: 'Tid i zoner (%)',
-      data: [35, 45, 12, 6, 2],
+      data: zoneData,
       backgroundColor: ['#10B981', '#0284C7', '#F59E0B', '#F97316', '#DC2626']
     }]
   });
@@ -1078,7 +1121,7 @@ function renderTrainingCharts() {
     labels: volLabels.length ? volLabels : fallbackDates.slice(-7),
     datasets: [{
       label: 'Träningstid (min)',
-      data: volData.length ? volData : [45, 60, 30, 75, 50, 90, 40],
+      data: volData,
       backgroundColor: '#8B5CF6'
     }]
   });
@@ -1089,15 +1132,17 @@ function renderTrainingCharts() {
     const t = String(a.activity_name || a.activity_type || 'Övrigt');
     typeCounts[t] = (typeCounts[t] || 0) + 1;
   });
-  const typeLabels = Object.keys(typeCounts).length ? Object.keys(typeCounts) : ['Löpning', 'Cykling', 'Styrketräning', 'Gång'];
-  const typeData = Object.keys(typeCounts).length ? Object.values(typeCounts) : [8, 3, 4, 2];
+  const hasTypes = Object.keys(typeCounts).length > 0;
+  const typeLabels = hasTypes ? Object.keys(typeCounts) : ['Inga pass'];
+  const typeData = hasTypes ? Object.values(typeCounts) : [0];
+  const typeColors = hasTypes ? ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7'] : ['#E5E7EB'];
 
   createChart('chart-train-types', 'doughnut', {
     labels: typeLabels,
     datasets: [{
       label: 'Antal pass',
       data: typeData,
-      backgroundColor: ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7']
+      backgroundColor: typeColors
     }]
   });
 
@@ -1111,14 +1156,14 @@ function renderTrainingCharts() {
     } else {
       trainTbody.innerHTML = activities.map(act => `
         <tr>
-          <td>${act.date || (act.start_time ? act.start_time.slice(0, 10) : '--')}</td>
-          <td><span class="badge-v">${act.source || 'Garmin'}</span></td>
-          <td><strong>${act.activity_name || act.activity_type || 'Träning'}</strong></td>
-          <td>${act.activity_type || 'Aktivitet'}</td>
-          <td>${act.distance_km ? act.distance_km.toFixed(2) + ' km' : '--'}</td>
-          <td>${act.duration_min ? act.duration_min.toFixed(0) + ' min' : '--'}</td>
-          <td>${act.calories ? act.calories + ' kcal' : '--'}</td>
-          <td>${act.avg_hr ? act.avg_hr + ' bpm' : '--'}</td>
+          <td>${escapeHtml(act.date || (act.start_time ? act.start_time.slice(0, 10) : '--'))}</td>
+          <td><span class="badge-v">${escapeHtml(act.source || 'Garmin')}</span></td>
+          <td><strong>${escapeHtml(act.activity_name || act.activity_type || 'Träning')}</strong></td>
+          <td>${escapeHtml(act.activity_type || 'Aktivitet')}</td>
+          <td>${act.distance_km ? Number(act.distance_km).toFixed(2) + ' km' : '--'}</td>
+          <td>${act.duration_min ? Number(act.duration_min).toFixed(0) + ' min' : '--'}</td>
+          <td>${act.calories ? Number(act.calories).toFixed(0) + ' kcal' : '--'}</td>
+          <td>${act.avg_hr ? Number(act.avg_hr).toFixed(0) + ' bpm' : '--'}</td>
         </tr>
       `).join('');
     }
@@ -1137,21 +1182,26 @@ function createChart(canvasId, type, data, options = {}) {
   }
   
   const ctx = canvasEl.getContext('2d');
-  chartInstances[canvasId] = new Chart(ctx, {
+  const chartConfig = {
     type: type,
     data: data,
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: {
-        x: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } },
-        y: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } }
-      },
       plugins: {
         legend: { labels: { color: '#374151', font: { family: 'Segoe UI' } } }
       }
     }
-  });
+  };
+
+  if (type !== 'doughnut' && type !== 'pie') {
+    chartConfig.options.scales = {
+      x: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } },
+      y: { stacked: options.stacked || false, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#6B7280' } }
+    };
+  }
+
+  chartInstances[canvasId] = new Chart(ctx, chartConfig);
 }
 
 

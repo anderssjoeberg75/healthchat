@@ -51,11 +51,11 @@ Kryptomodulen (`crypto.py`) håller – AES-256-GCM + Argon2id, färska nonces, 
 
 Ingen av dessa kräver designbeslut. Alla fyra har reproducerbara felfall beskrivna i sina uppgifter.
 
-### Omgång 2 – Frontend
+### Omgång 2 – Frontend (✅ Klart)
 | Ordning | ID | Fil | Omfattning |
 |---|---|---|---|
-| 5 | `UI-1` | `static/app.js` | Ta bort påhittade hälsovärden och `generateMockSeries`. |
-| 6 | `UI-2` | `static/app.js` | Escapa data i `innerHTML`. |
+| 5 | `UI-1` | `static/app.js` | ✅ Åtgärdad: Påhittade värden och generateMockSeries borttagna, tomma serier/-- vid saknad data |
+| 6 | `UI-2` | `static/app.js` | ✅ Åtgärdad: XSS-escapning via escapeHtml() i aktivitetstabeller och pulszoner |
 
 Gör dem tillsammans – de rör samma renderingsfunktioner. `UI-2` blir enklare efter `UI-1`, eftersom
 flera `innerHTML`-block försvinner helt när fallbackvärdena tas bort.
@@ -264,7 +264,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] UI-1: Dashboarden fyller i påhittade hälsovärden när data saknas
+### [x] UI-1: Dashboarden fyller i påhittade hälsovärden när data saknas
 - **Fil:** [static/app.js:365](static/app.js), [static/app.js:381-385](static/app.js), [static/app.js:394-402](static/app.js), [static/app.js:410-414](static/app.js), [static/app.js:516-522](static/app.js) (`generateMockSeries`), [static/app.js:572](static/app.js), [static/app.js:634-636](static/app.js), [static/app.js:669](static/app.js), [static/app.js:695](static/app.js), [static/app.js:716](static/app.js), [static/app.js:750](static/app.js), [static/app.js:774](static/app.js)
 - **Problem:** Saknas data visas hårdkodade värden som om de vore användarens egna mätvärden:
   - vikt `98.3` kg, fett `21.4` %, muskelmassa `72.1` kg, återhämtning `72` %, kaloriförbränning `1195` kcal, vilo-BMR `1123` kcal
@@ -302,7 +302,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] UI-2: Stored XSS i aktivitetstabellerna
+### [x] UI-2: Stored XSS i aktivitetstabellerna
 - **Fil:** [static/app.js:454-472](static/app.js) (`renderActivitiesTable`), [static/app.js:1052-1070](static/app.js) (träningsfliken)
 - **Problem:** `act.activity_name`, `act.activity_type` och `act.source` interpoleras rått i `innerHTML`. Passnamn är användarsatta i Garmin och Strava, så en användare kan namnge ett pass `<img src=x onerror=...>` och få kod exekverad i sitt eget gränssnitt – och i alla gränssnitt som visar delad data (se `S-14`, där SQLite-fallbacken faktiskt delar rader mellan konton). Samma mönster finns i `renderHrZonesTable` ([static/app.js:949](static/app.js)) och MAF-boxen ([static/app.js:968](static/app.js)), där innehållet i dag är serverstyrt men mönstret är lika skört.
 - **Åtgärd:**
