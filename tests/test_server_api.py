@@ -5,6 +5,7 @@ Tests REST authentication endpoints, session cookies, dashboard queries, and SSE
 
 import pytest
 import auth
+from garmin_db import GarminDatabase
 from fastapi.testclient import TestClient
 from server import app, _active_sessions
 
@@ -104,5 +105,67 @@ def test_register_login_and_me_flow(monkeypatch):
     # Verify Unauthorized after logout
     after_me_res = client.get("/api/auth/me")
     assert after_me_res.status_code == 401
+
+
+def test_dashboard_summary_with_missing_weight_uses_fallback(monkeypatch, tmp_path):
+    """B-3: When weight is missing in profile and body_comp has no weight, default 70kg is used."""
+    test_email = "bmrtest@example.com"
+    dummy_session = auth.UserSession(
+        user_id=101,
+        email=test_email,
+        dek=bytearray(b"0123456789abcdef0123456789abcdef"),
+        encrypted_profile={"sex": "male", "age": 40, "height_cm": 180.0, "weight_kg": None}
+    )
+
+    test_db = GarminDatabase(db_path=tmp_path / "test_bmr.db")
+    # Insert a body comp row without weight_kg
+    test_db.upsert_body_composition({"date": "2026-09-11", "muscle_mass_kg": 50.0})
+
+    from server import get_current_session
+    app.dependency_overrides[get_current_session] = lambda: dummy_session
+    monkeypatch.setattr("server.bind_user_db", lambda *args, **kwargs: test_db)
+    monkeypatch.setattr("server.get_db_conn", lambda *args, **kwargs: None)
+
+    try:
+        res = client.get("/api/dashboard/summary")
+        assert res.status_code == 200
+        data = res.json()
+        assert "calorie_burn_today" in data
+        # Full day BMR with 70kg fallback: 10*70 + 6.25*180 - 5*40 + 5 = 1630
+        assert data["calorie_burn_today"]["bmr_full"] > 1000
+        assert data["calorie_burn_today"]["bmr_source"] == "mifflin"
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+
+
+def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
+    """B-1: Verify that /api/ai/chat returns SSE stream with {"chunk": ...} and {"done": true}."""
+    test_email = "chattest@example.com"
+    dummy_session = auth.UserSession(
+        user_id=102,
+        email=test_email,
+        dek=bytearray(b"0123456789abcdef0123456789abcdef"),
+        encrypted_profile={"sex": "male", "age": 35}
+    )
+
+    test_db = GarminDatabase(db_path=tmp_path / "test_chat.db")
+
+    from server import get_current_session
+    app.dependency_overrides[get_current_session] = lambda: dummy_session
+    monkeypatch.setattr("server.bind_user_db", lambda *args, **kwargs: test_db)
+    monkeypatch.setattr("server.get_db_conn", lambda *args, **kwargs: None)
+    monkeypatch.setattr("server.AIClient.chat", lambda self, prompt: "Det här är ett AI-svar med åäö.")
+
+    try:
+        res = client.post("/api/ai/chat", json={"message": "Hur mår jag?", "provider": "openai"})
+        assert res.status_code == 200
+        assert "text/event-stream" in res.headers["content-type"]
+        body = res.text
+        assert '{"chunk":' in body
+        assert '{"done": true}' in body
+        assert "åäö" in body
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)
+
 
 

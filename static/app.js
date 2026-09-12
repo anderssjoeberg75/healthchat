@@ -204,7 +204,18 @@ async function populateProfileInputs(profile) {
   const rHrEl = document.getElementById('prof-resting-hr');
   if (rHrEl && p.resting_hr !== undefined && p.resting_hr !== null && p.resting_hr !== '') rHrEl.value = p.resting_hr;
   const mHrEl = document.getElementById('prof-max-hr');
-  if (mHrEl && p.max_hr !== undefined && p.max_hr !== null && p.max_hr !== '') mHrEl.value = p.max_hr;
+  if (mHrEl) {
+    if (p.max_hr !== undefined && p.max_hr !== null && p.max_hr !== '' && parseFloat(p.max_hr) > 0) {
+      mHrEl.value = p.max_hr;
+      mHrEl.dataset.isAutoComputed = 'false';
+    } else {
+      const currentAge = parseFloat(ageEl?.value || p.age || 0);
+      if (currentAge > 0) {
+        mHrEl.value = Math.round(220 - currentAge);
+        mHrEl.dataset.isAutoComputed = 'true';
+      }
+    }
+  }
   const fatEl = document.getElementById('prof-fat');
   if (fatEl && p.fat_ratio_pct !== undefined && p.fat_ratio_pct !== null && p.fat_ratio_pct !== '') fatEl.value = p.fat_ratio_pct;
   const musEl = document.getElementById('prof-muscle');
@@ -227,6 +238,8 @@ async function populateProfileInputs(profile) {
 
   updateLiveBmi();
   bindLiveBmiCalculator();
+  updateLiveMaxHr();
+  bindLiveMaxHrCalculator();
 }
 
 function updateLiveBmi() {
@@ -251,6 +264,53 @@ function bindLiveBmiCalculator() {
     wEl.addEventListener('input', updateLiveBmi);
     wEl.addEventListener('change', updateLiveBmi);
     wEl.dataset.bmiBound = 'true';
+  }
+}
+
+function updateLiveMaxHr() {
+  const ageVal = parseFloat((document.getElementById('prof-age')?.value || '').replace(',', '.'));
+  const rHrVal = parseFloat((document.getElementById('prof-resting-hr')?.value || '').replace(',', '.'));
+  const mHrEl = document.getElementById('prof-max-hr');
+
+  if (mHrEl && ageVal > 0) {
+    if (!mHrEl.value || mHrEl.dataset.isAutoComputed === 'true') {
+      mHrEl.value = Math.round(220 - ageVal);
+      mHrEl.dataset.isAutoComputed = 'true';
+    }
+  }
+
+  const age = ageVal || 42;
+  const restingHr = rHrVal || 54;
+  const maxHr = mHrEl && mHrEl.value ? parseFloat(mHrEl.value) : Math.round(220 - age);
+  const hrr = maxHr - restingHr;
+
+  const summaryHeader = document.getElementById('prof-summary-header-info');
+  if (summaryHeader) {
+    summaryHeader.innerText = `👤 Ålder: ${age} år | ❤️ Vilopuls: ${restingHr} bpm | ⚡ Maxpuls: ${maxHr} bpm | 📊 Pulsreserv (HRR): ${hrr} bpm`;
+  }
+}
+
+function bindLiveMaxHrCalculator() {
+  const ageEl = document.getElementById('prof-age');
+  const rHrEl = document.getElementById('prof-resting-hr');
+  const mHrEl = document.getElementById('prof-max-hr');
+
+  if (ageEl && !ageEl.dataset.maxHrBound) {
+    ageEl.addEventListener('input', updateLiveMaxHr);
+    ageEl.addEventListener('change', updateLiveMaxHr);
+    ageEl.dataset.maxHrBound = 'true';
+  }
+  if (rHrEl && !rHrEl.dataset.maxHrBound) {
+    rHrEl.addEventListener('input', updateLiveMaxHr);
+    rHrEl.addEventListener('change', updateLiveMaxHr);
+    rHrEl.dataset.maxHrBound = 'true';
+  }
+  if (mHrEl && !mHrEl.dataset.maxHrBound) {
+    mHrEl.addEventListener('input', () => {
+      mHrEl.dataset.isAutoComputed = 'false';
+      updateLiveMaxHr();
+    });
+    mHrEl.dataset.maxHrBound = 'true';
   }
 }
 
@@ -1124,19 +1184,34 @@ async function handleSendChatMessage(event) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
     botBubble.innerText = '';
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const dataStr = line.slice(6);
-          if (dataStr === '[DONE]') break;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const dataStr = trimmed.slice(6).trim();
+          if (dataStr === '[DONE]') {
+            return;
+          }
           try {
             const parsed = JSON.parse(dataStr);
-            if (parsed.content) {
+            if (parsed.error) {
+              botBubble.innerText = `⚠️ Fel från AI: ${parsed.error}`;
+              return;
+            }
+            if (parsed.done) {
+              return;
+            }
+            if (parsed.chunk) {
+              botBubble.innerText += parsed.chunk;
+            } else if (parsed.content) {
               botBubble.innerText += parsed.content;
             }
           } catch (e) {}
@@ -1270,6 +1345,9 @@ async function handleFetchExternalProfile() {
     if (document.getElementById('prof-bmi')) {
       document.getElementById('prof-bmi').value = bmiVal || '';
     }
+
+    updateLiveBmi();
+    updateLiveMaxHr();
 
     const srcStr = sources.length ? sources.join(', ') : 'anslutna tjänster';
     if (statusMsg) statusMsg.textContent = `✓ Hämtade uppdaterade profilmått från ${srcStr}! Klicka på "Spara profilmått" för att spara.`;

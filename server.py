@@ -13,6 +13,7 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 
 from fastapi import FastAPI, Request, Response, HTTPException, status, Depends, Cookie, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -123,6 +124,19 @@ def get_db_conn(db: GarminDatabase):
     return db.get_connection()
 
 
+@contextmanager
+def _db_cursor(conn):
+    """Context manager for database cursors supporting both PyMySQL and sqlite3."""
+    cur = conn.cursor()
+    try:
+        yield cur
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
 def init_sessions_table(conn):
     """Ensure user_sessions table exists in DB."""
     try:
@@ -146,7 +160,7 @@ def init_sessions_table(conn):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
-        with conn.cursor() as cur:
+        with _db_cursor(conn) as cur:
             cur.execute(sql)
         if hasattr(conn, "commit"):
             try:
@@ -171,7 +185,7 @@ def save_session_to_db(conn, session_id: str, session: UserSession):
             if is_mariadb else
             f"INSERT OR REPLACE INTO user_sessions (session_id, user_id, email, dek, encrypted_profile) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})"
         )
-        with conn.cursor() as cur:
+        with _db_cursor(conn) as cur:
             cur.execute(sql, (session_id, session.user_id, session.email, dek_bytes, prof_json))
         if hasattr(conn, "commit"):
             try:
@@ -189,7 +203,7 @@ def load_session_from_db(conn, session_id: str) -> Optional[UserSession]:
         is_mariadb = hasattr(conn, "ping")
         placeholder = "%s" if is_mariadb else "?"
         sql = f"SELECT user_id, email, dek, encrypted_profile FROM user_sessions WHERE session_id = {placeholder}"
-        with conn.cursor() as cur:
+        with _db_cursor(conn) as cur:
             cur.execute(sql, (session_id,))
             row = cur.fetchone()
             if not row:
@@ -215,9 +229,9 @@ def load_session_from_db(conn, session_id: str) -> Optional[UserSession]:
                         enc_p = u_row["encrypted_profile"] if isinstance(u_row, dict) else u_row[0]
                         p_n = u_row["profile_nonce"] if isinstance(u_row, dict) else u_row[1]
                         if enc_p and p_n:
-                            prof_dict = crypto.decrypt_payload(dek_bytes, p_n, enc_p)
+                            prof_dict = crypto.decrypt_payload(dek_bytes, enc_p, p_n)
                 except Exception as ex:
-                    logger.debug(f"Failed fallback profile decrypt from users table: {ex}")
+                    logger.warning(f"Failed fallback profile decrypt from users table: {ex}")
             return UserSession(user_id=uid, email=email, dek=dek_bytes, encrypted_profile=prof_dict)
     except Exception as e:
         logger.warning(f"Failed loading session {session_id} from DB: {e}")
@@ -230,7 +244,7 @@ def delete_session_from_db(conn, session_id: str):
         is_mariadb = hasattr(conn, "ping")
         placeholder = "%s" if is_mariadb else "?"
         sql = f"DELETE FROM user_sessions WHERE session_id = {placeholder}"
-        with conn.cursor() as cur:
+        with _db_cursor(conn) as cur:
             cur.execute(sql, (session_id,))
         if hasattr(conn, "commit"):
             try:
@@ -536,7 +550,11 @@ def get_dashboard_summary(
             except Exception:
                 pass
 
-    weight = profile.get("weight_kg") or (body_comp_latest.get("weight_kg") if body_comp_latest else 70.0)
+    weight = (
+        profile.get("weight_kg")
+        or (body_comp_latest or {}).get("weight_kg")
+        or 70.0
+    )
 
     
     burn_estimate = calorie_calc.estimate_daily_burn(
@@ -617,16 +635,19 @@ async def chat_stream(req: ChatRequest, session: UserSession = Depends(get_curre
             loop = asyncio.get_event_loop()
             response_text = await loop.run_in_executor(None, lambda: client.chat(prompt))
             
-            # Stream in chunks for real-time feel
+            # SSE Protocol contract with static/app.js:
+            # - data: {"chunk": "<text>"} for streamed text pieces
+            # - data: {"done": true} to signal successful completion
+            # - data: {"error": "<message>"} to signal failure
             words = response_text.split(" ")
             for i in range(0, len(words), 3):
                 chunk = " ".join(words[i:i+3]) + " "
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.03)
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             logger.error(f"Error streaming AI response: {e}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

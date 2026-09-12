@@ -297,6 +297,73 @@ def test_deduplicate_activities_merges_duplicates(db):
     assert "Strava" in act_dedup[0]["source"]
 
 
+def test_deduplicate_distance_free_activities_preserved():
+    """B-2: Three distance-free workouts same day (strength, yoga, swimming) must all be preserved."""
+    activities = [
+        {
+            "activity_id": "act_strength_1",
+            "activity_name": "Styrketräning",
+            "date": "2026-09-11",
+            "distance_km": 0.0,
+            "duration_min": 45.0,
+            "avg_hr": 110.0,
+            "source": "Garmin"
+        },
+        {
+            "activity_id": "act_yoga_1",
+            "activity_name": "Yoga",
+            "date": "2026-09-11",
+            "distance_km": 0.0,
+            "duration_min": 20.0,
+            "avg_hr": 75.0,
+            "source": "Garmin"
+        },
+        {
+            "activity_id": "act_swim_1",
+            "activity_name": "Simning",
+            "date": "2026-09-11",
+            "distance_km": 0.0,
+            "duration_min": 60.0,
+            "avg_hr": 140.0,
+            "source": "Garmin"
+        }
+    ]
+    deduped = GarminDatabase.deduplicate_activities(activities)
+    assert len(deduped) == 3
+    names = {a["activity_name"] for a in deduped}
+    assert names == {"Styrketräning", "Yoga", "Simning"}
+
+
+def test_deduplicate_two_runs_same_day_different_times_preserved():
+    """B-2: Morning run and evening run with similar 5km distance must both be preserved."""
+    activities = [
+        {
+            "activity_id": "run_morning",
+            "activity_name": "Morgonlöpning",
+            "start_time": "2026-09-11 07:00:00",
+            "date": "2026-09-11",
+            "distance_km": 5.00,
+            "duration_min": 30.0,
+            "avg_hr": 145.0,
+            "source": "Garmin"
+        },
+        {
+            "activity_id": "run_evening",
+            "activity_name": "Kvällslöpning",
+            "start_time": "2026-09-11 19:00:00",
+            "date": "2026-09-11",
+            "distance_km": 5.05,
+            "duration_min": 28.0,
+            "avg_hr": 160.0,
+            "source": "Garmin"
+        }
+    ]
+    deduped = GarminDatabase.deduplicate_activities(activities)
+    assert len(deduped) == 2
+    names = {a["activity_name"] for a in deduped}
+    assert names == {"Morgonlöpning", "Kvällslöpning"}
+
+
 def test_sync_metadata_get_and_set(db):
     assert db.get_metadata("last_garmin_sync") is None
     assert db.get_metadata("last_garmin_sync", default="fallback") == "fallback"

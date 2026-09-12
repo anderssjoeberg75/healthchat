@@ -100,15 +100,27 @@ def estimate_daily_burn(
     except ``day_fraction``).
     """
     # --- Full-day resting burn (BMR) -------------------------------------
+    has_valid_weight = weight_kg is not None and float(weight_kg or 0) > 0
+    warnings = []
+
     if bmr_override and bmr_override > 0:
         bmr_full = float(bmr_override)
         bmr_source = "device"
-    elif height_cm and age_years:
+    elif has_valid_weight and height_cm and age_years:
         bmr_full = mifflin_st_jeor_bmr(weight_kg, height_cm, age_years, sex)
-        bmr_source = "mifflin"
-    else:
+        if bmr_full > 0:
+            bmr_source = "mifflin"
+        else:
+            bmr_full = simple_bmr(weight_kg, sex)
+            bmr_source = "simple" if bmr_full > 0 else "none"
+    elif has_valid_weight:
         bmr_full = simple_bmr(weight_kg, sex)
-        bmr_source = "simple"
+        bmr_source = "simple" if bmr_full > 0 else "none"
+    else:
+        bmr_full = 0.0
+        bmr_source = "none"
+        warnings.append("Vikt saknas – ange vikt i profilen för korrekt BMR-beräkning")
+
     bmr_full = max(0.0, bmr_full)
 
     frac = day_fraction_elapsed(at_time) if is_today else 1.0
@@ -133,4 +145,5 @@ def estimate_daily_burn(
         "steps_burn": round(steps_burn_val),
         "workout_burn": round(workout_burn),
         "total_burn": round(total),
+        "warnings": warnings,
     }

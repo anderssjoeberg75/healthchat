@@ -142,3 +142,16 @@ def test_estimate_deducts_workout_steps():
     assert res_no_deduct["steps_burn"] == 400
     assert res_deduct["total_burn"] == res_deduct["resting_burn"] + 240 + 300
 
+
+def test_estimate_missing_weight_does_not_report_mifflin():
+    """B-3: estimate_daily_burn with missing weight must not report bmr_source='mifflin' with BMR 0."""
+    result = calorie_calc.estimate_daily_burn(
+        weight_kg=None, height_cm=180, age_years=40, steps=10000, is_today=False
+    )
+    assert result["bmr_full"] == 0
+    assert result["bmr_source"] != "mifflin"
+    assert result["bmr_source"] == "none"
+    assert "warnings" in result
+    assert any("Vikt saknas" in w for w in result["warnings"])
+
+

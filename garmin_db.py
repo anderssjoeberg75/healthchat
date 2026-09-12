@@ -38,28 +38,69 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
 })
 
 
+# Template written to ~/.healthchat/db.env when no configuration exists yet.
+# Every line is commented out and no credential is embedded: the operator fills
+# it in. Never add a default password here - it would end up in version control
+# and in every installation.
+_DB_ENV_TEMPLATE = """\
+# HealthChat MariaDB-konfiguration.
+# Läses av load_db_env() i garmin_db.py. Filen ligger utanför git-repot.
+# Avkommentera och fyll i värdena nedan, eller sätt motsvarande
+# miljövariabler i systemd-enheten (EnvironmentFile).
+#
+# Filen ska ha rättigheterna 0600 (endast ägaren kan läsa den).
+
+#MARIADB_HOST=
+#MARIADB_PORT=3306
+#MARIADB_USER=healthchat
+#MARIADB_PASSWORD=
+#MARIADB_DB=healthchat
+"""
+
+
+def _write_db_env_template(path: Path):
+    """Write the credential-free db.env template with owner-only permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Create with 0600 from the start so the file is never briefly world-readable.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(_DB_ENV_TEMPLATE)
+    logger.info(f"Skapade konfigurationsmall utan lösenord: {path}")
+
+
+def _warn_if_world_readable(path: Path):
+    """Log a warning when a file holding credentials is readable by others."""
+    try:
+        mode = path.stat().st_mode
+        if mode & 0o077:
+            logger.warning(
+                f"{path} är läsbar för andra användare (rättigheter {mode & 0o777:o}). "
+                f"Kör: chmod 600 {path}"
+            )
+    except OSError:
+        pass
+
+
 def load_db_env():
-    """Load key-value environment variables from ~/.healthchat/db.env or local .env into os.environ if missing."""
+    """Load key-value environment variables from ~/.healthchat/db.env or local .env into os.environ if missing.
+
+    Values already present in os.environ always win, so a systemd EnvironmentFile
+    or an explicitly exported variable cannot be overridden by a stray file in the
+    user's home directory.
+    """
     db_env_file = Path.home() / ".healthchat" / "db.env"
     local_env_file = Path.cwd() / ".env"
 
     if not db_env_file.exists() and not local_env_file.exists():
         try:
-            db_env_file.parent.mkdir(parents=True, exist_ok=True)
-            db_env_file.write_text(
-                "MARIADB_HOST=192.168.101.106\n"
-                "MARIADB_PORT=3306\n"
-                "MARIADB_USER=healthchat\n"
-                "MARIADB_PASSWORD=powerman\n"
-                "MARIADB_DB=healthchat\n",
-                encoding="utf-8"
-            )
+            _write_db_env_template(db_env_file)
         except Exception as e:
             logger.debug(f"Could not auto-create db.env: {e}")
 
     env_paths = [local_env_file, db_env_file]
     for p in env_paths:
         if p.is_file():
+            _warn_if_world_readable(p)
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     for line in f:
@@ -67,8 +108,8 @@ def load_db_env():
                         if line and not line.startswith("#") and "=" in line:
                             k, v = line.split("=", 1)
                             k, v = k.strip(), v.strip().strip("'\"")
-                            if k:
-                                os.environ[k] = v
+                            if k and v:
+                                os.environ.setdefault(k, v)
             except Exception as e:
                 logger.debug(f"Failed to load env file {p}: {e}")
 
@@ -811,6 +852,24 @@ class GarminDatabase:
             return [dict(row) for row in cursor.fetchall()]
 
     @staticmethod
+    def _parse_time_seconds(t_str: str) -> Optional[int]:
+        if not t_str:
+            return None
+        t_clean = str(t_str).replace("T", " ").strip()
+        parts = t_clean.split(" ")
+        time_part = parts[1] if len(parts) >= 2 else parts[0]
+        if ":" in time_part:
+            sub = time_part.split(":")
+            try:
+                h = int(sub[0])
+                m = int(sub[1])
+                s = int(float(sub[2])) if len(sub) > 2 else 0
+                return h * 3600 + m * 60 + s
+            except (ValueError, IndexError):
+                return None
+        return None
+
+    @staticmethod
     def deduplicate_activities(activities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not activities:
             return []
@@ -818,18 +877,24 @@ class GarminDatabase:
         # Pre-normalize numeric fields and group by date (duplicates only exist within the same date)
         normalized_list = []
         for act in activities:
-            act_date = str(act.get("date") or act.get("start_time") or "")[:10]
+            time_raw = act.get("start_time") or act.get("startTimeLocal") or act.get("date") or ""
+            act_date = str(time_raw)[:10]
             act_dist = float(act.get("distance_km") or 0.0)
             act_dur = float(act.get("duration_min") or 0.0)
             act_hr = float(act.get("avg_hr") or 0.0)
             act_src = str(act.get("source") or "Garmin").strip()
+            act_id = str(act.get("activity_id") or act.get("activityId") or "").strip()
+            act_time_sec = GarminDatabase._parse_time_seconds(time_raw)
+
             normalized_list.append({
                 "raw": dict(act),
                 "date": act_date,
                 "dist": act_dist,
                 "dur": act_dur,
                 "hr": act_hr,
-                "src": act_src
+                "src": act_src,
+                "id": act_id,
+                "time_sec": act_time_sec,
             })
 
         unique_activities: List[Dict[str, Any]] = []
@@ -841,6 +906,8 @@ class GarminDatabase:
             act_dur = norm["dur"]
             act_hr = norm["hr"]
             act_src = norm["src"]
+            act_id = norm["id"]
+            act_sec = norm["time_sec"]
             act_raw = norm["raw"]
 
             existing_candidates = unique_by_date.get(act_date, [])
@@ -850,21 +917,55 @@ class GarminDatabase:
                 ex_dist = existing_norm["dist"]
                 ex_dur = existing_norm["dur"]
                 ex_hr = existing_norm["hr"]
+                ex_src = existing_norm["src"]
+                ex_id = existing_norm["id"]
+                ex_sec = existing_norm["time_sec"]
                 existing = existing_norm["raw"]
+
+                # 1. Exact match by same provider and activity id
+                if act_id and ex_id and act_src.lower() == ex_src.lower():
+                    if act_id == ex_id:
+                        is_dup = True
+                        break
+                    else:
+                        # Two different IDs from the same source on the same day are separate activities
+                        continue
+
+                # 2. If both have start times and start > 20 minutes (1200s) apart, they cannot be duplicates
+                if act_sec is not None and ex_sec is not None:
+                    if abs(act_sec - ex_sec) > 1200:
+                        continue
 
                 dist_diff = abs(act_dist - ex_dist)
                 dur_diff = abs(act_dur - ex_dur)
-                hr_diff = abs(act_hr - ex_hr) if (act_hr > 0 and ex_hr > 0) else 999.0
+                hr_diff = abs(act_hr - ex_hr) if (act_hr > 0 and ex_hr > 0) else None
 
-                is_dist_match = (dist_diff <= max(0.15, ex_dist * 0.05)) if (act_dist > 0 or ex_dist > 0) else True
-                is_hr_match = (hr_diff <= 4.0)
-                is_dur_match = (dur_diff <= max(10.0, ex_dur * 0.25))
+                is_hr_match = (hr_diff is not None and hr_diff <= 5.0)
+                is_dur_match = (dur_diff <= max(5.0, ex_dur * 0.15))
 
-                if is_dist_match and (is_hr_match or is_dur_match or dist_diff <= 0.1):
-                    is_dup = True
-                    ex_src = str(existing.get("source") or "Garmin").strip()
-                    if act_src.lower() not in ex_src.lower():
-                        existing["source"] = f"{ex_src} / {act_src}"
+                # 3. Distance-bearing activities (at least one has distance > 0)
+                if act_dist > 0 or ex_dist > 0:
+                    # One has distance > 0.5km and the other has none -> not the same activity
+                    if (act_dist > 0.5 and ex_dist == 0) or (ex_dist > 0.5 and act_dist == 0):
+                        continue
+                    is_dist_match = (dist_diff <= max(0.2, ex_dist * 0.05))
+                    # Crucial B-2 fix: require distance match AND (duration match OR HR match)
+                    if is_dist_match and (is_hr_match or is_dur_match):
+                        is_dup = True
+
+                # 4. Distance-free activities (both act_dist == 0 and ex_dist == 0)
+                else:
+                    # For distance-free activities (strength, yoga, etc.), lack of distance is NOT a match.
+                    # They must match on duration closely AND (start time within 10 min OR HR match).
+                    dur_close = (dur_diff <= max(2.0, ex_dur * 0.10))
+                    time_close = (act_sec is not None and ex_sec is not None and abs(act_sec - ex_sec) <= 600)
+                    if dur_close and (time_close or is_hr_match):
+                        is_dup = True
+
+                if is_dup:
+                    ex_src_str = str(existing.get("source") or "Garmin").strip()
+                    if act_src.lower() not in ex_src_str.lower():
+                        existing["source"] = f"{ex_src_str} / {act_src}"
 
                     if ex_dur > 300 and 0 < act_dur < 300:
                         existing["duration_min"] = act_dur
@@ -881,7 +982,10 @@ class GarminDatabase:
                     "raw": act_raw,
                     "dist": act_dist,
                     "dur": act_dur,
-                    "hr": act_hr
+                    "hr": act_hr,
+                    "src": act_src,
+                    "id": act_id,
+                    "time_sec": act_sec,
                 })
 
         return unique_activities
