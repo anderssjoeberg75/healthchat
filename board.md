@@ -93,12 +93,23 @@ Största enskilda ändringen i tavlan. Ta den separat, inte ihop med något anna
 
 ✅ Samtliga åtgärdade och verifierade med automatiserade tester.
 
-### Omgång 7 – Kodkvalitet
+### Omgång 7 – Kodkvalitet & standardisering (✅ Klart)
 `Q-1` … `Q-10` samt `TLS-4`, `TLS-5`, `TLS-6`.
 
-Börja med **`Q-10`** (agentregeln pekar på filer i den gitignorerade `temp/`) och **`TLS-6`**
-(`requirements.txt` saknar webbappens beroenden) – båda hindrar nästa agent från att komma igång
-på en ren klon. `Q-9` punkt 7 (två testmoduler som importerar från `temp/`) hör ihop med dem.
+✅ Samtliga punkter genomförda:
+- `Q-1`: `/api/user/profile/refresh` endpoint med fallback & databas-aggregering, uppdaterad UI-text och docstrings.
+- `Q-2`: Session-chatthistorik bevaras per aktiv session, hälsokontext skickas via `garmin_context` utan att förorena historiken.
+- `Q-3` & `Q-4`: Azure OpenAI validerar `model`/`azure_deployment` med begripligt felmeddelande, `azure_deployment` skickas som model-parameter.
+- `Q-5`: Kodblocksindentering och tabellformatering bevaras via `_clean_response`.
+- `Q-6`: Vid AI-anropsfel rullas användarmeddelandet tillbaka så alternerande roller bibehålls.
+- `Q-7`: Konfigurerad `ollama_base_url` visas i Ollama-felsökningsmeddelandet.
+- `Q-8`: Dubblett-e-post ger `ValueError("E-postadressen är redan registrerad.")` och HTTP 400 utan råa databasdetaljer.
+- `Q-9`: Återställningsnyckelns entropi (200 bitar) dokumenterad sanningsenligt, Mojibake-symboler fixade, `get_db_conn` returnerar None säkert vid fel, `session.dek` kopieras via bytearray för att förhindra aliasing, `delete_account` kräver och validerar `current_password`, testisolering för desktop-moduler via `pytest.importorskip`.
+- `Q-10`: `.agents/rules/compile.md` uppdaterad för webbapplikation med pytest och git-flöde.
+- `TLS-4`: HTTPS stöds i `normalize_ollama_url` med default port 443; varning loggas vid okrypterad HTTP till icke-loopback.
+- `TLS-5`: Chart.js pinnad till `4.4.8` med SRI sha384-hash och `crossorigin="anonymous"`.
+- `TLS-6`: `requirements.txt` uppdaterad med alla webbberoenden; desktopberoenden flyttade till `requirements-desktop.txt`.
+
 
 ---
 
@@ -419,7 +430,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-1: `/api/user/profile/fetch_external` hämtar inget externt
+### [x] Q-1: `/api/user/profile/fetch_external` hämtar inget externt (åtgärdad med /api/user/profile/refresh & databasaggregering)
 - **Fil:** [server.py:692-701](server.py), [profile_sync.py:14-20](profile_sync.py), [static/app.js:1232](static/app.js)
 - **Problem:** `fetch_external_profile_metrics` anropas alltid som `fetch_external_profile_metrics(db=db)` – parametrarna `garmin_handler`, `fitbit_handler`, `strava_handler` och `withings_handler` skickas **aldrig** in från någon plats i repot (`grep` bekräftar att ingen av handlarna instansieras i webbvägen). Hela Garmin/Fitbit/Strava/Withings-logiken i [profile_sync.py:77-192](profile_sync.py) är död kod, och endpointen läser i praktiken bara den lokala databasen – trots att namnet, docstringen och knappen i UI:t lovar något annat. `sources`-listan i svaret innehåller bara `"Databas"`.
 - **Åtgärd:** Välj en linje och genomför den fullt ut:
@@ -429,7 +440,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-2: Webbchatten har inget konversationsminne och saknar hälsokontext
+### [x] Q-2: Webbchatten har inget konversationsminne och saknar hälsokontext (åtgärdad: chatthistorik per session & garmin_context)
 - **Fil:** [server.py:590-631](server.py)
 - **Problem:** `AIClient` skapas på nytt i varje request ([server.py:607](server.py)), så `conversation_history` är alltid tom – hela det glidande fönstret från `P1-1` är verkningslöst i webbläget och AI:n minns ingenting mellan frågor. Dessutom anropas `client.chat(prompt)` utan `garmin_context`-argumentet; kontexten klistras i stället in i `prompt` ([server.py:601](server.py)), vilket betyder att den **sparas i historiken** – precis det `P1-1` löste. Kontexten som byggs är dessutom mycket tunnare än desktopversionens: tre rader med antal aktiviteter och senaste sömn ([server.py:594-599](server.py)).
 - **Åtgärd:**
@@ -440,7 +451,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-3: `self.model.lower()` kraschar för Azure utan explicit modell
+### [x] Q-3: `self.model.lower()` kraschar för Azure utan explicit modell (åtgärdad med modellvalidering och (self.model or '').lower())
 - **Fil:** [ai_client.py:457](ai_client.py), [ai_client.py:91-95](ai_client.py)
 - **Problem:** `PROVIDERS['azure']['default_model']` är `None` ([ai_client.py:38](ai_client.py)). Skapas klienten utan `model` blir `self.model = None`, och `'qwen' in self.model.lower()` kastar `AttributeError`. Felet fångas visserligen av det breda `except` i `chat()` ([ai_client.py:307](ai_client.py)) men presenteras då som ett AI-fel i stället för ett konfigurationsfel.
 - **Åtgärd:** Validera i `__init__` att `self.model` är satt (kasta `ValueError` med tydlig text för Azure), och använd `(self.model or '').lower()` som skydd.
@@ -448,7 +459,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-4: `self.azure_deployment` sätts men används aldrig
+### [x] Q-4: `self.azure_deployment` sätts men används aldrig (åtgärdad: azure_deployment kopplad till model)
 - **Fil:** [ai_client.py:125-141](ai_client.py) (`_init_azure`), [ai_client.py:442](ai_client.py)
 - **Problem:** `_init_azure` sparar `self.azure_deployment = azure_deployment` ([ai_client.py:133](ai_client.py)), men `_call_openai_compatible` skickar `model=self.model`. För Azure är deployment-namnet det som ska skickas. I dag råkar det fungera eftersom `azure_deployment` defaultar till `self.model`, men skickar anroparen ett avvikande deployment-namn ignoreras det tyst.
 - **Åtgärd:** Använd `getattr(self, 'azure_deployment', None) or self.model` i `_call_openai_compatible`, eller ta bort attributet helt.
@@ -456,7 +467,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-5: `re.sub(r' +', ' ', content)` plattar ut AI-svarens formatering
+### [x] Q-5: `re.sub(r' +', ' ', content)` plattar ut AI-svarens formatering (åtgärdad: _clean_response bevarar kodblock & indentering)
 - **Fil:** [ai_client.py:460-461](ai_client.py)
 - **Problem:** Efterbehandlingen kollapsar **all** upprepad blanksteg i svaret – inte bara dubbla mellanslag i löptext, utan också indentering i kodblock, punktlistor och tabeller. Systemprompten ber uttryckligen om strukturerade svar med rubriker och listor ([ai_client.py:265-274](ai_client.py)), vilket den här raden delvis förstör.
 - **Åtgärd:** Begränsa normaliseringen till rader som inte är kod/listor, eller ta bort den. Behåll `re.sub(r'=\s*\\?"\$[\d.]+\\?"', ...)` om den löser ett känt problem – men dokumentera vilket.
@@ -464,7 +475,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-6: Misslyckat AI-anrop lämnar historiken i ogiltigt tillstånd
+### [x] Q-6: Misslyckat AI-anrop lämnar historiken i ogiltigt tillstånd (åtgärdad: rollback av användarmeddelande vid fel)
 - **Fil:** [ai_client.py:274-310](ai_client.py)
 - **Problem:** Användarmeddelandet läggs till i `conversation_history` ([ai_client.py:274-277](ai_client.py)) **innan** anropet görs. Kastar anropet returneras ett felmeddelande utan att något assistentsvar läggs till ([ai_client.py:307](ai_client.py) och framåt) – historiken innehåller då två `user`-meddelanden i rad. Anthropics API kräver alternerande roller och avvisar det i nästa tur, så ett övergående fel blir permanent tills `reset_conversation()` körs.
 - **Åtgärd:** Ta bort det senaste användarmeddelandet ur historiken i felgrenen, alternativt lägg till felmeddelandet som assistentsvar.
@@ -472,7 +483,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-7: Ollama-felmeddelandet visar fel adress
+### [x] Q-7: Ollama-felmeddelandet visar fel adress (åtgärdad: self.ollama_base_url sparas och visas)
 - **Fil:** [ai_client.py:331-338](ai_client.py)
 - **Problem:** Felmeddelandet vid anslutningsfel skriver `self.PROVIDERS['ollama']['base_url']` – den **hårdkodade** `http://localhost:11434/v1` – i stället för den URL klienten faktiskt konfigurerats med via `normalize_ollama_url` ([ai_client.py:213-222](ai_client.py)). En användare med Ollama på `192.168.1.50` får felsökningsråd för fel maskin.
 - **Åtgärd:** Spara den normaliserade URL:en på instansen (`self.ollama_base_url`) i `_init_ollama` och använd den i felmeddelandet.
@@ -480,7 +491,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-8: Dubblett-e-post ger HTTP 500 i stället för 400
+### [x] Q-8: Dubblett-e-post ger HTTP 500 i stället för 400 (åtgärdad: kontroll och ValueError med 400-svar)
 - **Fil:** [auth.py:160-178](auth.py) (`register_user`), [server.py:329-333](server.py)
 - **Problem:** `users.email` har `UNIQUE`-constraint ([init_mariadb.sql:10](init_mariadb.sql)), men `register_user` kontrollerar inte om adressen redan finns. `IntegrityError` är inget `ValueError`, så den fångas av det breda `except Exception` ([server.py:332](server.py)) och blir ett 500-svar med rå databastext i `detail` – både ett dåligt användarmeddelande och ett litet informationsläckage.
 - **Åtgärd:**
@@ -490,21 +501,21 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] Q-9: Diverse mindre fynd
+### [x] Q-9: Diverse mindre fynd (samtliga delpunkter åtgärdade eller motiverade)
 - **Fil:** flera
 - **Problem & åtgärd:**
-  1. **Återställningsnyckeln är 200 bitar, inte 256.** [crypto.py:92-104](crypto.py) – funktionen heter `generate_recovery_key`, docstringen säger 256 bitar, men `b32[:40]` kapar till 40 Base32-tecken = 200 bitar. Fortfarande säkert, men dokumentationen stämmer inte. **Åtgärd:** rätta docstringen (eller använd 52 tecken).
-  2. **Mojibake i loggsträngar.** [garmin_handler.py](garmin_handler.py) innehåller 6 strängar med `âœ…`/`ðŸ` – UTF-8 som avkodats som latin-1. **Åtgärd:** ersätt med korrekta tecken.
-  3. **`get_db_conn` returnerar aldrig `None`.** [server.py:118-123](server.py) – ändå testar anroparna `if conn:` ([server.py:679](server.py), [server.py:713](server.py), [server.py:741](server.py)) och har else-grenar som är död kod. **Åtgärd:** ta bort de meningslösa kontrollerna, eller låt funktionen faktiskt kunna returnera `None` och hantera det.
-  4. **Aliasing av DEK vid samtidig utloggning.** [server.py:386](server.py) – `session.clear()` nollar den `bytearray` som `bind_user_db` redan delat ut till en pågående request i en annan tråd. Osannolikt men reellt. **Åtgärd:** kopiera DEK:en in i `GarminDatabase` i stället för att dela referensen.
-  5. **`delete_account` kräver inget lösenord.** [server.py:736-751](server.py) – till skillnad från `change_password` och `rotate_recovery_key`. **Åtgärd:** kräv `current_password` för en irreversibel operation.
-  6. **Rate-limiting är process-lokal.** [auth.py:98-122](auth.py) – med flera Uvicorn-workers multipliceras gränsen med antalet workers. **Åtgärd:** samordna med `S-7`-lösningen (räknare i databasen).
-  7. **Två testmoduler refererar till `temp/`.** [tests/test_withings_handler.py:108-112](tests/test_withings_handler.py) importerar `HealthChatDesktop` och [tests/test_charts_view_tabs.py:4-9](tests/test_charts_view_tabs.py) importerar `charts_view` + `tkinter` – båda modulerna flyttades till den gitignorerade `temp/` i `33ae88d`. Det första testet **fallerar** på en ren klon, det andra kan inte ens samlas in utan `tkinter`. Felet fanns före denna genomgång (verifierat mot `HEAD`). **Åtgärd:** flytta de desktopberoende testerna till samma plats som koden, eller markera dem med `pytest.importorskip` så att sviten är grön på en ren klon.
+  1. **Återställningsnyckeln är 200 bitar, inte 256.** [crypto.py:92-104](crypto.py) – funktionen heter `generate_recovery_key`, docstringen säger 256 bitar, men `b32[:40]` kapar till 40 Base32-tecken = 200 bitar. Fortfarande säkert, men dokumentationen stämmer inte. **Åtgärd:** ✅ docstring rättad till 200 bitar (40 Base32-tecken).
+  2. **Mojibake i loggsträngar.** [garmin_handler.py](garmin_handler.py) innehåller 6 strängar med `âœ…`/`ðŸ` – UTF-8 som avkodats som latin-1. **Åtgärd:** ✅ ersatt med korrekta emojis (`✅`, `❌`).
+  3. **`get_db_conn` returnerar aldrig `None`.** [server.py:118-123](server.py) – ändå testar anroparna `if conn:` ([server.py:679](server.py), [server.py:713](server.py), [server.py:741](server.py)) och har else-grenar som är död kod. **Åtgärd:** ✅ `get_db_conn` fångar anslutningsfel och returnerar `None` säkert; `if conn:` fyller nu sin funktion vid fel/mockning.
+  4. **Aliasing av DEK vid samtidig utloggning.** [server.py:386](server.py) – `session.clear()` nollar den `bytearray` som `bind_user_db` redan delat ut till en pågående request i en annan tråd. Osannolikt men reellt. **Åtgärd:** ✅ `bind_user_db` kopierar DEK:en (`bytearray(session.dek)`) så att referenser inte delas.
+  5. **`delete_account` kräver inget lösenord.** [server.py:736-751](server.py) – till skillnad från `change_password` och `rotate_recovery_key`. **Åtgärd:** ✅ `auth.delete_user_account` och `/api/user/delete_account` kräver och verifierar `current_password`.
+  6. **Rate-limiting är process-lokal.** [auth.py:98-122](auth.py) – med flera Uvicorn-workers multipliceras gränsen med antalet workers. **Åtgärd:** I enlighet med S-13 kör HealthChat med 1 Uvicorn-worker (`--workers 1`), vilket gör process-lokal rate limiting fulltäckande per nod.
+  7. **Två testmoduler refererar till `temp/`.** [tests/test_withings_handler.py:108-112](tests/test_withings_handler.py) importerar `HealthChatDesktop` och [tests/test_charts_view_tabs.py:4-9](tests/test_charts_view_tabs.py) importerar `charts_view` + `tkinter` – båda modulerna flyttades till den gitignorerade `temp/` i `33ae88d`. **Åtgärd:** ✅ markerade med `pytest.importorskip` så hela testsviten kör och passerar på rena kloner utan `--ignore`.
 - **Acceptanskriterier:** Varje delpunkt åtgärdad eller uttryckligen avfärdad med motivering i denna fil.
 
 ---
 
-### [ ] Q-10: `.agents/rules/compile.md` refererar till filer som inte längre finns
+### [x] Q-10: `.agents/rules/compile.md` refererar till filer som inte längre finns (uppdaterad till webb-arbetsflöde)
 - **Fil:** [.agents/rules/compile.md](.agents/rules/compile.md)
 - **Problem:** Regeln kräver `pyinstaller --noconfirm HealthChatDesktop_optimized.spec` och `sign_executable.ps1` efter varje kodändring. Båda filerna flyttades till `temp/` i commit `33ae88d` och `temp/` är gitignorerad – stegen går alltså inte att utföra i repot längre. En agent som följer regeln bokstavligt fastnar.
 - **Åtgärd:** Uppdatera regeln till webbapplikationens verklighet: kör `pytest`, verifiera att `uvicorn server:app` startar, och beskriv desktop-bygget som valfritt/historiskt.
@@ -616,7 +627,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] TLS-4: Ollama-trafiken går alltid över `http://`
+### [x] TLS-4: Ollama-trafiken går alltid över `http://` (åtgärdad: HTTPS-stöd & varning vid okrypterad fjärrtrafik)
 - **Fil:** [ai_client.py:196-211](ai_client.py) (`normalize_ollama_url`), [ai_client.py:61](ai_client.py)
 - **Problem:** `normalize_ollama_url` tvingar `http://` på allt som saknar schema ([ai_client.py:203-204](ai_client.py)), och bygger alltid om URL:en till `{scheme}://{host}:{port}/v1`. Pekar användaren Ollama mot en maskin i nätverket – vilket docstringens egna exempel (`192.168.107.15`) uppmuntrar till – går **hela hälsokontexten och AI-svaret** i klartext över LAN. Mot `localhost` är det oproblematiskt.
 - **Åtgärd:**
@@ -630,7 +641,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] TLS-5: Chart.js laddas opinnat från CDN utan SRI
+### [x] TLS-5: Chart.js laddas opinnat från CDN utan SRI (åtgärdad: 4.4.8 med sha384 SRI)
 - **Fil:** [static/index.html:12](static/index.html)
 - **Problem:** `<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>` – transporten är krypterad, men versionen är **opinnad** (senaste vid varje sidladdning) och saknar `integrity`-attribut. En komprometterad eller utbytt CDN-resurs kör godtycklig kod i en sida som visar hälsodata och håller en inloggad session. Det gör också `Content-Security-Policy` i `TLS-2` svagare, eftersom `cdn.jsdelivr.net` måste tillåtas.
 - **Åtgärd:** Antingen (a) lägg Chart.js lokalt under `static/` – då kan CSP:n bli `default-src 'self'` – eller (b) pinna en exakt version och lägg till `integrity="sha384-…" crossorigin="anonymous"`.
@@ -638,7 +649,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] TLS-6: `requirements.txt` saknar webbapplikationens beroenden
+### [x] TLS-6: `requirements.txt` saknar webbapplikationens beroenden (åtgärdad: delad i webb och desktop)
 - **Fil:** [requirements.txt](requirements.txt)
 - **Problem:** Filen listar `garth`, `tk`, `pyinstaller` och desktopberoenden – men **varken `fastapi`, `uvicorn`, `pydantic` eller `email-validator`**, trots att [server.py:17-21](server.py) importerar alla fyra (`EmailStr` kräver `email-validator`). Webbappen går alltså inte att installera reproducerbart från repot, och man kan inte pinna den uvicorn-version som TLS-/proxy-uppsättningen i `TLS-1` förutsätter. Filens rubrik säger dessutom fortfarande "HealthChat **Desktop** v4.1.0".
 - **Åtgärd:**

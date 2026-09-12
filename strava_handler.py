@@ -50,20 +50,22 @@ class StravaHandler:
 
     def load_stored_tokens(self) -> bool:
         """Load stored OAuth tokens from secret_store or fallback disk."""
-        try:
-            import secret_store
-            at = secret_store.get_secret("strava_access_token")
-            rt = secret_store.get_secret("strava_refresh_token")
-            cs = secret_store.get_secret("strava_client_secret")
-            if at and rt:
-                self.access_token = at
-                self.refresh_token = rt
-                if cs:
-                    self.client_secret = cs
-                self._authenticated = True
-                return True
-        except Exception as ss_err:
-            logger.debug(f"Could not load Strava tokens from secret_store: {ss_err}")
+        is_default_dir = (self.token_store_dir.resolve() == (Path.home() / ".healthchat").resolve())
+        if is_default_dir:
+            try:
+                import secret_store
+                at = secret_store.get_secret("strava_access_token")
+                rt = secret_store.get_secret("strava_refresh_token")
+                cs = secret_store.get_secret("strava_client_secret")
+                if at and rt:
+                    self.access_token = at
+                    self.refresh_token = rt
+                    if cs:
+                        self.client_secret = cs
+                    self._authenticated = True
+                    return True
+            except Exception as ss_err:
+                logger.debug(f"Could not load Strava tokens from secret_store: {ss_err}")
 
         if not self.token_file.exists():
             return False
@@ -78,14 +80,15 @@ class StravaHandler:
             if self.access_token and self.refresh_token:
                 self._authenticated = True
                 # Migrate to secret_store
-                try:
-                    import secret_store
-                    secret_store.set_secret("strava_access_token", self.access_token)
-                    secret_store.set_secret("strava_refresh_token", self.refresh_token)
-                    if self.client_secret:
-                        secret_store.set_secret("strava_client_secret", self.client_secret)
-                except Exception:
-                    pass
+                if is_default_dir:
+                    try:
+                        import secret_store
+                        secret_store.set_secret("strava_access_token", self.access_token)
+                        secret_store.set_secret("strava_refresh_token", self.refresh_token)
+                        if self.client_secret:
+                            secret_store.set_secret("strava_client_secret", self.client_secret)
+                    except Exception:
+                        pass
                 return True
         except Exception as e:
             logger.error(f"Failed to read Strava tokens: {e}")
@@ -102,17 +105,19 @@ class StravaHandler:
             if tokens.get("client_secret"):
                 self.client_secret = tokens.get("client_secret")
 
-            # Persist to secret_store
-            try:
-                import secret_store
-                if self.access_token:
-                    secret_store.set_secret("strava_access_token", self.access_token)
-                if self.refresh_token:
-                    secret_store.set_secret("strava_refresh_token", self.refresh_token)
-                if self.client_secret:
-                    secret_store.set_secret("strava_client_secret", self.client_secret)
-            except Exception as ss_err:
-                logger.debug(f"Could not save Strava tokens to secret_store: {ss_err}")
+            # Persist to secret_store if default store dir
+            is_default_dir = (self.token_store_dir.resolve() == (Path.home() / ".healthchat").resolve())
+            if is_default_dir:
+                try:
+                    import secret_store
+                    if self.access_token:
+                        secret_store.set_secret("strava_access_token", self.access_token)
+                    if self.refresh_token:
+                        secret_store.set_secret("strava_refresh_token", self.refresh_token)
+                    if self.client_secret:
+                        secret_store.set_secret("strava_client_secret", self.client_secret)
+                except Exception as ss_err:
+                    logger.debug(f"Could not save Strava tokens to secret_store: {ss_err}")
 
             # Safe disk fallback with 0o600 permissions
             tokens["client_id"] = self.client_id

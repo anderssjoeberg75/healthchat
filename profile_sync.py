@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger("profile_sync")
 
 
-def fetch_external_profile_metrics(
+def refresh_profile_metrics(
     db=None,
     garmin_handler=None,
     fitbit_handler=None,
@@ -21,6 +21,8 @@ def fetch_external_profile_metrics(
     """
     Query active connected service handlers and local DB history to extract the latest available
     profile metrics (sex, height_cm, age, weight_kg, resting_hr, max_hr).
+    In web mode when external service handlers are not instantiated per request, this aggregates
+    and refreshes the latest available metrics from the local encrypted database history.
 
     Returns a dict:
     {
@@ -190,3 +192,7 @@ def fetch_external_profile_metrics(
         "metrics": merged_metrics,
         "sources": unique_sources
     }
+
+
+# Backward-compatible alias (Q-1)
+fetch_external_profile_metrics = refresh_profile_metrics

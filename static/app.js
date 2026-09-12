@@ -1352,16 +1352,16 @@ async function handleUpdateProfile(event) {
 
 async function handleFetchExternalProfile() {
   const statusMsg = document.getElementById('prof-status-msg');
-  if (statusMsg) statusMsg.textContent = '⏳ Hämtar data från Garmin, Strava, Fitbit, Withings...';
+  if (statusMsg) statusMsg.textContent = '⏳ Läser in senaste mått från hälsodatabasen...';
   try {
-    const res = await fetch('/api/user/profile/fetch_external');
-    if (!res.ok) throw new Error('Failed to fetch external profile metrics');
+    const res = await fetch('/api/user/profile/refresh');
+    if (!res.ok) throw new Error('Failed to fetch profile metrics');
     const data = await res.json();
     const metrics = data.metrics || {};
     const sources = data.sources || [];
 
     if (Object.keys(metrics).length === 0) {
-      if (statusMsg) statusMsg.textContent = 'ℹ️ Inga externa profilmått hittades från Garmin, Strava, Fitbit eller Withings.';
+      if (statusMsg) statusMsg.textContent = 'ℹ️ Inga hälsomått hittades i sparad hälsodata.';
       return;
     }
 
@@ -1521,9 +1521,19 @@ async function handleDeleteAccount() {
     return;
   }
 
+  const password = prompt('Ange ditt lösenord för att bekräfta permanent radering av kontot:');
+  if (!password) {
+    alert('Raderingen avbröts – lösenord krävs.');
+    return;
+  }
+
   try {
     const res = await fetch('/api/user/delete_account', {
-      method: 'DELETE'
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ current_password: password })
     });
     if (res.ok) {
       alert('Ditt konto och all din hälsodata har raderats permanent.');

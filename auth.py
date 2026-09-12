@@ -148,6 +148,14 @@ def register_user(
     recovery_key = crypto.generate_recovery_key()
     rec_salt, rec_nonce, rec_wrapped = crypto.wrap_dek_for_recovery(recovery_key, dek)
 
+    # Check if email is already registered (Q-8)
+    is_mariadb = hasattr(db_conn, "ping")
+    placeholder = "%s" if is_mariadb else "?"
+    with _db_cursor(db_conn) as cur:
+        cur.execute(f"SELECT id FROM users WHERE email = {placeholder}", (clean_email,))
+        if cur.fetchone():
+            raise ValueError("E-postadressen är redan registrerad.")
+
     # Hash password with Argon2id
     pwd_hash = hash_password(password)
 
@@ -157,13 +165,13 @@ def register_user(
     if initial_profile:
         profile_nonce, enc_profile = crypto.encrypt_payload(dek, initial_profile)
 
-    with db_conn.cursor() as cur:
-        sql = """
+    with _db_cursor(db_conn) as cur:
+        sql = f"""
         INSERT INTO users (
             email, password_hash, kdf_salt, wrapped_dek, dek_nonce,
             recovery_wrapped_dek, recovery_salt, recovery_nonce,
             encrypted_profile, profile_nonce
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
         """
         cur.execute(sql, (
             clean_email, pwd_hash, salt, wrapped_dek, dek_nonce,
@@ -478,14 +486,25 @@ def _db_cursor(conn):
             pass
 
 
-def delete_user_account(db_conn, user_id: int):
+def delete_user_account(db_conn, user_id: int, current_password: Optional[str] = None):
     """
-    Permanently delete user account, sessions, and all cascading health data (S-16).
+    Permanently delete user account, sessions, and all cascading health data (S-16, Q-9 p5).
+    If current_password is provided, verifies it before deletion and raises ValueError on mismatch.
     """
     email = None
     is_mariadb = hasattr(db_conn, "ping")
     placeholder = "%s" if is_mariadb else "?"
     with _db_cursor(db_conn) as cur:
+        # If current_password is provided, verify it first (Q-9 p5)
+        if current_password is not None:
+            cur.execute(f"SELECT password_hash FROM users WHERE id = {placeholder}", (user_id,))
+            pw_row = cur.fetchone()
+            if not pw_row:
+                raise ValueError("Användaren hittades inte.")
+            stored_hash = pw_row["password_hash"] if isinstance(pw_row, dict) else pw_row[0]
+            if not verify_password(stored_hash, current_password):
+                raise ValueError("Felaktigt lösenord.")
+
         # Fetch email before deletion to clean up OS keyring (S-16)
         cur.execute(f"SELECT email FROM users WHERE id = {placeholder}", (user_id,))
         row = cur.fetchone()

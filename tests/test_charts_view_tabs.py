@@ -4,6 +4,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "temp"))
 import pytest
 from unittest.mock import MagicMock
+
+tkinter = pytest.importorskip("tkinter", reason="tkinter is required for desktop charts_view tests")
+pytest.importorskip("charts_view", reason="charts_view is archived in temp/")
 import tkinter as tk
 
 from charts_view import HealthChartsView

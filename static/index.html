@@ -9,7 +9,7 @@
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
   <link rel="stylesheet" href="/static/styles.css?v=8.0.0">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" integrity="sha384-T/4KgSWuZEPozpPz7rnnp/5lDSnpY1VPJCojf1S81uTHS1E38qgLfMgVsAeRCWc4" crossorigin="anonymous"></script>
 </head>
 <body>
   
@@ -527,7 +527,7 @@
 
               <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
                 <button type="submit" class="btn btn-primary">💾 Spara personliga mått</button>
-                <button type="button" class="btn btn-secondary" onclick="handleFetchExternalProfile()">🔄 Hämta från anslutna källor</button>
+                <button type="button" class="btn btn-secondary" onclick="handleFetchExternalProfile()">🔄 Uppdatera från sparad hälsodata</button>
               </div>
               <p id="prof-status-msg" style="margin-top:8px; font-size:0.85rem; font-weight:600; color:#16a34a;"></p>
             </form>

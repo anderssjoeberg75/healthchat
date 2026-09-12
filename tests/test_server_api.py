@@ -154,7 +154,7 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
     app.dependency_overrides[get_current_session] = lambda: dummy_session
     monkeypatch.setattr("server.bind_user_db", lambda *args, **kwargs: test_db)
     monkeypatch.setattr("server.get_db_conn", lambda *args, **kwargs: None)
-    monkeypatch.setattr("server.AIClient.chat", lambda self, prompt: "Det här är ett AI-svar med åäö.")
+    monkeypatch.setattr("server.AIClient.chat", lambda self, *args, **kwargs: "Det här är ett AI-svar med åäö.")
 
     try:
         res = client.post("/api/ai/chat", json={"message": "Hur mår jag?", "provider": "openai"})

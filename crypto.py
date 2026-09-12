@@ -92,7 +92,7 @@ def decrypt_payload(dek: bytes, ciphertext: bytes, nonce: bytes) -> Any:
 
 def generate_recovery_key() -> str:
     """
-    Generate a 256-bit recovery key formatted as grouped Base32.
+    Generate a 200-bit entropy recovery key formatted as grouped Base32 (Q-9).
     Format: 8 groups of 5 uppercase characters separated by hyphens (e.g. K7QF2-9MXTE-...)
     Total length: 47 chars (40 Base32 characters + 7 hyphens).
     """

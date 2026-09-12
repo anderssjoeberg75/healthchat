@@ -329,13 +329,13 @@ class GarminDataHandler:
                 logger.info(f"Calling garth.resume() with path: {str(self.token_store)}")
                 try:
                     garth.resume(str(self.token_store))
-                    logger.info("âœ… garth.resume() succeeded!")
+                    logger.info("✅ garth.resume() succeeded!")
                     # garth uses a mobile iPhone User-Agent for SSO auth, but Garmin's
                     # Connect API returns empty lists for mobile UAs on activity endpoints.
                     # Switch to a standard requests UA so data APIs return real results.
                     garth.client.sess.headers.update({'User-Agent': 'python-requests/2.32.3'})
                 except Exception as resume_ex:
-                    logger.error(f"âŒ garth.resume() failed: {type(resume_ex).__name__}: {resume_ex}")
+                    logger.error(f"❌ garth.resume() failed: {type(resume_ex).__name__}: {resume_ex}")
                     
                     # Try manual token loading
                     logger.info("Attempting manual token load...")
@@ -350,18 +350,17 @@ class GarminDataHandler:
                             # Load OAuth1 token
                             with open(oauth1_path, 'r') as f:
                                 oauth1_data = json.load(f)
-                            logger.info("âœ… Loaded OAuth1 token manually")
+                            logger.info("✅ Loaded OAuth1 token manually")
                             
                             # Load OAuth2 token
                             with open(oauth2_path, 'r') as f:
                                 oauth2_data = json.load(f)
-                            logger.info("âœ… Loaded OAuth2 token manually")
+                            logger.info("✅ Loaded OAuth2 token manually")
                             
                             # Set tokens in garth client
                             from garth.http import OAuth1Token, OAuth2Token
                             garth.client.oauth1_token = OAuth1Token(**oauth1_data)
                             garth.client.oauth2_token = OAuth2Token(**oauth2_data)
-                            logger.info("âœ… Manually loaded tokens into garth.client")
                             logger.info("✅ Manually loaded tokens into garth.client")
                             
                         except Exception as manual_load_error:
@@ -480,7 +479,7 @@ class GarminDataHandler:
                 # Save tokens
                 try:
                     garth.save(str(self.token_store))
-                    logger.info(f"âœ… Tokens saved to {self.token_store}")
+                    logger.info(f"✅ Tokens saved to {self.token_store}")
                 except Exception as save_err:
                     logger.warning(f"Could not save tokens: {save_err}")
 
@@ -545,7 +544,7 @@ class GarminDataHandler:
             # Save tokens
             try:
                 garth.save(str(self.token_store))
-                logger.info(f"âœ… Tokens saved to {self.token_store}")
+                logger.info(f"✅ Tokens saved to {self.token_store}")
             except Exception as save_err:
                 logger.warning(f"Could not save tokens (will re-auth next time): {save_err}")
             

@@ -109,6 +109,7 @@ def test_sync_profile_weight_from_db(tmp_path):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent / "temp"))
+    pytest.importorskip("HealthChatDesktop", reason="HealthChatDesktop is archived in temp/")
     from HealthChatDesktop import HealthChatApp
     test_db = GarminDatabase(db_path=tmp_path / "weight_sync_test.db")
     test_db.upsert_body_composition(

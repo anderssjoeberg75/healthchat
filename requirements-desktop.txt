@@ -1,0 +1,30 @@
+# HealthChat Desktop v4.1.0 Dependencies (Historical / Standalone GUI)
+
+# Core Application
+garth==0.4.46              # Garmin Connect API wrapper
+tk==0.1.0                  # Tkinter (usually included with Python)
+
+# Database & Security
+pymysql==1.2.0             # MariaDB/MySQL database driver
+dbutils==3.2.0             # Thread-safe database connection pool
+cryptography>=43.0.0       # AES-256-GCM envelope encryption
+argon2-cffi>=25.1.0        # Argon2id password & recovery key derivation
+keyring>=25.7.0            # OS Keyring (Windows Credential Manager / DPAPI)
+
+# AI Providers
+openai==1.58.1             # OpenAI, xAI, Azure OpenAI, and Ollama (OpenAI-compatible)
+anthropic==0.39.0          # Anthropic Claude API
+google-genai==0.3.0        # Google Gemini (new SDK)
+requests==2.32.3           # HTTP library for Ollama API calls
+
+# Document Generation
+python-docx==1.1.2         # Word document creation
+reportlab==4.2.5           # PDF generation
+Pillow==11.0.0             # Image processing
+
+# UI and Utilities
+ttkthemes==3.2.2           # Additional ttk themes (optional)
+
+# Build Tools
+pyinstaller==6.11.1        # Create executable
+Pillow==11.0.0

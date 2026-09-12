@@ -86,6 +86,7 @@ async def add_security_headers(request: Request, call_next):
 # In-memory active user sessions (S-13 Path A: DEK held strictly in memory, never in DB)
 _active_sessions: Dict[str, UserSession] = {}
 _session_expirations: Dict[str, datetime] = {}
+_session_chat_histories: Dict[str, List[Dict[str, str]]] = {}
 _sessions_lock = threading.Lock()
 
 SESSION_COOKIE_NAME = "healthchat_session"
@@ -105,6 +106,7 @@ def remove_active_session(session_id: str) -> Optional[UserSession]:
     """Remove and zeroize session from memory."""
     with _sessions_lock:
         _session_expirations.pop(session_id, None)
+        _session_chat_histories.pop(session_id, None)
         sess = _active_sessions.pop(session_id, None)
         if sess:
             sess.clear()
@@ -217,17 +219,23 @@ def get_db(require_mariadb: bool = True) -> GarminDatabase:
 
 
 def bind_user_db(session: UserSession, require_mariadb: bool = True) -> GarminDatabase:
-    """Create GarminDatabase bound to the authenticated user's DEK."""
+    """Create GarminDatabase bound to a copy of the authenticated user's DEK (Q-9 p4)."""
     db = GarminDatabase(require_mariadb=require_mariadb)
-    db.set_user_session(session.user_id, session.dek)
+    dek_copy = bytearray(session.dek) if session.dek else None
+    db.set_user_session(session.user_id, dek_copy)
     return db
 
 
 def get_db_conn(db: GarminDatabase):
-    """Get active database connection (MariaDB pool if available, otherwise SQLite fallback connection)."""
-    if db.is_mariadb and db.pool:
-        return db.get_mariadb_conn()
-    return db.get_connection()
+    """Get active database connection (MariaDB pool if available, otherwise SQLite fallback connection).
+    Returns None if connection cannot be established (Q-9 p3)."""
+    try:
+        if db.is_mariadb and db.pool:
+            return db.get_mariadb_conn()
+        return db.get_connection()
+    except Exception as e:
+        logger.warning(f"Failed to acquire db connection: {e}")
+        return None
 
 
 @app.on_event("startup")
@@ -479,7 +487,7 @@ def register(req: RegisterRequest, response: Response):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Registreringsfel: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Serverfel vid registrering: {e}")
+        raise HTTPException(status_code=500, detail="Serverfel vid registrering. Försök igen senare.")
     finally:
         if conn:
             try:
@@ -743,18 +751,28 @@ def get_dashboard_summary(
 import secret_store
 
 @app.post("/api/ai/chat")
-async def chat_stream(req: ChatRequest, session: UserSession = Depends(get_current_session)):
+async def chat_stream(
+    req: ChatRequest,
+    healthchat_session: Optional[str] = Cookie(None),
+    session: UserSession = Depends(get_current_session)
+):
     db = bind_user_db(session)
     activities = db.get_activities_history(30)
     sleep = db.get_sleep_history(7)
+    hrv = db.get_hrv_history(7)
+    body_comp = db.get_latest_body_composition() or {}
     
-    context_text = f"Användar-ID: {session.user_id}\n"
+    context_lines = [f"Användar-ID: {session.user_id}"]
+    if body_comp.get("weight_kg"):
+        context_lines.append(f"Vikt: {body_comp.get('weight_kg')} kg (Fett%: {body_comp.get('fat_ratio_pct', 'N/A')}%)")
     if activities:
-        context_text += f"Senaste aktiviteter (30d): {len(activities)} st. Senaste: {activities[0].get('activity_name', 'Träning')} ({activities[0].get('distance_km', 0)} km)\n"
+        context_lines.append(f"Senaste aktiviteter (30d): {len(activities)} st. Senaste: {activities[0].get('activity_name', 'Träning')} ({activities[0].get('distance_km', 0)} km, {activities[0].get('duration_min', 0)} min)")
     if sleep:
-        context_text += f"Senaste sömn: {sleep[-1].get('total_sleep_hours', 0)}h (Kvalitet: {sleep[-1].get('sleep_score', 'N/A')})\n"
+        context_lines.append(f"Senaste sömn: {sleep[-1].get('total_sleep_hours', 0)}h (Score: {sleep[-1].get('sleep_score', 'N/A')})")
+    if hrv:
+        context_lines.append(f"Senaste HRV: {hrv[-1].get('last_night_avg', 'N/A')} ms (Status: {hrv[-1].get('status', 'N/A')})")
     
-    prompt = f"Hälsokontext:\n{context_text}\nAnvändarens fråga: {req.message}"
+    garmin_context = "\n".join(context_lines)
     
     provider = (req.provider or "openai").lower()
     api_key = secret_store.get_secret(f"{provider}_api_key") or ""
@@ -767,11 +785,21 @@ async def chat_stream(req: ChatRequest, session: UserSession = Depends(get_curre
         ollama_base_url=ollama_url
     )
 
+    # Restore prior conversation history for this active session
+    if healthchat_session and healthchat_session in _session_chat_histories:
+        client.conversation_history = list(_session_chat_histories[healthchat_session])
+
     async def event_generator():
         try:
             # Execute AI call in thread pool to avoid blocking async looper
             loop = asyncio.get_event_loop()
-            response_text = await loop.run_in_executor(None, lambda: client.chat(prompt))
+            response_text = await loop.run_in_executor(
+                None, lambda: client.chat(req.message, garmin_context=garmin_context)
+            )
+
+            # Persist updated conversation history
+            if healthchat_session:
+                _session_chat_histories[healthchat_session] = list(client.conversation_history)
             
             # SSE Protocol contract with static/app.js:
             # - data: {"chunk": "<text>"} for streamed text pieces
@@ -851,10 +879,12 @@ def update_profile(
             conn.close()
 
 
+@app.get("/api/user/profile/refresh")
+@app.post("/api/user/profile/refresh")
 @app.get("/api/user/profile/fetch_external")
 @app.post("/api/user/profile/fetch_external")
 def fetch_external_profile(session: UserSession = Depends(get_current_session)):
-    """Fetch external profile metrics from Garmin, Fitbit, Strava, Withings, and local DB."""
+    """Fetch and refresh profile metrics from local encrypted health database history or connected sources (Q-1)."""
     db = bind_user_db(session)
     res = profile_sync.fetch_external_profile_metrics(db=db)
     return {
@@ -895,24 +925,37 @@ def rotate_recovery_key(req: RotateRecoveryKeyRequest, session: UserSession = De
             conn.close()
 
 
+class DeleteAccountRequest(BaseModel):
+    current_password: Optional[str] = None
+
+
 @app.delete("/api/user/delete_account")
 @app.post("/api/user/delete_account")
-def delete_account(response: Response, healthchat_session: Optional[str] = Cookie(None), session: UserSession = Depends(get_current_session)):
+def delete_account(
+    response: Response,
+    req: Optional[DeleteAccountRequest] = None,
+    healthchat_session: Optional[str] = Cookie(None),
+    session: UserSession = Depends(get_current_session)
+):
     db = bind_user_db(session)
     conn = get_db_conn(db)
     try:
         if conn:
-            auth.delete_user_account(conn, session.user_id)
+            pw = req.current_password if req else None
+            auth.delete_user_account(conn, session.user_id, current_password=pw)
         if healthchat_session:
             remove_active_session(healthchat_session)
             delete_session_from_db(conn, healthchat_session)
-        response.delete_cookie(
-            key=SESSION_COOKIE_NAME,
-            httponly=True,
-            secure=get_cookie_secure(),
-            samesite="lax"
-        )
+        if response:
+            response.delete_cookie(
+                key=SESSION_COOKIE_NAME,
+                httponly=True,
+                secure=get_cookie_secure(),
+                samesite="lax"
+            )
         return {"status": "success", "message": "Konto raderat!"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         if conn:
             conn.close()

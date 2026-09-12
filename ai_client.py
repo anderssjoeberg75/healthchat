@@ -93,8 +93,11 @@ class AIClient:
         if model:
             self.model = model
         else:
-            self.model = provider_config['default_model']
-        
+            self.model = provider_config.get('default_model')
+
+        if provider == 'azure' and not self.model and not kwargs.get('azure_deployment'):
+            raise ValueError("Azure OpenAI kräver att antingen 'model' eller 'azure_deployment' anges")
+
         # Initialize provider-specific client
         if provider == 'xai':
             self.client = self._init_xai()
@@ -123,14 +126,17 @@ class AIClient:
         return OpenAI(api_key=self.api_key)
     
     def _init_azure(self, kwargs):
-        """Initialize Azure OpenAI client."""
+        """Initialize Azure OpenAI client (Q-3, Q-4)."""
         azure_endpoint = kwargs.get('azure_endpoint')
         if not azure_endpoint:
             raise ValueError("Azure OpenAI requires 'azure_endpoint' parameter")
         
         # For Azure, model is actually the deployment name
-        azure_deployment = kwargs.get('azure_deployment', self.model)
+        azure_deployment = kwargs.get('azure_deployment') or self.model
+        if not azure_deployment:
+            raise ValueError("Azure OpenAI requires 'azure_deployment' or 'model' parameter")
         self.azure_deployment = azure_deployment
+        self.model = azure_deployment
         
         api_version = kwargs.get('azure_api_version', '2024-02-15-preview')
         
@@ -205,15 +211,21 @@ class AIClient:
 
         parsed = urlparse(url)
         host = parsed.hostname or 'localhost'
-        port = parsed.port or 11434
         scheme = parsed.scheme or 'http'
+        default_port = 443 if scheme == 'https' else 11434
+        port = parsed.port or default_port
+
+        # TLS-4: Warn when using unencrypted HTTP to non-loopback host
+        if scheme == 'http' and host not in ('localhost', '127.0.0.1', '::1'):
+            logger.warning(f"Ollama-trafik till {host} går okrypterad över HTTP.")
 
         return f"{scheme}://{host}:{port}/v1"
 
     def _init_ollama(self, kwargs):
-        """Initialize Ollama local/network client using OpenAI-compatible API."""
+        """Initialize Ollama local/network client using OpenAI-compatible API (TLS-4, Q-7)."""
         raw_url = kwargs.get('ollama_base_url') or os.environ.get('OLLAMA_BASE_URL') or self.PROVIDERS['ollama']['base_url']
         base_url = self.normalize_ollama_url(raw_url)
+        self.ollama_base_url = base_url
         logger.info(f"Connecting to Ollama server at: {base_url}")
         return OpenAI(
             api_key='ollama',  # Ollama ignores the key but OpenAI client requires one
@@ -305,6 +317,10 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
             return response
             
         except Exception as e:
+            # Q-6: Roll back the last user message so history retains valid alternating roles
+            if self.conversation_history and self.conversation_history[-1].get('role') == 'user':
+                self.conversation_history.pop()
+
             error_msg = f"Error calling {self.PROVIDERS[self.provider]['name']}: {str(e)}"
             logger.error(error_msg)
             
@@ -324,8 +340,9 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
             
             # Ollama-specific errors (connection refused = Ollama not running)
             if self.provider == 'ollama' and ('connection' in error_str or 'refused' in error_str or 'connect' in error_str):
+                ollama_target = getattr(self, 'ollama_base_url', None) or self.PROVIDERS['ollama']['base_url']
                 return (f"🔌 Ollama Not Running\n\n"
-                       f"Could not connect to Ollama at {self.PROVIDERS['ollama']['base_url']}.\n\n"
+                       f"Could not connect to Ollama at {ollama_target}.\n\n"
                        f"To fix this:\n"
                        f"1. Make sure Ollama is installed (https://ollama.com)\n"
                        f"2. Start Ollama: run 'ollama serve' in a terminal\n"
@@ -454,13 +471,32 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
         )
         
         content = response.choices[0].message.content or ""
-        if self.provider == 'ollama' or 'qwen' in self.model.lower():
+        return self._clean_response(content)
+
+    def _clean_response(self, content: str) -> str:
+        """Clean and normalize response text while preserving code blocks and indentation (Q-5)."""
+        if not content:
+            return ""
+        if self.provider == 'ollama' or 'qwen' in (self.model or '').lower():
             import re
             content = re.sub(r'[\u4e00-\u9fff]+', '', content)
         import re
         content = re.sub(r'=\s*\\?"\$[\d.]+\\?"', '', content)
-        content = re.sub(r' +', ' ', content)
-        return content.strip()
+        
+        # Normalize double spaces in regular text without destroying leading indentation / table formatting (Q-5)
+        lines = content.split('\n')
+        normalized_lines = []
+        in_code_block = False
+        for line in lines:
+            if line.strip().startswith('```'):
+                in_code_block = not in_code_block
+                normalized_lines.append(line)
+            elif in_code_block or line.startswith('    ') or line.startswith('\t') or '|' in line:
+                normalized_lines.append(line)
+            else:
+                normalized_lines.append(re.sub(r'  +', ' ', line))
+        return '\n'.join(normalized_lines).strip()
+
         
     def _call_anthropic(self, system_prompt: str, current_user_content: str) -> str:
         """Call Anthropic using native SDK with full history memory and max_tokens=4000."""
@@ -622,3 +658,7 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                     logger.debug(f"Could not fetch Ollama models from {h}/v1/models: {e}")
                 
         return fallback
+
+
+# Module-level alias
+normalize_ollama_url = AIClient.normalize_ollama_url
