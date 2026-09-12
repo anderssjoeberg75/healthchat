@@ -104,6 +104,21 @@ CREATE TABLE IF NOT EXISTS calorie_burn (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 3. External Data Sources (Strava, Garmin Connect, Withings, Fitbit)
+-- Credentials and OAuth tokens are encrypted with the user's own DEK (S-13).
+CREATE TABLE IF NOT EXISTS user_datasources (
+    user_id BIGINT NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    encrypted_payload LONGBLOB NOT NULL,
+    nonce VARBINARY(32) NOT NULL,
+    connected TINYINT(1) NOT NULL DEFAULT 0,
+    last_sync_at DATETIME NULL,
+    last_sync_count INT NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, provider),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS sync_metadata (
     user_id BIGINT NOT NULL,
     `key` VARCHAR(100) NOT NULL,

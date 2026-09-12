@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Datakallor page (web)**: A new "Datakallor" tab next to "Profil & Konto" where
+  each user connects and configures Strava, Garmin Connect, Withings and Fitbit
+  themselves, mirroring the connect dialogs in the desktop app.
+  - OAuth 2.0 sources (Strava, Withings, Fitbit) show the exact callback URL to
+    paste into the developer portal, take Client ID / Client Secret and run the
+    authorization round trip with CSRF state (plus PKCE S256 for Fitbit).
+  - Garmin Connect uses email/password with an MFA field that appears when Garmin
+    asks for a one-time code.
+  - Per-source sync with live progress, last-sync timestamp and disconnect.
+  - Credentials and OAuth tokens are stored per user in a new `user_datasources`
+    table, encrypted with the user's own DEK (AES-256-GCM), and are never
+    returned by the API.
+
 - **Daily Calorie Burn card**: A new dashboard card under the weight card shows
   an approximate estimate of how many calories you have burned *so far today*.
   - Combines three transparent components: resting burn (BMR, pro-rated to the

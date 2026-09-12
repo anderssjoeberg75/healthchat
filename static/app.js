@@ -13,11 +13,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkSession();
 });
 
-// --- AUTHENTICATION ---
+/// --- AUTHENTICATION & API HELPERS ---
+
+function getAuthHeaders(extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  const token = sessionStorage.getItem('healthchat_session');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+function apiFetch(url, options = {}) {
+  const headers = getAuthHeaders(options.headers || {});
+  return fetch(url, { ...options, headers });
+}
 
 async function checkSession() {
   try {
-    const res = await fetch('/api/auth/me');
+    const res = await apiFetch('/api/auth/me');
     if (res.ok) {
       currentUser = await res.json();
       onAuthSuccess();
@@ -90,6 +104,9 @@ async function handleLogin(event) {
     }
     if (res.ok) {
       currentUser = data;
+      if (data.session_id) {
+        sessionStorage.setItem('healthchat_session', data.session_id);
+      }
       onAuthSuccess();
     } else {
       errDiv.innerText = data.detail || 'Inloggningen misslyckades.';
@@ -97,7 +114,7 @@ async function handleLogin(event) {
     }
   } catch (err) {
     errDiv.innerText = `Nätverksfel vid inloggning: ${err.message || err}`;
-    errDiv.classList.remove('hidden');
+    errDiv.classList.add('hidden');
   }
 }
 
@@ -120,6 +137,9 @@ async function handleRegister(event) {
     const data = await res.json();
     if (res.ok) {
       currentUser = data;
+      if (data.session_id) {
+        sessionStorage.setItem('healthchat_session', data.session_id);
+      }
       if (data.recovery_key) {
         showRecoveryModal(data.recovery_key);
       } else {
@@ -131,7 +151,7 @@ async function handleRegister(event) {
     }
   } catch (err) {
     errDiv.innerText = 'Nätverksfel vid registrering.';
-    errDiv.classList.remove('hidden');
+    errDiv.classList.add('hidden');
   }
 }
 
@@ -152,7 +172,10 @@ function closeRecoveryModal() {
 }
 
 async function handleLogout() {
-  await fetch('/api/auth/logout', { method: 'POST' });
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+  } catch (e) {}
+  sessionStorage.removeItem('healthchat_session');
   currentUser = null;
   showAuthModal();
 }
@@ -179,6 +202,8 @@ function showTab(tabId) {
     renderTrainingCharts();
   } else if (tabId === 'profile') {
     populateProfileInputs();
+  } else if (tabId === 'datasources') {
+    loadDatasources();
   }
 }
 
@@ -186,7 +211,7 @@ async function populateProfileInputs(profile) {
   let p = profile || (currentUser && currentUser.profile) || (cachedSummary && cachedSummary.profile) || {};
   if (!p.height_cm || !p.age) {
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         currentUser = await res.json();
         p = (currentUser && currentUser.profile) || p;
@@ -332,8 +357,14 @@ function setDaysRange(days) {
 
 async function refreshDashboard() {
   try {
-    const res = await fetch(`/api/dashboard/summary?days=${currentDaysRange}`);
-    if (!res.ok) return;
+    const res = await apiFetch(`/api/dashboard/summary?days=${currentDaysRange}`);
+    if (!res.ok) {
+      if (res.status === 401) {
+        sessionStorage.removeItem('healthchat_session');
+        showAuthModal();
+      }
+      return;
+    }
     cachedSummary = await res.json();
     
     if (cachedSummary.profile) {
@@ -405,9 +436,13 @@ function updateDashboardCards(data) {
   const daysLabel = days < 365 ? `${days} d` : (days > 365 ? 'alla d' : '1 år');
 
   // 1. Recovery Score Card
-  const bb = data.bb_latest || {};
-  const hasRec = bb.highest_level !== undefined && bb.highest_level !== null && Number(bb.highest_level) > 0;
-  const recVal = hasRec ? Number(bb.highest_level) : null;
+  const bb = data.bb_latest || (data.history && data.history.body_battery && data.history.body_battery.slice(-1)[0]) || {};
+  const rawRec = bb.highest !== undefined && bb.highest !== null ? bb.highest :
+                 (bb.highest_level !== undefined && bb.highest_level !== null ? bb.highest_level :
+                 (bb.current !== undefined && bb.current !== null ? bb.current :
+                 (bb.charged !== undefined && bb.charged !== null ? bb.charged : null)));
+  const hasRec = rawRec !== undefined && rawRec !== null && Number(rawRec) > 0;
+  const recVal = hasRec ? Math.round(Number(rawRec)) : null;
   const recColor = recVal !== null ? (recVal >= 75 ? '#10B981' : (recVal >= 45 ? '#F59E0B' : '#EF4444')) : '#9CA3AF';
   
   const recValEl = document.getElementById('val-bb-level');
@@ -874,7 +909,8 @@ function renderHealthCharts() {
   try {
     const bb = history.body_battery || [];
     const bbExt = extractChartData(bb, 'date', item => {
-      const val = item.charged !== undefined && item.charged !== null ? item.charged : item.highest_level;
+      const val = item.charged !== undefined && item.charged !== null ? item.charged :
+                  (item.highest !== undefined && item.highest !== null ? item.highest : item.highest_level);
       return val !== undefined ? Number(val) : 0;
     });
     const hasBb = !!(bbExt && bbExt.data.some(v => v > 0));
@@ -1305,7 +1341,7 @@ async function handleSendChatMessage(event) {
   const botBubble = appendChatMessage('bot', 'Tänker...');
 
   try {
-    const res = await fetch('/api/ai/chat', {
+    const res = await apiFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, provider })
@@ -1412,7 +1448,7 @@ async function handleUpdateProfile(event) {
   }
 
   try {
-    const res = await fetch('/api/profile/update', {
+    const res = await apiFetch('/api/profile/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi })
@@ -1439,7 +1475,7 @@ async function handleFetchExternalProfile() {
   const statusMsg = document.getElementById('prof-status-msg');
   if (statusMsg) statusMsg.textContent = '⏳ Läser in senaste mått från hälsodatabasen...';
   try {
-    const res = await fetch('/api/user/profile/refresh');
+    const res = await apiFetch('/api/user/profile/refresh');
     if (!res.ok) throw new Error('Failed to fetch profile metrics');
     const data = await res.json();
     const metrics = data.metrics || {};
@@ -1511,7 +1547,7 @@ async function handleChangePassword(event) {
   }
 
   try {
-    const res = await fetch('/api/profile/change_password', {
+    const res = await apiFetch('/api/profile/change_password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ current_password, new_password })
@@ -1560,7 +1596,7 @@ async function handleRotateRecoveryKey(event) {
   }
 
   try {
-    const res = await fetch('/api/user/rotate_recovery_key', {
+    const res = await apiFetch('/api/user/rotate_recovery_key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ current_password })
@@ -1613,7 +1649,7 @@ async function handleDeleteAccount() {
   }
 
   try {
-    const res = await fetch('/api/user/delete_account', {
+    const res = await apiFetch('/api/user/delete_account', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -1630,4 +1666,332 @@ async function handleDeleteAccount() {
   } catch (e) {
     alert('Nätverksfel vid radering av konto.');
   }
+}
+
+
+// --- DATAKÄLLOR (EXTERNA TJÄNSTER) ---
+
+let datasourcesCache = [];
+const dsSyncPollers = {};
+
+async function loadDatasources() {
+  const container = document.getElementById('ds-cards');
+  if (!container) return;
+  if (!datasourcesCache.length) {
+    container.innerHTML = '<p style="color:#6b7280; font-size:0.9rem;">⏳ Laddar datakällor...</p>';
+  }
+  try {
+    const res = await apiFetch('/api/datasources');
+    if (!res.ok) throw new Error('Kunde inte läsa datakällornas status.');
+    const data = await res.json();
+    datasourcesCache = data.providers || [];
+    renderDatasourceCards(datasourcesCache);
+  } catch (e) {
+    container.innerHTML = `<p style="color:#b91c1c; font-size:0.9rem;">❌ ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function renderDatasourceCards(providers) {
+  const container = document.getElementById('ds-cards');
+  if (!container) return;
+  container.innerHTML = providers.map(p =>
+    p.auth_kind === 'oauth' ? renderOauthDsCard(p) : renderCredentialsDsCard(p)
+  ).join('');
+}
+
+function dsCardHeader(p) {
+  const badgeClass = p.connected ? 'ds-badge connected' : 'ds-badge';
+  const badgeText = p.connected ? '● Ansluten' : '○ Ej ansluten';
+  const steps = (p.steps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+  return `
+    <div class="ds-card-head">
+      <span class="ds-icon">${escapeHtml(p.icon)}</span>
+      <div>
+        <h4>${escapeHtml(p.name)}</h4>
+        <p class="ds-desc">${escapeHtml(p.description)}</p>
+      </div>
+      <span class="${badgeClass}">${badgeText}</span>
+    </div>
+    <ol class="ds-steps">${steps}</ol>
+    <a class="ds-link" href="${escapeHtml(p.portal_url)}" target="_blank" rel="noopener noreferrer">🔗 ${escapeHtml(p.portal_label)}</a>
+  `;
+}
+
+function dsCardFooter(p) {
+  const syncInfo = p.last_sync_at
+    ? `Senast synkad: ${escapeHtml(p.last_sync_at)} (${escapeHtml(String(p.last_sync_count))} ${escapeHtml(p.sync_label)})`
+    : 'Ingen synkronisering har körts ännu.';
+  return `
+    <p class="ds-sync-info">${syncInfo}</p>
+    <p class="ds-status" id="ds-status-${escapeHtml(p.provider)}"></p>
+  `;
+}
+
+function renderOauthDsCard(p) {
+  const pid = escapeHtml(p.provider);
+  const secretPlaceholder = p.secret_set ? '•••••••• (sparad)' : 'Klistra in Client Secret';
+  return `
+    <div class="ds-card" style="border-top-color:${escapeHtml(p.color)};">
+      ${dsCardHeader(p)}
+      <div class="ds-field">
+        <label for="ds-cb-${pid}">Callback-URL – klistra in exakt denna i utvecklarportalen</label>
+        <div class="ds-copy-row">
+          <input type="text" id="ds-cb-${pid}" readonly value="${escapeHtml(p.callback_url)}">
+          <button type="button" class="btn btn-secondary" onclick="copyDsField('ds-cb-${pid}')">📋 Kopiera</button>
+        </div>
+      </div>
+      <form onsubmit="handleSaveDatasourceCredentials(event, '${pid}')">
+        <div class="input-row">
+          <div class="input-group">
+            <label for="ds-cid-${pid}">Client ID</label>
+            <input type="text" id="ds-cid-${pid}" value="${escapeHtml(p.client_id)}" placeholder="t.ex. 123456" autocomplete="off">
+          </div>
+          <div class="input-group">
+            <label for="ds-secret-${pid}">Client Secret</label>
+            <input type="password" id="ds-secret-${pid}" placeholder="${escapeHtml(secretPlaceholder)}" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="ds-actions">
+          <button type="submit" class="btn btn-secondary">💾 Spara uppgifter</button>
+          <button type="button" class="btn btn-primary" onclick="handleAuthorizeDatasource('${pid}')">▶ ${p.connected ? 'Anslut om' : 'Anslut'}</button>
+          <button type="button" class="btn btn-secondary" onclick="handleSyncDatasource('${pid}')">📥 Synkronisera nu</button>
+          <button type="button" class="btn danger-btn" onclick="handleDisconnectDatasource('${pid}')">🔌 Koppla ifrån</button>
+        </div>
+      </form>
+      ${dsCardFooter(p)}
+    </div>
+  `;
+}
+
+function renderCredentialsDsCard(p) {
+  const pid = escapeHtml(p.provider);
+  const pwPlaceholder = p.secret_set ? '•••••••• (sparat)' : 'Ditt Garmin Connect-lösenord';
+  return `
+    <div class="ds-card" style="border-top-color:${escapeHtml(p.color)};">
+      ${dsCardHeader(p)}
+      <form onsubmit="handleGarminConnect(event, '${pid}')">
+        <div class="input-row">
+          <div class="input-group">
+            <label for="ds-email-${pid}">E-postadress</label>
+            <input type="email" id="ds-email-${pid}" value="${escapeHtml(p.email)}" placeholder="namn@exempel.se" autocomplete="off">
+          </div>
+          <div class="input-group">
+            <label for="ds-pwd-${pid}">Lösenord</label>
+            <input type="password" id="ds-pwd-${pid}" placeholder="${escapeHtml(pwPlaceholder)}" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="input-row ds-mfa-row hidden" id="ds-mfa-row-${pid}">
+          <div class="input-group">
+            <label for="ds-mfa-${pid}">🔐 MFA-kod (6 siffror)</label>
+            <input type="text" id="ds-mfa-${pid}" inputmode="numeric" maxlength="10" placeholder="123456" autocomplete="one-time-code">
+          </div>
+        </div>
+        <div class="ds-actions">
+          <button type="submit" class="btn btn-primary">▶ ${p.connected ? 'Anslut om / Verifiera' : 'Anslut / Verifiera'}</button>
+          <button type="button" class="btn btn-secondary" onclick="handleSyncDatasource('${pid}')">📥 Synkronisera nu</button>
+          <button type="button" class="btn danger-btn" onclick="handleDisconnectDatasource('${pid}')">🔌 Koppla ifrån</button>
+        </div>
+      </form>
+      ${dsCardFooter(p)}
+    </div>
+  `;
+}
+
+function setDsStatus(provider, text) {
+  const el = document.getElementById(`ds-status-${provider}`);
+  if (el) el.textContent = text;
+}
+
+function setDsGlobalStatus(text) {
+  const el = document.getElementById('ds-global-status');
+  if (el) el.textContent = text;
+}
+
+function copyDsField(elementId) {
+  const input = document.getElementById(elementId);
+  if (!input) return;
+  input.select();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).catch(() => {});
+  } else {
+    try { document.execCommand('copy'); } catch (e) {}
+  }
+  setDsGlobalStatus('📋 Callback-URL kopierad till urklipp.');
+}
+
+async function dsPost(url, body) {
+  const res = await apiFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  // Read as text first: a crashed endpoint or a proxy error page is not JSON, and
+  // then the status code plus the raw body is what makes the failure diagnosable.
+  const raw = await res.text();
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch (e) {}
+
+  if (!res.ok) {
+    if (typeof data.detail === 'string' && data.detail) throw new Error(data.detail);
+    const snippet = (raw || res.statusText || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    throw new Error(`Serverfel ${res.status}${snippet ? ': ' + snippet : ''}`);
+  }
+  return data;
+}
+
+async function handleSaveDatasourceCredentials(event, provider) {
+  event.preventDefault();
+  const cidEl = document.getElementById(`ds-cid-${provider}`);
+  const secretEl = document.getElementById(`ds-secret-${provider}`);
+  setDsStatus(provider, '⏳ Sparar uppgifter...');
+  try {
+    const data = await dsPost(`/api/datasources/${provider}/credentials`, {
+      client_id: cidEl ? cidEl.value.trim() : '',
+      client_secret: secretEl ? secretEl.value.trim() : ''
+    });
+    await loadDatasources();
+    setDsStatus(provider, `✓ ${data.message}`);
+  } catch (e) {
+    setDsStatus(provider, `❌ ${e.message}`);
+  }
+}
+
+async function handleAuthorizeDatasource(provider) {
+  setDsStatus(provider, '⏳ Förbereder auktorisering...');
+  try {
+    const data = await dsPost(`/api/datasources/${provider}/authorize`, {});
+    if (!data.auth_url) throw new Error('Ingen auktoriseringslänk mottogs.');
+    setDsStatus(provider, '↗️ Skickar dig vidare till tjänstens inloggningssida...');
+    window.location.href = data.auth_url;
+  } catch (e) {
+    setDsStatus(provider, `❌ ${e.message}`);
+  }
+}
+
+async function handleGarminConnect(event, provider) {
+  event.preventDefault();
+  const emailEl = document.getElementById(`ds-email-${provider}`);
+  const pwdEl = document.getElementById(`ds-pwd-${provider}`);
+  const mfaRow = document.getElementById(`ds-mfa-row-${provider}`);
+  const mfaInput = document.getElementById(`ds-mfa-${provider}`);
+  const mfaVisible = mfaRow && !mfaRow.classList.contains('hidden');
+  const mfaCode = mfaVisible && mfaInput ? mfaInput.value.trim() : '';
+
+  setDsStatus(provider, mfaCode ? '⏳ Verifierar MFA-koden...' : '⏳ Loggar in på Garmin Connect...');
+  try {
+    const data = await dsPost('/api/datasources/garmin/connect', {
+      email: emailEl ? emailEl.value.trim() : '',
+      password: pwdEl ? pwdEl.value : '',
+      mfa_code: mfaCode,
+      save_credentials: true
+    });
+
+    if (data.status === 'mfa_required') {
+      if (mfaRow) mfaRow.classList.remove('hidden');
+      if (mfaInput) mfaInput.focus();
+      setDsStatus(provider, `🔐 ${data.message}`);
+      return;
+    }
+
+    await loadDatasources();
+    setDsStatus(provider, `✓ ${data.message}`);
+  } catch (e) {
+    setDsStatus(provider, `❌ ${e.message}`);
+  }
+}
+
+async function handleDisconnectDatasource(provider) {
+  const meta = datasourcesCache.find(p => p.provider === provider);
+  const name = meta ? meta.name : provider;
+  const warning = `Koppla ifrån ${name}?\n\nSparade API-uppgifter och tokens raderas. Redan hämtad hälsodata ligger kvar i databasen.`;
+  if (!confirm(warning)) return;
+
+  setDsStatus(provider, '⏳ Kopplar ifrån...');
+  try {
+    const data = await dsPost(`/api/datasources/${provider}/disconnect`, {});
+    await loadDatasources();
+    setDsStatus(provider, `✓ ${data.message}`);
+  } catch (e) {
+    setDsStatus(provider, `❌ ${e.message}`);
+  }
+}
+
+async function handleSyncDatasource(provider) {
+  setDsStatus(provider, '⏳ Startar synkronisering...');
+  try {
+    const data = await dsPost(`/api/datasources/${provider}/sync`, {});
+    setDsStatus(provider, `⏳ ${data.message}`);
+    await pollDatasourceSync(provider);
+  } catch (e) {
+    setDsStatus(provider, `❌ ${e.message}`);
+  }
+}
+
+function pollDatasourceSync(provider) {
+  if (dsSyncPollers[provider]) {
+    clearTimeout(dsSyncPollers[provider]);
+    delete dsSyncPollers[provider];
+  }
+
+  return new Promise((resolve) => {
+    const tick = async () => {
+      try {
+        const res = await apiFetch(`/api/datasources/${provider}/sync_status`);
+        if (!res.ok) throw new Error('Kunde inte läsa synkstatus.');
+        const data = await res.json();
+
+        if (data.status === 'running') {
+          setDsStatus(provider, `⏳ ${data.message || 'Synkronisering pågår...'}`);
+          dsSyncPollers[provider] = setTimeout(tick, 3000);
+          return;
+        }
+
+        delete dsSyncPollers[provider];
+        if (data.status === 'done') {
+          setDsStatus(provider, `✓ ${data.message || 'Synkroniseringen är klar.'}`);
+          await loadDatasources();
+          await refreshDashboard();
+        } else if (data.status === 'error') {
+          setDsStatus(provider, `⚠️ ${data.message || 'Synkroniseringen misslyckades.'}`);
+          await loadDatasources();
+        }
+        resolve(data);
+      } catch (e) {
+        delete dsSyncPollers[provider];
+        setDsStatus(provider, `❌ ${e.message}`);
+        resolve(null);
+      }
+    };
+    dsSyncPollers[provider] = setTimeout(tick, 1500);
+  });
+}
+
+async function syncAllDatasources() {
+  const connected = datasourcesCache.filter(p => p.connected);
+  if (!connected.length) {
+    setDsGlobalStatus('ℹ️ Inga anslutna datakällor att synkronisera. Anslut en tjänst först.');
+    return;
+  }
+  setDsGlobalStatus(`⏳ Synkroniserar ${connected.length} anslutna datakällor...`);
+  for (const p of connected) {
+    await handleSyncDatasource(p.provider);
+  }
+  setDsGlobalStatus('✓ Synkroniseringen av alla anslutna datakällor är klar.');
+}
+
+function handleDatasourceReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const provider = params.get('datakalla');
+  if (!provider) return;
+
+  const ok = params.get('status') === 'ok';
+  showTab('datasources');
+  setDsGlobalStatus(
+    ok
+      ? '✓ Anslutningen lyckades! Klicka på "Synkronisera nu" för den anslutna tjänsten för att hämta data.'
+      : '❌ Anslutningen misslyckades. Kontrollera Client ID, Client Secret och Callback-URL och försök igen.'
+  );
+
+  // Drop the query string so a reload does not repeat the message.
+  window.history.replaceState({}, '', window.location.pathname);
 }

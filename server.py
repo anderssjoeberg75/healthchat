@@ -7,16 +7,22 @@ and multi-provider AI engine.
 
 import os
 import sys
+import html
+import secrets
+import time
 import uuid
 import json
+import shutil
 import logging
 import asyncio
+import tempfile
 import threading
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
-from fastapi import FastAPI, Request, Response, HTTPException, status, Depends, Cookie, Query
+from fastapi import FastAPI, Request, Response, HTTPException, status, Depends, Cookie, Query, Header
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,6 +39,7 @@ from ai_client import AIClient
 import calorie_calc
 import hr_zones_calc
 import profile_sync
+import datasource_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("server")
@@ -49,16 +56,24 @@ def get_allowed_origins() -> List[str]:
         return [o.strip() for o in raw.split(",") if o.strip()]
     return ["http://localhost:8000", "http://127.0.0.1:8000"]
 
-def get_cookie_secure() -> bool:
-    return os.getenv("COOKIE_SECURE", "1").lower() not in ("0", "false", "no")
+def get_cookie_secure(request: Optional[Request] = None) -> bool:
+    val = os.getenv("COOKIE_SECURE")
+    if val is not None:
+        return val.strip().lower() not in ("0", "false", "no")
+    if request:
+        proto = request.headers.get("x-forwarded-proto", "").lower()
+        if request.url.scheme == "http" and proto != "https":
+            return False
+    return True
 
 _allowed_origins = get_allowed_origins()
 _allow_credentials = "*" not in _allowed_origins
 
-# CORS Middleware (S-15)
+# CORS Middleware (S-15) - also permits LAN IPs (192.168.x.x, 10.x.x.x, 127.0.0.1)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?",
     allow_credentials=_allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
@@ -414,15 +429,25 @@ def delete_session_from_db(conn, session_id: str):
         logger.warning(f"Failed deleting session {session_id} from DB: {e}")
 
 
-def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> UserSession:
-    """Dependency retrieving active UserSession from session cookie."""
-    if not healthchat_session:
+def get_current_session(
+    healthchat_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None)
+) -> UserSession:
+    """Dependency retrieving active UserSession from session cookie or Authorization header."""
+    token = healthchat_session
+    if not token and authorization:
+        if authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+        else:
+            token = authorization.strip()
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Ej inloggad eller sessionen har löpt ut."
         )
 
-    session = get_valid_session(healthchat_session)
+    session = get_valid_session(token)
     if not session:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -434,7 +459,7 @@ def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> Use
         conn = None
         try:
             conn = get_db_conn(db)
-            fresh = load_session_from_db(conn, healthchat_session)
+            fresh = load_session_from_db(conn, token)
             if fresh and fresh.encrypted_profile:
                 return fresh
         finally:
@@ -452,7 +477,7 @@ def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> Use
 # --- AUTH ENDPOINTS ---
 
 @app.post("/api/auth/register")
-def register(req: RegisterRequest, response: Response):
+def register(req: RegisterRequest, response: Response, request: Request):
     db = get_db()
     conn = get_db_conn(db)
     try:
@@ -472,13 +497,14 @@ def register(req: RegisterRequest, response: Response):
             key=SESSION_COOKIE_NAME,
             value=session_id,
             httponly=True,
-            secure=get_cookie_secure(),
+            secure=get_cookie_secure(request),
             samesite="lax",
             max_age=SESSION_MAX_AGE_SECONDS
         )
         return {
             "status": "success",
             "message": "Konto skapat!",
+            "session_id": session_id,
             "user_id": user_id,
             "recovery_key": recovery_key,
             "email": session.email
@@ -497,7 +523,7 @@ def register(req: RegisterRequest, response: Response):
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest, response: Response):
+def login(req: LoginRequest, response: Response, request: Request):
     db = get_db()
     conn = None
     try:
@@ -510,13 +536,14 @@ def login(req: LoginRequest, response: Response):
             key=SESSION_COOKIE_NAME,
             value=session_id,
             httponly=True,
-            secure=get_cookie_secure(),
+            secure=get_cookie_secure(request),
             samesite="lax",
             max_age=SESSION_MAX_AGE_SECONDS
         )
         return {
             "status": "success",
             "message": "Inloggningen lyckades!",
+            "session_id": session_id,
             "user_id": session.user_id,
             "email": session.email,
             "profile": session.encrypted_profile or {}
@@ -535,16 +562,23 @@ def login(req: LoginRequest, response: Response):
 
 
 @app.post("/api/auth/logout")
-def logout(response: Response, healthchat_session: Optional[str] = Cookie(None)):
-    if healthchat_session:
-        session = remove_active_session(healthchat_session)
+def logout(response: Response, request: Request, healthchat_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)):
+    token = healthchat_session
+    if not token and authorization:
+        if authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+        else:
+            token = authorization.strip()
+
+    if token:
+        session = remove_active_session(token)
         if session:
             auth.clear_remembered_session(session.email)
         db = get_db()
         conn = None
         try:
             conn = get_db_conn(db)
-            delete_session_from_db(conn, healthchat_session)
+            delete_session_from_db(conn, token)
         finally:
             if conn:
                 try:
@@ -554,7 +588,7 @@ def logout(response: Response, healthchat_session: Optional[str] = Cookie(None))
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         httponly=True,
-        secure=get_cookie_secure(),
+        secure=get_cookie_secure(request),
         samesite="lax"
     )
     return {"status": "success", "message": "Utloggad!"}
@@ -728,7 +762,10 @@ def get_dashboard_summary(
         "latest_body_comp": body_comp_latest,
         "calorie_burn_today": burn_estimate,
         "sleep_latest": sleep_hist[-1] if sleep_hist else None,
-        "bb_latest": bb_hist[-1] if bb_hist else None,
+        "bb_latest": (
+            {**bb_hist[-1], "highest_level": bb_hist[-1].get("highest") or bb_hist[-1].get("highest_level")}
+            if bb_hist else None
+        ),
         "stress_latest": stress_hist[-1] if stress_hist else None,
         "hrv_latest": hrv_hist[-1] if hrv_hist else None,
         "activities_recent": activities_hist[:10],
@@ -933,8 +970,10 @@ class DeleteAccountRequest(BaseModel):
 @app.post("/api/user/delete_account")
 def delete_account(
     response: Response,
+    request: Request,
     req: Optional[DeleteAccountRequest] = None,
     healthchat_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
     session: UserSession = Depends(get_current_session)
 ):
     db = bind_user_db(session)
@@ -943,14 +982,17 @@ def delete_account(
         if conn:
             pw = req.current_password if req else None
             auth.delete_user_account(conn, session.user_id, current_password=pw)
-        if healthchat_session:
-            remove_active_session(healthchat_session)
-            delete_session_from_db(conn, healthchat_session)
+        token = healthchat_session
+        if not token and authorization:
+            token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else authorization.strip()
+        if token:
+            remove_active_session(token)
+            delete_session_from_db(conn, token)
         if response:
             response.delete_cookie(
                 key=SESSION_COOKIE_NAME,
                 httponly=True,
-                secure=get_cookie_secure(),
+                secure=get_cookie_secure(request),
                 samesite="lax"
             )
         return {"status": "success", "message": "Konto raderat!"}
@@ -959,6 +1001,569 @@ def delete_account(
     finally:
         if conn:
             conn.close()
+
+
+# --- DATAKÄLLOR: EXTERNA TJÄNSTER (STRAVA, GARMIN, WITHINGS, FITBIT) ---
+
+# Garmin Connect logs in with email/password (+ optional MFA) instead of OAuth, so an
+# in-flight login must stay alive between the first request and the MFA request.
+GARMIN_PENDING_TTL_SECONDS = 600
+_pending_garmin: Dict[int, Dict[str, Any]] = {}
+_pending_garmin_lock = threading.Lock()
+# garth keeps its client in module state; datasource_store owns the shared lock.
+_garmin_auth_lock = datasource_store.GARMIN_AUTH_LOCK
+
+# In-memory state for background sync jobs, polled by the frontend.
+_sync_jobs: Dict[str, Dict[str, Any]] = {}
+_sync_jobs_lock = threading.Lock()
+
+
+class DatasourceCredentialsRequest(BaseModel):
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+
+
+class DatasourceSyncRequest(BaseModel):
+    days: Optional[int] = None
+    force_full: bool = False
+
+
+class GarminConnectRequest(BaseModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    mfa_code: Optional[str] = None
+    save_credentials: bool = True
+
+
+def get_public_base_url(request: Request) -> str:
+    """Public origin used to build OAuth redirect URIs (override with PUBLIC_BASE_URL)."""
+    configured = os.environ.get("PUBLIC_BASE_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+def datasource_callback_url(request: Request, provider: str) -> str:
+    return f"{get_public_base_url(request)}/api/datasources/{provider}/callback"
+
+
+def require_provider(provider: str) -> str:
+    if not datasource_store.is_valid_provider(provider):
+        raise HTTPException(status_code=404, detail=f"Okänd datakälla: {provider}")
+    return provider
+
+
+def compare_oauth_state(stored: str, received: str) -> bool:
+    """Constant-time comparison of OAuth CSRF state tokens."""
+    return secrets.compare_digest(str(stored).strip(), str(received).strip())
+
+
+@contextmanager
+def datasource_errors(context: str):
+    """
+    Turn unexpected failures in a datasource endpoint into a readable JSON error.
+
+    Without this an unhandled exception becomes a bare 500 with a plain-text body,
+    which the frontend cannot parse into a message - the user just sees that the
+    call failed, and the cause only exists in the server log.
+    """
+    try:
+        yield
+    except HTTPException:
+        raise
+    except Exception as e:
+        # The exception message can carry connection strings or URLs with tokens, so
+        # only the exception type and a correlation id go back to the client (S-15).
+        error_id = uuid.uuid4().hex[:12]
+        logger.exception(f"Datasource error ({context}) [felkod {error_id}]")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"{context} misslyckades ({type(e).__name__}). "
+                f"Felkod {error_id} - detaljerna finns i serverloggen."
+            )
+        )
+
+
+@contextmanager
+def datasource_session(session: UserSession):
+    """Yield (db, conn) with the user_datasources table guaranteed to exist."""
+    db = bind_user_db(session)
+    conn = get_db_conn(db)
+    if conn is None:
+        raise HTTPException(status_code=503, detail="Databasen är inte tillgänglig för tillfället.")
+    try:
+        datasource_store.ensure_table(conn)
+        yield db, conn
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _cleanup_pending_garmin(user_id: Optional[int] = None):
+    """Drop expired (or explicitly named) in-flight Garmin logins and their token dirs."""
+    now = time.time()
+    with _pending_garmin_lock:
+        for uid in list(_pending_garmin.keys()):
+            pending = _pending_garmin[uid]
+            expired = (now - pending.get("created_at", 0)) > GARMIN_PENDING_TTL_SECONDS
+            if uid == user_id or expired:
+                token_dir = pending.get("token_dir")
+                if token_dir:
+                    shutil.rmtree(str(token_dir), ignore_errors=True)
+                _pending_garmin.pop(uid, None)
+
+
+@app.get("/api/datasources")
+def list_datasources(request: Request, session: UserSession = Depends(get_current_session)):
+    """List connection status for every supported external data source."""
+    with datasource_errors("Hamtningen av datakallor"), datasource_session(session) as (_db, conn):
+        providers = datasource_store.list_status(
+            conn, session.user_id, bytes(session.dek),
+            lambda p: datasource_callback_url(request, p)
+        )
+    return {"status": "success", "providers": providers}
+
+
+@app.post("/api/datasources/{provider}/credentials")
+def save_datasource_credentials(
+    provider: str,
+    req: DatasourceCredentialsRequest,
+    request: Request,
+    session: UserSession = Depends(get_current_session)
+):
+    """Store API credentials (Client ID / Client Secret) for an OAuth data source."""
+    require_provider(provider)
+    meta = datasource_store.PROVIDERS[provider]
+    if meta["auth_kind"] != "oauth":
+        raise HTTPException(
+            status_code=400,
+            detail=f"{meta['name']} ansluts med inloggningsuppgifter, inte med Client ID/Secret."
+        )
+
+    client_id = (req.client_id or "").strip()
+    client_secret = (req.client_secret or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Client ID måste anges.")
+
+    dek = bytes(session.dek)
+    with datasource_errors("Sparandet av API-uppgifter"), datasource_session(session) as (_db, conn):
+        record = datasource_store.load_record(conn, session.user_id, dek, provider)
+        payload = dict(record["payload"])
+        payload["client_id"] = client_id
+        if client_secret:
+            payload["client_secret"] = client_secret
+        if not payload.get("client_secret"):
+            raise HTTPException(status_code=400, detail="Client Secret måste anges.")
+
+        datasource_store.save_record(conn, session.user_id, dek, provider, payload)
+        record = datasource_store.load_record(conn, session.user_id, dek, provider)
+        status_obj = datasource_store.public_status(
+            provider, record, datasource_callback_url(request, provider)
+        )
+    return {
+        "status": "success",
+        "message": f"Uppgifterna för {meta['name']} är sparade. Klicka på Anslut för att godkänna åtkomsten.",
+        "provider_status": status_obj
+    }
+
+
+@app.post("/api/datasources/{provider}/authorize")
+def authorize_datasource(
+    provider: str,
+    request: Request,
+    session: UserSession = Depends(get_current_session)
+):
+    """Build the provider OAuth authorization URL and persist state/PKCE verifier."""
+    require_provider(provider)
+    meta = datasource_store.PROVIDERS[provider]
+    if meta["auth_kind"] != "oauth":
+        raise HTTPException(
+            status_code=400,
+            detail=f"{meta['name']} ansluts med inloggningsuppgifter, inte via OAuth."
+        )
+
+    dek = bytes(session.dek)
+    redirect_uri = datasource_callback_url(request, provider)
+
+    with datasource_errors("Auktoriseringen"), datasource_session(session) as (db, conn):
+        record = datasource_store.load_record(conn, session.user_id, dek, provider)
+        payload = dict(record["payload"])
+        if not payload.get("client_id") or not payload.get("client_secret"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Spara Client ID och Client Secret för {meta['name']} innan du ansluter."
+            )
+
+        with datasource_store.temp_token_dir() as token_dir:
+            handler = datasource_store.build_handler(provider, db, payload, token_dir)
+            auth_url = handler.get_auth_url(payload["client_id"], redirect_uri=redirect_uri)
+            payload["oauth_state"] = handler.current_state
+            payload["redirect_uri"] = redirect_uri
+            if getattr(handler, "code_verifier", None):
+                payload["code_verifier"] = handler.code_verifier
+
+        datasource_store.save_record(conn, session.user_id, dek, provider, payload)
+
+    return {"status": "success", "auth_url": auth_url, "redirect_uri": redirect_uri}
+
+
+def _callback_page(provider: str, ok: bool, message: str) -> HTMLResponse:
+    """Render the small landing page the provider redirects back to."""
+    meta = datasource_store.PROVIDERS.get(provider, {"name": provider, "icon": "🔌"})
+    safe_message = html.escape(message)
+    safe_name = html.escape(str(meta.get("name", provider)))
+    safe_provider = html.escape(provider)
+    color = "#10B981" if ok else "#EF4444"
+    heading = f"✅ {safe_name} ansluten!" if ok else f"❌ Kunde inte ansluta till {safe_name}"
+    target = f"/?datakalla={safe_provider}&status={'ok' if ok else 'error'}"
+    body = f"""<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <title>{safe_name} – HealthChat</title>
+  <meta http-equiv="refresh" content="4;url={target}">
+</head>
+<body style="font-family: 'Segoe UI', sans-serif; text-align:center; padding-top:60px; background:#F3F4F6;">
+  <div style="background:#fff; max-width:520px; margin:0 auto; padding:40px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+    <h2 style="color:{color}; margin-bottom:10px;">{heading}</h2>
+    <p style="color:#4B5563; font-size:16px;">{safe_message}</p>
+    <p style="color:#6B7280; font-size:14px;">Du skickas tillbaka till HealthChat automatiskt.</p>
+    <a href="{target}" style="color:#0078D4; font-weight:600;">Tillbaka till Datakällor</a>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=body, status_code=200 if ok else 400)
+
+
+@app.get("/api/datasources/{provider}/callback", response_class=HTMLResponse)
+def datasource_oauth_callback(
+    provider: str,
+    request: Request,
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    healthchat_session: Optional[str] = Cookie(None)
+):
+    """OAuth redirect target: verify state, exchange the code and store the tokens."""
+    if not datasource_store.is_valid_provider(provider):
+        return _callback_page(provider, False, "Okänd datakälla.")
+    meta = datasource_store.PROVIDERS[provider]
+
+    session = get_valid_session(healthchat_session) if healthchat_session else None
+    if session is None:
+        return _callback_page(provider, False, "Din session har gått ut. Logga in igen och upprepa anslutningen.")
+
+    if error:
+        return _callback_page(provider, False, f"{meta['name']} nekade åtkomsten ({error}).")
+    if not code:
+        return _callback_page(provider, False, "Ingen auktoriseringskod mottogs.")
+
+    dek = bytes(session.dek)
+    try:
+        with datasource_session(session) as (db, conn):
+            record = datasource_store.load_record(conn, session.user_id, dek, provider)
+            payload = dict(record["payload"])
+
+            stored_state = payload.get("oauth_state")
+            if not stored_state or not state or not compare_oauth_state(stored_state, state):
+                return _callback_page(
+                    provider, False,
+                    "Säkerhetskontrollen (state) misslyckades. Starta anslutningen igen från Datakällor."
+                )
+
+            redirect_uri = payload.get("redirect_uri") or datasource_callback_url(request, provider)
+
+            with datasource_store.temp_token_dir() as token_dir:
+                handler = datasource_store.build_handler(provider, db, payload, token_dir)
+                handler.exchange_code_for_token(
+                    code,
+                    payload.get("client_id", ""),
+                    payload.get("client_secret", ""),
+                    redirect_uri=redirect_uri
+                )
+                tokens = datasource_store.collect_tokens(provider, handler)
+
+            if not tokens.get("access_token") and not tokens.get("refresh_token"):
+                return _callback_page(provider, False, f"{meta['name']} lämnade inga giltiga tokens.")
+
+            payload.update(tokens)
+            payload.pop("oauth_state", None)
+            payload.pop("code_verifier", None)
+            datasource_store.save_record(conn, session.user_id, dek, provider, payload, connected=True)
+
+        logger.info(f"Datasource {provider} connected for user {session.user_id}")
+        return _callback_page(
+            provider, True,
+            f"Ditt {meta['name']}-konto är anslutet. Kör en synkronisering under Datakällor för att hämta data."
+        )
+    except Exception as e:
+        logger.error(f"OAuth callback failed for {provider}: {e}")
+        return _callback_page(provider, False, f"Anslutningen misslyckades: {e}")
+
+
+@app.post("/api/datasources/garmin/connect")
+def connect_garmin(
+    req: GarminConnectRequest,
+    request: Request,
+    session: UserSession = Depends(get_current_session)
+):
+    """Log in to Garmin Connect with email/password, handling the MFA round trip."""
+    dek = bytes(session.dek)
+    mfa_code = (req.mfa_code or "").strip()
+    _cleanup_pending_garmin()
+
+    with datasource_errors("Garmin-anslutningen"), datasource_session(session) as (db, conn):
+        record = datasource_store.load_record(conn, session.user_id, dek, "garmin")
+        payload = dict(record["payload"])
+
+        if mfa_code:
+            with _pending_garmin_lock:
+                pending = _pending_garmin.get(session.user_id)
+            if not pending:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ingen pågående Garmin-inloggning hittades. Börja om med e-post och lösenord."
+                )
+            handler = pending["handler"]
+            token_dir = pending["token_dir"]
+            email = pending.get("email", "")
+            password = pending.get("password", "")
+            save_credentials = pending.get("save_credentials", True)
+            with _garmin_auth_lock:
+                result = handler.submit_mfa(mfa_code)
+        else:
+            email = (req.email or payload.get("email") or "").strip()
+            password = req.password or payload.get("password") or ""
+            save_credentials = bool(req.save_credentials)
+            if not email or not password:
+                raise HTTPException(status_code=400, detail="Ange både e-postadress och lösenord för Garmin Connect.")
+
+            _cleanup_pending_garmin(session.user_id)
+            token_dir = Path(tempfile.mkdtemp(prefix="healthchat_garmin_"))
+            login_payload = dict(payload)
+            login_payload["email"] = email
+            login_payload["password"] = password
+            handler = datasource_store.build_handler("garmin", db, login_payload, token_dir)
+            with _garmin_auth_lock:
+                result = handler.authenticate()
+
+        payload["email"] = email
+        if save_credentials:
+            payload["password"] = password
+        else:
+            payload.pop("password", None)
+
+        if result.get("mfa_required"):
+            with _pending_garmin_lock:
+                _pending_garmin[session.user_id] = {
+                    "handler": handler,
+                    "token_dir": token_dir,
+                    "email": email,
+                    "password": password,
+                    "save_credentials": save_credentials,
+                    "created_at": time.time(),
+                }
+            datasource_store.save_record(conn, session.user_id, dek, "garmin", payload, connected=False)
+            return {
+                "status": "mfa_required",
+                "message": "Garmin kräver en engångskod (MFA). Ange koden från din autentiseringsapp."
+            }
+
+        if not result.get("success"):
+            _cleanup_pending_garmin(session.user_id)
+            datasource_store.save_record(conn, session.user_id, dek, "garmin", payload, connected=False)
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error") or "Inloggningen på Garmin Connect misslyckades."
+            )
+
+        tokens = datasource_store.collect_tokens("garmin", handler, token_dir)
+        payload.update(tokens)
+        datasource_store.save_record(conn, session.user_id, dek, "garmin", payload, connected=True)
+        _cleanup_pending_garmin(session.user_id)
+
+        record = datasource_store.load_record(conn, session.user_id, dek, "garmin")
+        status_obj = datasource_store.public_status(
+            "garmin", record, datasource_callback_url(request, "garmin")
+        )
+
+    logger.info(f"Garmin Connect linked for user {session.user_id}")
+    return {
+        "status": "connected",
+        "message": "Garmin Connect är anslutet. Kör en synkronisering för att hämta din hälsodata.",
+        "provider_status": status_obj
+    }
+
+
+@app.post("/api/datasources/{provider}/disconnect")
+def disconnect_datasource(
+    provider: str,
+    request: Request,
+    session: UserSession = Depends(get_current_session)
+):
+    """Delete all stored credentials and tokens for one data source."""
+    require_provider(provider)
+    meta = datasource_store.PROVIDERS[provider]
+    if provider == "garmin":
+        _cleanup_pending_garmin(session.user_id)
+
+    with datasource_errors("Bortkopplingen"), datasource_session(session) as (_db, conn):
+        datasource_store.delete_record(conn, session.user_id, provider)
+        record = datasource_store.load_record(conn, session.user_id, bytes(session.dek), provider)
+        status_obj = datasource_store.public_status(
+            provider, record, datasource_callback_url(request, provider)
+        )
+
+    with _sync_jobs_lock:
+        _sync_jobs.pop(f"{session.user_id}:{provider}", None)
+
+    logger.info(f"Datasource {provider} disconnected for user {session.user_id}")
+    return {
+        "status": "success",
+        "message": f"{meta['name']} är bortkopplad. Redan hämtad hälsodata ligger kvar i databasen.",
+        "provider_status": status_obj
+    }
+
+
+def _sync_job_key(user_id: int, provider: str) -> str:
+    return f"{user_id}:{provider}"
+
+
+def _set_sync_job(key: str, **fields):
+    with _sync_jobs_lock:
+        job = _sync_jobs.setdefault(key, {})
+        job.update(fields)
+
+
+def build_worker_db(user_id: int, dek: bytes) -> GarminDatabase:
+    """GarminDatabase bound to a user's DEK copy, for use outside a request scope."""
+    db = GarminDatabase(require_mariadb=True)
+    db.set_user_session(user_id, bytearray(dek))
+    return db
+
+
+def _run_datasource_sync(user_id: int, dek: bytes, provider: str, days: Optional[int], force_full: bool):
+    """Background worker: sync one provider and persist refreshed tokens."""
+    key = _sync_job_key(user_id, provider)
+    conn = None
+    try:
+        db = build_worker_db(user_id, dek)
+        conn = get_db_conn(db)
+        if conn is None:
+            _set_sync_job(key, state="error", message="Databasen är inte tillgänglig.")
+            return
+
+        datasource_store.ensure_table(conn)
+        record = datasource_store.load_record(conn, user_id, dek, provider)
+        payload = dict(record["payload"])
+
+        if not datasource_store.has_tokens(provider, payload):
+            _set_sync_job(
+                key, state="error",
+                message=f"{datasource_store.PROVIDERS[provider]['name']} är inte anslutet."
+            )
+            return
+
+        result = datasource_store.sync_provider(
+            provider, db, payload, days=days, force_full=force_full,
+            on_progress=lambda text: _set_sync_job(key, message=text)
+        )
+
+        tokens = result.get("tokens") or {}
+        if tokens:
+            payload.update(tokens)
+        datasource_store.save_record(
+            conn, user_id, dek, provider, payload,
+            connected=bool(record["connected"] or result["success"]),
+            last_sync_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S") if result["success"] else None,
+            last_sync_count=result["count"] if result["success"] else None,
+        )
+        _set_sync_job(
+            key,
+            state="done" if result["success"] else "error",
+            message=result["message"],
+            count=result["count"],
+        )
+    except Exception as e:
+        logger.error(f"Datasource sync failed for {provider}/user {user_id}: {e}")
+        _set_sync_job(key, state="error", message=f"Synkroniseringen misslyckades: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.post("/api/datasources/{provider}/sync")
+def sync_datasource(
+    provider: str,
+    req: Optional[DatasourceSyncRequest] = None,
+    session: UserSession = Depends(get_current_session)
+):
+    """Start a background sync for one data source (poll /sync_status for progress)."""
+    require_provider(provider)
+    meta = datasource_store.PROVIDERS[provider]
+    key = _sync_job_key(session.user_id, provider)
+
+    with datasource_errors("Starten av synkroniseringen"), datasource_session(session) as (_db, conn):
+        record = datasource_store.load_record(conn, session.user_id, bytes(session.dek), provider)
+        if not datasource_store.has_tokens(provider, record["payload"]):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{meta['name']} är inte anslutet ännu. Anslut kontot innan du synkroniserar."
+            )
+
+    with _sync_jobs_lock:
+        existing = _sync_jobs.get(key)
+        if existing and existing.get("state") == "running":
+            return {
+                "status": "running",
+                "message": existing.get("message", "Synkronisering pågår redan."),
+                "provider": provider
+            }
+        _sync_jobs[key] = {
+            "state": "running",
+            "provider": provider,
+            "message": f"Startar synkronisering med {meta['name']}...",
+            "count": 0,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    days = req.days if req and req.days else None
+    force_full = bool(req.force_full) if req else False
+    thread = threading.Thread(
+        target=_run_datasource_sync,
+        args=(session.user_id, bytes(session.dek), provider, days, force_full),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "status": "running",
+        "provider": provider,
+        "message": f"Synkronisering med {meta['name']} har startat."
+    }
+
+
+@app.get("/api/datasources/{provider}/sync_status")
+def datasource_sync_status(provider: str, session: UserSession = Depends(get_current_session)):
+    """Poll the state of the latest sync job for one data source."""
+    require_provider(provider)
+    with _sync_jobs_lock:
+        job = dict(_sync_jobs.get(_sync_job_key(session.user_id, provider)) or {})
+    if not job:
+        return {"status": "idle", "provider": provider, "message": "", "count": 0}
+    return {
+        "status": job.get("state", "idle"),
+        "provider": provider,
+        "message": job.get("message", ""),
+        "count": job.get("count", 0),
+        "started_at": job.get("started_at"),
+    }
 
 
 # --- STATIC FILES & INDEX HTML ---

@@ -517,6 +517,12 @@ def delete_user_account(db_conn, user_id: int, current_password: Optional[str] =
         except Exception:
             pass
 
+        # Explicitly clean up external datasource credentials/tokens (S-16)
+        try:
+            cur.execute(f"DELETE FROM user_datasources WHERE user_id = {placeholder}", (user_id,))
+        except Exception:
+            pass
+
         # Delete user row (cascades to all health data tables via FOREIGN KEY ON DELETE CASCADE)
         cur.execute(f"DELETE FROM users WHERE id = {placeholder}", (user_id,))
         if hasattr(db_conn, "commit"):

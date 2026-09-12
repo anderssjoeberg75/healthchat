@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=9.1.0">
+  <link rel="stylesheet" href="/static/styles.css?v=9.2.0">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -146,6 +146,9 @@
         </button>
         <button class="nav-tab-btn" id="tab-btn-profile" onclick="showTab('profile')">
           <span>👤</span> Profil & Konto
+        </button>
+        <button class="nav-tab-btn" id="tab-btn-datasources" onclick="showTab('datasources')">
+          <span>🔌</span> Datakällor
         </button>
       </div>
 
@@ -592,11 +595,32 @@
         </div>
       </section>
 
+      <!-- TAB 6: DATAKÄLLOR (EXTERNA TJÄNSTER) -->
+      <section id="tab-datasources" class="content-tab hidden">
+
+        <div class="table-card-box" style="margin-bottom:15px;">
+          <h3>🔌 Datakällor</h3>
+          <p style="font-size:0.85rem; color:#6b7280; margin-top:4px; line-height:1.5;">
+            Koppla HealthChat till dina tränings- och hälsotjänster. Alla API-uppgifter och OAuth-tokens
+            krypteras med din personliga nyckel innan de sparas i MariaDB – exakt som din hälsodata.
+            Varje tjänst hämtar sina data till samma databas som graferna och AI-coachen läser ifrån.
+          </p>
+          <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary" onclick="loadDatasources()">🔄 Uppdatera status</button>
+            <button type="button" class="btn btn-primary" onclick="syncAllDatasources()">📥 Synkronisera alla anslutna</button>
+          </div>
+          <p id="ds-global-status" style="margin-top:10px; font-size:0.85rem; font-weight:600; color:#374151;"></p>
+        </div>
+
+        <div id="ds-cards" class="ds-grid"></div>
+
+      </section>
+
     </main>
 
   </div>
 
-  <script src="/static/app.js?v=9.1.0"></script>
+  <script src="/static/app.js?v=9.2.1"></script>
 
 </body>
 </html>

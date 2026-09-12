@@ -180,5 +180,23 @@ def test_chart_js_static_served():
     assert "/static/chart.umd.min.js" in res_root.text
 
 
-
-
+def test_auth_me_with_bearer_token():
+    """Verify that Authorization: Bearer <session_id> authenticates successfully without cookies."""
+    import server
+    test_sid = "test-bearer-token-12345"
+    test_session = auth.UserSession(
+        user_id=123,
+        email="bearer@example.com",
+        dek=bytearray(b"0123456789abcdef0123456789abcdef"),
+        encrypted_profile={"sex": "female", "age": 35}
+    )
+    server.store_active_session(test_sid, test_session)
+    try:
+        res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {test_sid}"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["user_id"] == 123
+        assert data["email"] == "bearer@example.com"
+        assert data["profile"]["sex"] == "female"
+    finally:
+        server.remove_active_session(test_sid)
