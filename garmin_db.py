@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any, Union
 
 import pymysql
 from dbutils.pooled_db import PooledDB
+import threading
 import crypto
 
 logger = logging.getLogger("garmin_db")
@@ -114,8 +115,24 @@ def load_db_env():
                 logger.debug(f"Failed to load env file {p}: {e}")
 
 
+def _resolve_ssl_config(config: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Resolve SSL/TLS configuration for MariaDB connection."""
+    cfg = config or {}
+    require_tls = os.environ.get("MARIADB_REQUIRE_TLS", "0") == "1" or cfg.get("require_tls")
+    ca_path = cfg.get("ssl_ca") or os.environ.get("MARIADB_SSL_CA") or str(Path.home() / ".healthchat" / "ca.pem")
+
+    if os.path.exists(ca_path):
+        check_hostname = cfg.get("ssl_check_hostname")
+        if check_hostname is None:
+            check_hostname = os.environ.get("MARIADB_SSL_CHECK_HOSTNAME", "1").lower() not in ("0", "false", "no")
+        return {"ca": ca_path, "check_hostname": check_hostname}
+    elif require_tls:
+        raise RuntimeError(f"MARIADB_REQUIRE_TLS=1 men SSL CA certifikat saknas på sökvägen: {ca_path}")
+    return None
+
+
 def get_mariadb_connection(config: Optional[Dict[str, Any]] = None):
-    """Create and return a raw pymysql connection to the MariaDB server."""
+    """Create and return a raw pymysql connection to the MariaDB server with TLS support."""
     load_db_env()
     cfg = config or {}
     host = cfg.get("host") or os.environ.get("MARIADB_HOST", DEFAULT_MARIADB_HOST)
@@ -127,6 +144,11 @@ def get_mariadb_connection(config: Optional[Dict[str, Any]] = None):
     if not password:
         raise RuntimeError("MARIADB_PASSWORD saknas – sätt miljövariabel eller ~/.healthchat/db.env")
 
+    ssl_config = _resolve_ssl_config(cfg)
+    connect_timeout = int(cfg.get("connect_timeout") or os.environ.get("MARIADB_CONNECT_TIMEOUT", 5))
+    read_timeout = int(cfg.get("read_timeout") or os.environ.get("MARIADB_READ_TIMEOUT", 30))
+    write_timeout = int(cfg.get("write_timeout") or os.environ.get("MARIADB_WRITE_TIMEOUT", 30))
+
     return pymysql.connect(
         host=host,
         port=port,
@@ -134,8 +156,80 @@ def get_mariadb_connection(config: Optional[Dict[str, Any]] = None):
         password=password,
         database=database,
         charset="utf8mb4",
-        autocommit=False
+        autocommit=False,
+        ssl=ssl_config,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        write_timeout=write_timeout
     )
+
+
+# --- MODULE-GLOBAL SHARED CONNECTION POOL (PF-7) ---
+_SHARED_MARIADB_POOL: Optional[PooledDB] = None
+_SHARED_POOL_LOCK = threading.Lock()
+_SHARED_POOL_KEY: Optional[str] = None
+
+
+def _create_mariadb_pool(config: Dict[str, Any]) -> PooledDB:
+    """Create a new PooledDB connection pool with ping, timeouts, and optional TLS."""
+    password = config.get("password") or os.environ.get("MARIADB_PASSWORD")
+    if not password:
+        raise RuntimeError("MARIADB_PASSWORD saknas – sätt miljövariabel eller ~/.healthchat/db.env")
+
+    ssl_config = _resolve_ssl_config(config)
+    connect_timeout = int(config.get("connect_timeout") or os.environ.get("MARIADB_CONNECT_TIMEOUT", 5))
+    read_timeout = int(config.get("read_timeout") or os.environ.get("MARIADB_READ_TIMEOUT", 30))
+    write_timeout = int(config.get("write_timeout") or os.environ.get("MARIADB_WRITE_TIMEOUT", 30))
+
+    return PooledDB(
+        creator=pymysql,
+        maxconnections=int(os.environ.get("MARIADB_MAX_CONNECTIONS", "10")),
+        mincached=int(os.environ.get("MARIADB_MIN_CACHED", "2")),
+        maxcached=int(os.environ.get("MARIADB_MAX_CACHED", "5")),
+        blocking=True,
+        ping=1,
+        host=config.get("host", DEFAULT_MARIADB_HOST),
+        port=int(config.get("port", DEFAULT_MARIADB_PORT)),
+        user=config.get("user", DEFAULT_MARIADB_USER),
+        password=password,
+        database=config.get("database", DEFAULT_MARIADB_DB),
+        charset="utf8mb4",
+        autocommit=True,
+        ssl=ssl_config,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        write_timeout=write_timeout,
+    )
+
+
+def get_shared_mariadb_pool(config: Optional[Dict[str, Any]] = None) -> PooledDB:
+    """Return the shared singleton PooledDB instance across GarminDatabase instances."""
+    global _SHARED_MARIADB_POOL, _SHARED_POOL_KEY
+    cfg = config or {}
+    cfg_key = f"{cfg.get('host')}:{cfg.get('port')}:{cfg.get('user')}:{cfg.get('database')}"
+
+    with _SHARED_POOL_LOCK:
+        if _SHARED_MARIADB_POOL is not None and (config is None or cfg_key == _SHARED_POOL_KEY):
+            return _SHARED_MARIADB_POOL
+
+        pool = _create_mariadb_pool(cfg)
+        _SHARED_MARIADB_POOL = pool
+        _SHARED_POOL_KEY = cfg_key
+        return pool
+
+
+# --- SQLITE DDL EXECUTION CACHE (PF-7) ---
+_INITIALIZED_SQLITE_PATHS: set = set()
+_SQLITE_INIT_LOCK = threading.Lock()
+_SQLITE_INIT_CALL_COUNT: int = 0
+
+
+def reset_sqlite_init_cache():
+    """Reset SQLite initialization cache (used for tests)."""
+    global _SQLITE_INIT_CALL_COUNT
+    with _SQLITE_INIT_LOCK:
+        _INITIALIZED_SQLITE_PATHS.clear()
+        _SQLITE_INIT_CALL_COUNT = 0
 
 
 class GarminDatabase:
@@ -146,12 +240,17 @@ class GarminDatabase:
         db_path: Optional[Path] = None,
         mariadb_config: Optional[Dict[str, Any]] = None,
         user_id: Optional[int] = None,
-        dek: Optional[bytes] = None
+        dek: Optional[bytes] = None,
+        require_mariadb: Optional[bool] = None
     ):
         self.user_id = user_id
         self.dek = dek
         self.pool: Optional[PooledDB] = None
         self.is_mariadb = False
+
+        if require_mariadb is None:
+            require_mariadb = os.environ.get("HEALTHCHAT_REQUIRE_MARIADB", "0").lower() in ("1", "true", "yes")
+        self.require_mariadb = require_mariadb
 
         load_db_env()
         if mariadb_config is None and db_path is None:
@@ -168,59 +267,33 @@ class GarminDatabase:
 
         if mariadb_config and mariadb_config.get("host"):
             try:
-                self._init_mariadb_pool(mariadb_config)
+                self.pool = get_shared_mariadb_pool(mariadb_config)
                 self.is_mariadb = True
-                logger.info(f"Connected to MariaDB at {mariadb_config.get('host')}:{mariadb_config.get('port', 3306)}")
+                logger.info(f"Connected to MariaDB pool at {mariadb_config.get('host')}:{mariadb_config.get('port', 3306)}")
             except Exception as e:
+                if self.require_mariadb:
+                    logger.critical(f"MariaDB krävs i fleranvändarläge men anslutningen misslyckades: {e}")
+                    raise RuntimeError(f"MariaDB-anslutning krävs i fleranvändarläge, men misslyckades: {e}")
                 logger.warning(f"Failed to connect to MariaDB pool, falling back to SQLite: {e}")
                 self.is_mariadb = False
+        elif self.require_mariadb:
+            raise RuntimeError("MariaDB krävs i fleranvändarläge men inga konfigurationsuppgifter hittades.")
 
-        # SQLite fallback setup
-        if db_path is None:
-            config_dir = Path.home() / '.healthchat'
-            config_dir.mkdir(parents=True, exist_ok=True)
-            db_path = config_dir / 'healthdata.db'
-            
-        self.db_path = db_path
-        self.init_sqlite_db()
+        # SQLite fallback setup (only when not running against MariaDB)
+        if not self.is_mariadb:
+            if db_path is None:
+                config_dir = Path.home() / '.healthchat'
+                config_dir.mkdir(parents=True, exist_ok=True)
+                db_path = config_dir / 'healthdata.db'
+                
+            self.db_path = db_path
+            self.init_sqlite_db()
+        else:
+            self.db_path = db_path
 
     def _init_mariadb_pool(self, config: Dict[str, Any]):
-        """Initialize connection pool for MariaDB with ping, timeouts, and optional TLS."""
-        password = config.get("password") or os.environ.get("MARIADB_PASSWORD")
-        if not password:
-            raise RuntimeError("MARIADB_PASSWORD saknas – sätt miljövariabel eller ~/.healthchat/db.env")
-
-        ssl_config = None
-        require_tls = os.environ.get("MARIADB_REQUIRE_TLS", "0") == "1" or config.get("require_tls")
-        ca_path = config.get("ssl_ca") or os.environ.get("MARIADB_SSL_CA") or str(Path.home() / ".healthchat" / "ca.pem")
-        if os.path.exists(ca_path):
-            ssl_config = {"ca": ca_path}
-        elif require_tls:
-            raise RuntimeError(f"MARIADB_REQUIRE_TLS=1 men SSL CA certifikat saknas på sökvägen: {ca_path}")
-
-        connect_timeout = int(config.get("connect_timeout") or os.environ.get("MARIADB_CONNECT_TIMEOUT", 5))
-        read_timeout = int(config.get("read_timeout") or os.environ.get("MARIADB_READ_TIMEOUT", 30))
-        write_timeout = int(config.get("write_timeout") or os.environ.get("MARIADB_WRITE_TIMEOUT", 30))
-
-        self.pool = PooledDB(
-            creator=pymysql,
-            maxconnections=int(os.environ.get("MARIADB_MAX_CONNECTIONS", "10")),
-            mincached=int(os.environ.get("MARIADB_MIN_CACHED", "2")),
-            maxcached=int(os.environ.get("MARIADB_MAX_CACHED", "5")),
-            blocking=True,
-            ping=1,
-            host=config.get("host", DEFAULT_MARIADB_HOST),
-            port=int(config.get("port", DEFAULT_MARIADB_PORT)),
-            user=config.get("user", DEFAULT_MARIADB_USER),
-            password=password,
-            database=config.get("database", DEFAULT_MARIADB_DB),
-            charset="utf8mb4",
-            autocommit=True,
-            ssl=ssl_config,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-            write_timeout=write_timeout,
-        )
+        """Initialize or retrieve shared connection pool for MariaDB."""
+        self.pool = get_shared_mariadb_pool(config)
 
     def set_user_session(self, user_id: int, dek: bytes):
         """Set active user session for encrypted MariaDB operations."""
@@ -241,131 +314,142 @@ class GarminDatabase:
             raise RuntimeError("MariaDB connection pool is not initialized")
         return self.pool.connection()
 
-    def init_sqlite_db(self):
-        """Create SQLite database tables if they do not exist."""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS daily_summary (
-                date TEXT PRIMARY KEY,
-                total_steps INTEGER DEFAULT 0,
-                total_calories INTEGER DEFAULT 0,
-                active_calories INTEGER DEFAULT 0,
-                resting_hr INTEGER DEFAULT 0,
-                raw_json TEXT
-            )
-            """)
+    def init_sqlite_db(self, force: bool = False):
+        """Create SQLite database tables if they do not exist (executed once per db file)."""
+        global _SQLITE_INIT_CALL_COUNT
+        canonical_path = str(self.db_path.resolve()) if self.db_path else ""
+        if not force and canonical_path in _INITIALIZED_SQLITE_PATHS:
+            return
 
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sleep_data (
-                date TEXT PRIMARY KEY,
-                total_sleep_hours REAL DEFAULT 0,
-                deep_sleep_hours REAL DEFAULT 0,
-                light_sleep_hours REAL DEFAULT 0,
-                rem_sleep_hours REAL DEFAULT 0,
-                awake_hours REAL DEFAULT 0,
-                sleep_score INTEGER DEFAULT 0,
-                raw_json TEXT
-            )
-            """)
+        with _SQLITE_INIT_LOCK:
+            if not force and canonical_path in _INITIALIZED_SQLITE_PATHS:
+                return
+            _SQLITE_INIT_CALL_COUNT += 1
 
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS body_battery (
-                date TEXT PRIMARY KEY,
-                charged INTEGER DEFAULT 0,
-                drained INTEGER DEFAULT 0,
-                highest INTEGER DEFAULT 0,
-                lowest INTEGER DEFAULT 0,
-                current INTEGER DEFAULT 0
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS stress_data (
-                date TEXT PRIMARY KEY,
-                average INTEGER DEFAULT 0,
-                max INTEGER DEFAULT 0,
-                rest INTEGER DEFAULT 0,
-                activity INTEGER DEFAULT 0,
-                low_duration_min INTEGER DEFAULT 0,
-                medium_duration_min INTEGER DEFAULT 0,
-                high_duration_min INTEGER DEFAULT 0
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS hrv_data (
-                date TEXT PRIMARY KEY,
-                last_night_avg REAL DEFAULT 0,
-                weekly_avg REAL DEFAULT 0,
-                status TEXT DEFAULT ''
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS activities (
-                activity_id INTEGER PRIMARY KEY,
-                activity_name TEXT,
-                activity_type TEXT,
-                start_time TEXT,
-                date TEXT,
-                distance_km REAL DEFAULT 0,
-                duration_min REAL DEFAULT 0,
-                calories INTEGER DEFAULT 0,
-                avg_hr INTEGER DEFAULT 0,
-                max_hr INTEGER DEFAULT 0,
-                avg_pace_min_km REAL DEFAULT 0,
-                source TEXT DEFAULT 'Garmin',
-                raw_json TEXT
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS body_composition (
-                date TEXT PRIMARY KEY,
-                weight_kg REAL DEFAULT 0,
-                fat_ratio_pct REAL DEFAULT 0,
-                muscle_mass_kg REAL DEFAULT 0,
-                bone_mass_kg REAL DEFAULT 0,
-                water_pct REAL DEFAULT 0,
-                bmi REAL DEFAULT 0,
-                source TEXT DEFAULT 'withings',
-                raw_json TEXT
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS calorie_burn (
-                date TEXT PRIMARY KEY,
-                total_burn INTEGER DEFAULT 0,
-                resting_burn INTEGER DEFAULT 0,
-                steps_burn INTEGER DEFAULT 0,
-                workout_burn INTEGER DEFAULT 0,
-                bmr_full INTEGER DEFAULT 0,
-                steps INTEGER DEFAULT 0,
-                weight_kg REAL DEFAULT 0,
-                day_fraction REAL DEFAULT 1.0,
-                bmr_source TEXT DEFAULT '',
-                updated_at TEXT,
-                raw_json TEXT
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sync_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-            """)
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(activity_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_body_comp_date ON body_composition(date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_calorie_burn_date ON calorie_burn(date)")
-            
-            conn.commit()
-
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS daily_summary (
+                    date TEXT PRIMARY KEY,
+                    total_steps INTEGER DEFAULT 0,
+                    total_calories INTEGER DEFAULT 0,
+                    active_calories INTEGER DEFAULT 0,
+                    resting_hr INTEGER DEFAULT 0,
+                    raw_json TEXT
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sleep_data (
+                    date TEXT PRIMARY KEY,
+                    total_sleep_hours REAL DEFAULT 0,
+                    deep_sleep_hours REAL DEFAULT 0,
+                    light_sleep_hours REAL DEFAULT 0,
+                    rem_sleep_hours REAL DEFAULT 0,
+                    awake_hours REAL DEFAULT 0,
+                    sleep_score INTEGER DEFAULT 0,
+                    raw_json TEXT
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS body_battery (
+                    date TEXT PRIMARY KEY,
+                    charged INTEGER DEFAULT 0,
+                    drained INTEGER DEFAULT 0,
+                    highest INTEGER DEFAULT 0,
+                    lowest INTEGER DEFAULT 0,
+                    current INTEGER DEFAULT 0
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS stress_data (
+                    date TEXT PRIMARY KEY,
+                    average INTEGER DEFAULT 0,
+                    max INTEGER DEFAULT 0,
+                    rest INTEGER DEFAULT 0,
+                    activity INTEGER DEFAULT 0,
+                    low_duration_min INTEGER DEFAULT 0,
+                    medium_duration_min INTEGER DEFAULT 0,
+                    high_duration_min INTEGER DEFAULT 0
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS hrv_data (
+                    date TEXT PRIMARY KEY,
+                    last_night_avg REAL DEFAULT 0,
+                    weekly_avg REAL DEFAULT 0,
+                    status TEXT DEFAULT ''
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS activities (
+                    activity_id INTEGER PRIMARY KEY,
+                    activity_name TEXT,
+                    activity_type TEXT,
+                    start_time TEXT,
+                    date TEXT,
+                    distance_km REAL DEFAULT 0,
+                    duration_min REAL DEFAULT 0,
+                    calories INTEGER DEFAULT 0,
+                    avg_hr INTEGER DEFAULT 0,
+                    max_hr INTEGER DEFAULT 0,
+                    avg_pace_min_km REAL DEFAULT 0,
+                    source TEXT DEFAULT 'Garmin',
+                    raw_json TEXT
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS body_composition (
+                    date TEXT PRIMARY KEY,
+                    weight_kg REAL DEFAULT 0,
+                    fat_ratio_pct REAL DEFAULT 0,
+                    muscle_mass_kg REAL DEFAULT 0,
+                    bone_mass_kg REAL DEFAULT 0,
+                    water_pct REAL DEFAULT 0,
+                    bmi REAL DEFAULT 0,
+                    source TEXT DEFAULT 'withings',
+                    raw_json TEXT
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS calorie_burn (
+                    date TEXT PRIMARY KEY,
+                    total_burn INTEGER DEFAULT 0,
+                    resting_burn INTEGER DEFAULT 0,
+                    steps_burn INTEGER DEFAULT 0,
+                    workout_burn INTEGER DEFAULT 0,
+                    bmr_full INTEGER DEFAULT 0,
+                    steps INTEGER DEFAULT 0,
+                    weight_kg REAL DEFAULT 0,
+                    day_fraction REAL DEFAULT 1.0,
+                    bmr_source TEXT DEFAULT '',
+                    updated_at TEXT,
+                    raw_json TEXT
+                )
+                """)
+    
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+                """)
+    
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(activity_type)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_body_comp_date ON body_composition(date)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_calorie_burn_date ON calorie_burn(date)")
+                
+                conn.commit()
+            _INITIALIZED_SQLITE_PATHS.add(canonical_path)
+    
     @staticmethod
     def _normalize_date(date_input: Optional[str], strict: bool = False) -> str:
         if not date_input:

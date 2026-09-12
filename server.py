@@ -142,9 +142,15 @@ class ChatRequest(BaseModel):
 
 # --- HELPER DEPENDENCIES ---
 
-def get_db() -> GarminDatabase:
-    """Instantiate GarminDatabase handler."""
-    db = GarminDatabase()
+def get_db(require_mariadb: bool = True) -> GarminDatabase:
+    """Instantiate GarminDatabase handler (enforces MariaDB in web mode)."""
+    return GarminDatabase(require_mariadb=require_mariadb)
+
+
+def bind_user_db(session: UserSession, require_mariadb: bool = True) -> GarminDatabase:
+    """Create GarminDatabase bound to the authenticated user's DEK."""
+    db = GarminDatabase(require_mariadb=require_mariadb)
+    db.set_user_session(session.user_id, session.dek)
     return db
 
 
@@ -153,6 +159,42 @@ def get_db_conn(db: GarminDatabase):
     if db.is_mariadb and db.pool:
         return db.get_mariadb_conn()
     return db.get_connection()
+
+
+@app.on_event("startup")
+def startup_db_check():
+    """Verify MariaDB connectivity on startup to prevent running with unsafe shared SQLite fallback (S-14)."""
+    require_mariadb = os.environ.get("HEALTHCHAT_REQUIRE_MARIADB", "1").lower() not in ("0", "false", "no")
+    if require_mariadb:
+        try:
+            db = GarminDatabase(require_mariadb=True)
+            conn = db.get_mariadb_conn()
+            with _db_cursor(conn) as cur:
+                cur.execute("SELECT 1")
+            conn.close()
+            logger.info("MariaDB connectivity and connection pool verified on startup.")
+        except Exception as e:
+            logger.critical(f"FATAL: Kunde inte ansluta till MariaDB vid serverstart: {e}")
+            raise RuntimeError(
+                f"HealthChat Web kräver MariaDB i fleranvändarläge (S-14). "
+                f"Fallback till SQLite är inte tillåtet. Fel: {e}"
+            )
+
+
+@app.exception_handler(RuntimeError)
+async def runtime_database_error_handler(request: Request, exc: RuntimeError):
+    msg = str(exc)
+    if "MariaDB" in msg:
+        logger.error(f"MariaDB unavailable on {request.url.path}: {msg}")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Databasen är inte tillgänglig för tillfället (MariaDB krävs)."}
+        )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": msg}
+    )
+
 
 
 @contextmanager
@@ -331,11 +373,6 @@ def get_current_session(healthchat_session: Optional[str] = Cookie(None)) -> Use
     )
 
 
-def bind_user_db(session: UserSession) -> GarminDatabase:
-    """Create GarminDatabase bound to the authenticated user's DEK."""
-    db = GarminDatabase()
-    db.set_user_session(session.user_id, session.dek)
-    return db
 
 
 # --- AUTH ENDPOINTS ---

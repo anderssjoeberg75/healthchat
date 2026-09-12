@@ -70,12 +70,12 @@ Samma fil och samma uppstartsblock – gör dem i en omgång. **`TLS-2` punkt 1 
 slås på i produktion förrän `TLS-1` är klar**, annars slutar inloggningen fungera över HTTP. Låt
 default vara `1` men dokumentera flaggan.
 
-### Omgång 4 – Databaslagret
+### Omgång 4 – Databaslagret (✅ Klart)
 | Ordning | ID | Fil | Omfattning |
 |---|---|---|---|
-| 9 | `TLS-3` (kod) | `garmin_db.py:117-138` | `ssl`-stöd i `get_mariadb_connection()` + värdnamnsvalidering. |
-| 10 | `PF-7` | `garmin_db.py`, `server.py` | Delad connection pool i stället för en per request. |
-| 11 | `S-14` | `garmin_db.py`, `server.py` | Kräv MariaDB i webbläget. **Designbeslut – läs uppgiften först.** |
+| 9 | `TLS-3` (kod) | `garmin_db.py:117-138` | ✅ Åtgärdad: ssl-stöd och värdnamnsvalidering i get_mariadb_connection & pool |
+| 10 | `PF-7` | `garmin_db.py`, `server.py` | ✅ Åtgärdad: Delad connection pool (singleton) + engångsinitiering av SQLite DDL |
+| 11 | `S-14` | `garmin_db.py`, `server.py` | ✅ Åtgärdad: Kräv MariaDB i webbläget (require_mariadb), startup-kontroll & 503-fel |
 
 `S-14` ändrar hur appen beter sig vid databasfel och bör tas efter `PF-7`, eftersom båda rör
 `GarminDatabase.__init__`. `TLS-3`:s serverdel (certifikat, `require_secure_transport`) är
@@ -172,7 +172,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] S-14: All hälsodata delas mellan användare när MariaDB inte är tillgänglig
+### [x] S-14: All hälsodata delas mellan användare när MariaDB inte är tillgänglig (webbkod: require_mariadb tvingat, startkontroll och 503-fel aktivt)
 - **Fil:** [garmin_db.py:167-185](garmin_db.py) (`__init__`), samtliga getters [garmin_db.py:784-1036](garmin_db.py), [secret_store.py:18-37](secret_store.py)
 - **Problem:** Varje läs- och skrivmetod i `GarminDatabase` har mönstret:
   ```python
@@ -371,7 +371,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] PF-7: Ny connection pool skapas per HTTP-request
+### [x] PF-7: Ny connection pool skapas per HTTP-request (delad singleton-pool och engångsinitiering av SQLite DDL aktiv)
 - **Fil:** [server.py:113-116](server.py) (`get_db`), [server.py:289-293](server.py) (`bind_user_db`), [garmin_db.py:167-185](garmin_db.py), [garmin_db.py:187-224](garmin_db.py) (`_init_mariadb_pool`)
 - **Problem:** `get_db()` och `bind_user_db()` instansierar `GarminDatabase()` vid **varje** anrop. Konstruktorn bygger en helt ny `PooledDB` med `mincached=2` ([garmin_db.py:207-209](garmin_db.py)) – alltså två nya TCP-anslutningar och handskakningar mot MariaDB per request – och kör dessutom `init_sqlite_db()` ([garmin_db.py:185](garmin_db.py)) som öppnar SQLite-filen och kör `CREATE TABLE IF NOT EXISTS` för samtliga tabeller, varje gång.
   `/api/dashboard/summary` anropar `bind_user_db` en gång och `get_db_conn` flera gånger; `get_current_session` kan skapa ytterligare en instans i samma request. Under last äter det upp MariaDB:s `max_connections`, och eftersom `blocking=True` ([garmin_db.py:210](garmin_db.py)) börjar requests hänga i stället för att fela snabbt.
@@ -569,7 +569,7 @@ av `Q-9` punkt 7.
 
 ---
 
-### [ ] TLS-3: Databastrafiken går okrypterad över LAN (lösenordsdelen åtgärdad, se `S-17`)
+### [x] TLS-3: Databastrafiken går okrypterad över LAN (kodåtgärd klar: TLS-stöd i get_mariadb_connection & pool; drift/serverkonfig kvarstår)
 - **Fil:** [healthchat_web.service:13](healthchat_web.service), [garmin_db.py:84-114](garmin_db.py) (`load_db_env`), [garmin_db.py:192-199](garmin_db.py) (`_init_mariadb_pool`), [garmin_db.py:117-138](garmin_db.py) (`get_mariadb_connection`)
 - **Problem:** Tre saker som förstärker varandra:
   1. **Ingen TLS mot databasen.** `_init_mariadb_pool` har stöd för TLS, men aktiverar det **bara om filen `~/.healthchat/ca.pem` råkar finnas** ([garmin_db.py:196-197](garmin_db.py)). Service-filen sätter varken `MARIADB_SSL_CA` eller `MARIADB_REQUIRE_TLS=1`, så `ssl_config` blir `None` och anslutningen går i klartext. Databasen ligger på `192.168.101.106` – en **annan maskin** – så all trafik passerar nätverket. Innehållet är visserligen envelope-krypterat, men **DEK:en skickas också** över samma anslutning (se `S-13`), liksom e-postadresser, lösenordshashar och hela sessionstabellen.
