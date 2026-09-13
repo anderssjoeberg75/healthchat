@@ -359,6 +359,26 @@ body {
   }
 }
 
+/* 4 Columns Grid (for Training + Weather) */
+.cards-row-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+@media (max-width: 1200px) {
+  .cards-row-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .cards-row-4 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .summary-card {
   background: #FFFFFF;
   border: 1px solid var(--border-color);

@@ -171,7 +171,13 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
     monkeypatch.setattr("server.AIClient.chat", mock_chat)
 
     try:
-        res = client.post("/api/ai/chat", json={"message": "Hur mår jag?"})
+        res = client.post(
+            "/api/ai/chat",
+            json={
+                "message": "Hur mår jag?",
+                "weather_context": "Göteborg: +14°C (Halvklart), Vind 3 m/s, Nederbörd 0.0 mm. Fina förhållanden för utomhuspass!"
+            }
+        )
         assert res.status_code == 200
         assert "text/event-stream" in res.headers["content-type"]
         body = res.text
@@ -190,6 +196,7 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         assert captured["model"] in ("gemma4:12b", "qwen2.5:latest")
         assert "🎯 MÅL MED TRÄNINGEN: Bli starkare i marklyft och springa milen" in captured["garmin_context"]
         assert "⚠️ KÄNDA SKADOR / FYSISKA BEGRÄNSNINGAR: Känning i höger hälsena" in captured["garmin_context"]
+        assert "⛅ AKTUELLT LOKALT VÄDER: Göteborg: +14°C" in captured["garmin_context"]
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 

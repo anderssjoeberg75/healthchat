@@ -259,6 +259,7 @@ class ChatRequest(BaseModel):
     message: str
     provider: Optional[str] = "ollama"
     model: Optional[str] = None
+    weather_context: Optional[str] = None
 
 
 # --- HELPER DEPENDENCIES ---
@@ -874,6 +875,13 @@ async def chat_stream(
         context_lines.append(f"Senaste sömn: {sleep[-1].get('total_sleep_hours', 0)}h (Score: {sleep[-1].get('sleep_score', 'N/A')})")
     if hrv:
         context_lines.append(f"Senaste HRV: {hrv[-1].get('last_night_avg', 'N/A')} ms (Status: {hrv[-1].get('status', 'N/A')})")
+    if req.weather_context:
+        context_lines.append(f"⛅ AKTUELLT LOKALT VÄDER: {req.weather_context.strip()}")
+        context_lines.append(
+            "VIKTIGT OM VÄDER & TRÄNINGSPASS: Användaren har ovanstående aktuella lokala väderrapport. "
+            "Ta aktiv hänsyn till detta vid val mellan utomhus/inomhus, passupplägg, klädrekommendationer, "
+            "halkrisk, vindmotstånd, temperatur och vätskebehov."
+        )
     
     garmin_context = "\n".join(context_lines)
     
