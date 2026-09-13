@@ -495,6 +495,98 @@ async function refreshDashboard() {
   }
 }
 
+const SPORT_COLORS = {
+  'Löpning': '#0078D4',
+  'Cykling': '#F59E0B',
+  'Virtuell cykling': '#F97316',
+  'Löpband': '#38BDF8',
+  'Traillöpning': '#0284C7',
+  'Styrketräning': '#10B981',
+  'Promenad': '#8B5CF6',
+  'Vandring': '#059669',
+  'Simning': '#06B6D4',
+  'Yoga': '#EC4899',
+  'Pilates': '#D946EF',
+  'Rodd': '#6366F1',
+  'Skidåkning': '#0EA5E9',
+  'Padel / Racket': '#EAB308',
+  'Konditionsträning': '#EF4444',
+  'Övrigt': '#6B7280'
+};
+
+function formatActivityType(rawType, fallbackName = '') {
+  const t = String(rawType || '').toLowerCase().trim();
+  const n = String(fallbackName || '').toLowerCase().trim();
+
+  // Virtuell cykling (Rouvy, Zwift, VirtualRide, inomhuscykling etc.)
+  if (t.includes('virtual') || n.includes('virtual') || n.includes('rouvy') || n.includes('zwift') || t.includes('indoor_cycling') || t.includes('spinning')) {
+    return 'Virtuell cykling';
+  }
+  // Cykling
+  if (t.includes('cycl') || t.includes('biking') || t.includes('ride') || t.includes('cykel') || t.includes('cykling') || n.includes('cykling') || n.includes('cykel')) {
+    return 'Cykling';
+  }
+  // Löpband
+  if (t.includes('treadmill') || n.includes('löpband')) {
+    return 'Löpband';
+  }
+  // Traillöpning
+  if (t.includes('trail_running') || t.includes('trail running') || n.includes('traillöpning') || n.includes('trail')) {
+    return 'Traillöpning';
+  }
+  // Löpning
+  if (t.includes('run') || t.includes('löp') || t.includes('jogg') || n.includes('löpning') || n.includes('jogg')) {
+    return 'Löpning';
+  }
+  // Promenad
+  if (t.includes('walk') || t.includes('gång') || t.includes('promenad') || n.includes('promenad') || n.includes('gång')) {
+    return 'Promenad';
+  }
+  // Vandring
+  if (t.includes('hike') || t.includes('vandr') || n.includes('vandr')) {
+    return 'Vandring';
+  }
+  // Simning
+  if (t.includes('swim') || t.includes('sim') || n.includes('sim')) {
+    return 'Simning';
+  }
+  // Styrketräning
+  if (t.includes('strength') || t.includes('weight') || t.includes('styrk') || t.includes('gym') || n.includes('styrk') || n.includes('gym')) {
+    return 'Styrketräning';
+  }
+  // Yoga
+  if (t.includes('yoga') || n.includes('yoga')) {
+    return 'Yoga';
+  }
+  // Pilates
+  if (t.includes('pilates') || n.includes('pilates')) {
+    return 'Pilates';
+  }
+  // Rodd
+  if (t.includes('row') || t.includes('rodd') || n.includes('rodd')) {
+    return 'Rodd';
+  }
+  // Skidåkning
+  if (t.includes('ski') || t.includes('skid') || n.includes('skid')) {
+    return 'Skidåkning';
+  }
+  // Padel / Racket
+  if (t.includes('padel') || t.includes('tennis') || n.includes('padel') || n.includes('tennis')) {
+    return 'Padel / Racket';
+  }
+  // Kondition
+  if (t.includes('cardio') || t.includes('fitness') || t.includes('workout') || t.includes('hiit') || n.includes('cardio') || n.includes('fitness')) {
+    return 'Konditionsträning';
+  }
+
+  // Om rawType är angett men inte översatt ovan
+  if (rawType && !['träning', 'activity', 'other', 'övrigt'].includes(t)) {
+    return rawType.charAt(0).toUpperCase() + rawType.slice(1).replace(/_/g, ' ');
+  }
+
+  return 'Övrigt';
+}
+
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -1356,13 +1448,16 @@ function renderTrainingCharts() {
   try {
     const typeCounts = {};
     activities.forEach(a => {
-      const t = String(a.activity_name || a.activity_type || 'Övrigt');
+      const t = formatActivityType(a.activity_type, a.activity_name);
       typeCounts[t] = (typeCounts[t] || 0) + 1;
     });
     const hasTypes = Object.keys(typeCounts).length > 0;
     const typeLabels = hasTypes ? Object.keys(typeCounts) : ['Inga pass'];
     const typeData = hasTypes ? Object.values(typeCounts) : [];
-    const typeColors = hasTypes ? ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7'] : ['#E5E7EB'];
+    const fallbackPalette = ['#0078D4', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#0284C7', '#14B8A6', '#F97316'];
+    const typeColors = hasTypes
+      ? typeLabels.map((lbl, idx) => SPORT_COLORS[lbl] || fallbackPalette[idx % fallbackPalette.length])
+      : ['#E5E7EB'];
 
     createChart('chart-train-types', 'doughnut', {
       labels: typeLabels,
@@ -1389,7 +1484,7 @@ function renderTrainingCharts() {
           <td>${escapeHtml(act.date || (act.start_time ? act.start_time.slice(0, 10) : '--'))}</td>
           <td><span class="badge-v">${escapeHtml(act.source || 'Garmin')}</span></td>
           <td><strong>${escapeHtml(act.activity_name || act.activity_type || 'Träning')}</strong></td>
-          <td>${escapeHtml(act.activity_type || 'Aktivitet')}</td>
+          <td>${escapeHtml(formatActivityType(act.activity_type, act.activity_name))}</td>
           <td>${act.distance_km ? Number(act.distance_km).toFixed(2) + ' km' : '--'}</td>
           <td>${act.duration_min ? Number(act.duration_min).toFixed(0) + ' min' : '--'}</td>
           <td>${act.calories ? Number(act.calories).toFixed(0) + ' kcal' : '--'}</td>
