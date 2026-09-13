@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=10.2.0">
+  <link rel="stylesheet" href="/static/styles.css?v=10.2.1">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -302,10 +302,10 @@
             <div class="summary-subtext" id="val-train-summary-cal" style="color:#6B7280; font-style:italic; margin-top:4px;">🏋️ 4 850 kcal träningsförbränning</div>
           </div>
 
-          <!-- CARD 4: LOKALT VÄDER & TRÄNINGSLÄGE -->
+          <!-- CARD 4: LOKALT VÄDER -->
           <div class="summary-card" id="card-weather-status">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>⛅ Lokalt Väder & Löpläge</h3>
+              <h3>⛅ Lokalt väder</h3>
               <button type="button" id="btn-refresh-weather" onclick="fetchLocalWeather(true)" title="Uppdatera väder & position" style="background:none; border:none; cursor:pointer; font-size:1rem; padding:0; line-height:1; color:#6B7280;">🔄</button>
             </div>
             <div class="summary-value" id="val-weather-temp" style="color:#0284C7; font-size:1.8rem;">--°C</div>
@@ -654,7 +654,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=10.2.0"></script>
+  <script src="/static/app.js?v=10.2.1"></script>
 
 </body>
 </html>
