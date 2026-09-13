@@ -841,9 +841,10 @@ async def chat_stream(
         or "http://192.168.107.15:11436"
     )
     ollama_model = (
-        secret_store.get_secret("ollama_model")
+        req.model
+        or secret_store.get_secret("ollama_model")
         or os.environ.get("OLLAMA_MODEL")
-        or "gemma4:12b"
+        or "qwen2.5:latest"
     )
 
     client = AIClient(
@@ -862,29 +863,40 @@ async def chat_stream(
 
     async def event_generator():
         try:
-            # Execute AI call in thread pool to avoid blocking async looper
+            import queue
+            q = queue.Queue()
+            SENTINEL = object()
+
+            def producer():
+                try:
+                    if hasattr(client, "chat_stream"):
+                        for chunk in client.chat_stream(req.message, garmin_context=garmin_context):
+                            q.put(chunk)
+                    else:
+                        resp = client.chat(req.message, garmin_context=garmin_context)
+                        q.put(resp)
+                except Exception as ex:
+                    q.put(ex)
+                finally:
+                    q.put(SENTINEL)
+
             loop = asyncio.get_event_loop()
-            response_text = await loop.run_in_executor(
-                None, lambda: client.chat(req.message, garmin_context=garmin_context)
-            )
+            loop.run_in_executor(None, producer)
+
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is SENTINEL:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                if item:
+                    yield f"data: {json.dumps({'chunk': item}, ensure_ascii=False)}\n\n"
 
             # Persist updated conversation history
             _user_chat_histories[session.user_id] = list(client.conversation_history)
             if healthchat_session:
                 _session_chat_histories[healthchat_session] = list(client.conversation_history)
-            
-            # SSE Protocol contract with static/app.js:
-            # - data: {"chunk": "<text>"} for streamed text pieces
-            # - data: {"done": true} to signal successful completion
-            # - data: {"error": "<message>"} to signal failure
-            import re
-            tokens = re.findall(r"\S+\s*|\s+", response_text)
-            if not tokens:
-                tokens = [response_text]
-            for i in range(0, len(tokens), 3):
-                chunk = "".join(tokens[i:i+3])
-                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.02)
+
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             logger.error(f"Error streaming AI response: {e}")

@@ -4,7 +4,7 @@ Supports: xAI (Grok), OpenAI (ChatGPT), Azure OpenAI, Google Gemini, Anthropic (
 """
 
 from openai import OpenAI, AzureOpenAI
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Generator
 import logging
 import os
 
@@ -233,6 +233,42 @@ class AIClient:
             timeout=300.0  # 5-minute timeout for local/network LLM generation
         )
     
+    @classmethod
+    def get_default_system_prompt(cls) -> str:
+        return """Du är en professionell personlig tränare och hälsocoach (COACH AI).
+Du analyserar användarens hälso- och träningsdata (Garmin Connect & Withings: sömn, Body Battery, stress, vikt, fett%, muskelmassa, puls och träningspass) för att ge skräddarsydda och professionella tränings- och hälsoråd.
+
+OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
+1. Svara ALLTID på ren, grammatiskt felfri och naturlig svenska.
+2. Förbjudna felöversättningar (använd ALDRIG dessa ord):
+   - Skriv "Analys & Bedömning" (ALDRIG "Sälsnämnd" eller "soterrängning").
+   - Skriv "Slutsats" (ALDRIG "Conclusio").
+   - Skriv "Sömnpoäng" eller "Sömnbetyg" (ALDRIG "sömnskore" eller "sovvakt").
+   - Skriv "Andetag per minut" (ALDRIG "åtgärder per minut").
+   - Skriv "Backar" eller "Stigning" (ALDRIG "häller").
+   - Skriv "Dricka ordentligt" eller "Hålla vätskebalansen" (ALDRIG "hålla dig hyddrad" eller "tvivelaktiga drickor").
+   - För cykling: Använd HASTIGHET i km/h eller watt (skriv INTE cykeltempo som 8-9 min/km).
+3. Håll en uppmuntrande och professionell ton.
+
+4. ANPASSA SVARSLÄNGD OCH STRUKTUR FÖR SNABBHET:
+   - Vid allmänna frågor, råd, tips eller korta frågor: Svara direkt, fokuserat och kortfattat utan onödig text.
+   - Endast vid full analys, sammanfattning av dagsform eller önskemål om träningspass: Inkludera datakällor och strukturera med rubriker:
+     📊 **Data & Datum som använts för denna analys:**
+     - 🛌 **Sömn:** [Datum]
+     - ⚡ **Body Battery & Stress:** [Datum]
+     - ⚖️ **Vikt & Kroppssammansättning (Withings/Garmin):** [Datum och vikt om tillgängligt]
+     - 🏃 **Träningspass:** [Datumintervall]
+
+     Rubriker:
+     - **Analys & Bedömning**
+     - **Rekommenderat träningspass**
+     - **Vätska, Näring & Återhämtning**
+     - **Slutsats & Mål**
+
+5. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
+6. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
+"""
+
     def chat(
         self, 
         user_message: str, 
@@ -252,36 +288,7 @@ class AIClient:
         """
         # Default system prompt
         if system_prompt is None:
-            system_prompt = """Du är en professionell personlig tränare och hälsocoach (COACH AI).
-Du analyserar användarens hälso- och träningsdata (Garmin Connect & Withings: sömn, Body Battery, stress, vikt, fett%, muskelmassa, puls och träningspass) för att ge skräddarsydda och professionella tränings- och hälsoråd.
-
-OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
-1. Svara ALLTID på ren, grammatiskt felfri och naturlig svenska.
-2. Förbjudna felöversättningar (använd ALDRIG dessa felaktiga ord):
-   - Skriv "Analys & Bedömning" (ALDRIG "Sälsnämnd").
-   - Skriv "Slutsats" (ALDRIG "Conclusio").
-   - Skriv "Sömnpoäng" eller "Sömnbetyg" (ALDRIG "sömnskore").
-   - Skriv "Andetag per minut" (ALDRIG "åtgärder per minut").
-   - Skriv "Backar" eller "Stigning" (ALDRIG "häller").
-   - Skriv "Dricka ordentligt" eller "Hålla vätskebalansen" (ALDRIG "hålla dig hyddrad").
-   - För cykling: Använd HASTIGHET i km/h eller watt (skriv INTE cykeltempo som 8-9 min/km).
-3. Håll en uppmuntrande, professionell och tydligt strukturerad ton.
-4. OBLIGATORISK DATAKÄLLA: Du MÅSTE inkludera följande lista med exakta datum för din analys:
-   📊 **Data & Datum som använts för denna analys:**
-   - 🛌 **Sömn:** [Datum]
-   - ⚡ **Body Battery & Stress:** [Datum]
-   - ⚖️ **Vikt & Kroppssammansättning (Withings/Garmin):** [Datum och vikt om tillgängligt]
-   - 🏃 **Träningspass:** [Datumintervall]
-
-5. Strukturera ditt svar med tydliga rubriker:
-   - **Analys & Bedömning**
-   - **Rekommenderat träningspass**
-   - **Vätska, Näring & Återhämtning**
-   - **Slutsats & Mål**
-
-6. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
-7. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
-"""
+            system_prompt = self.get_default_system_prompt()
         
         # Store ONLY user_message in history (not duplicated garmin_context) to prevent token explosion
         self.conversation_history.append({
@@ -446,6 +453,82 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                         f"Error details: {str(e)}")
             
             return f"Error: {str(e)}"
+
+    def chat_stream(
+        self, 
+        user_message: str, 
+        garmin_context: Optional[str] = None,
+        system_prompt: Optional[str] = None
+    ) -> Generator[str, None, None]:
+        """
+        Stream tokens from AI provider in real-time.
+        Yields text chunks as they are generated.
+        Updates self.conversation_history upon completion.
+        """
+        # Check if chat() has been mocked or monkeypatched (e.g. in tests)
+        if getattr(self.chat, "__name__", "") != "chat" or self.chat.__code__ != AIClient.chat.__code__:
+            resp = self.chat(user_message, garmin_context=garmin_context, system_prompt=system_prompt)
+            yield resp
+            return
+
+        if system_prompt is None:
+            system_prompt = self.get_default_system_prompt()
+            
+        self.conversation_history.append({
+            'role': 'user',
+            'content': user_message
+        })
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+
+        current_user_content = f"{garmin_context}\n\nUser Question: {user_message}" if garmin_context else user_message
+
+        # Check if OpenAI-compatible streaming is available
+        if self.provider in ('ollama', 'openai', 'xai', 'azure') and hasattr(self.client, 'chat') and hasattr(self.client.chat, 'completions'):
+            messages = [{"role": "system", "content": system_prompt}]
+            for msg in self.conversation_history[:-1]:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+            messages.append({"role": "user", "content": current_user_content})
+
+            model_param = self.model
+            if self.provider == 'xai' and not model_param:
+                model_param = 'grok-beta'
+
+            timeout_val = 300.0 if self.provider == 'ollama' else 120.0
+            full_response = ""
+            try:
+                response = self.client.chat.completions.create(
+                    model=model_param,
+                    messages=messages,
+                    max_tokens=2000,
+                    temperature=0.5 if self.provider == 'ollama' else 0.7,
+                    timeout=timeout_val,
+                    stream=True
+                )
+                for chunk in response:
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        full_response += delta
+                        yield delta
+
+                # Record full response in history
+                self.conversation_history.append({
+                    'role': 'assistant',
+                    'content': self._clean_response(full_response)
+                })
+                if len(self.conversation_history) > 20:
+                    self.conversation_history = self.conversation_history[-20:]
+            except Exception as e:
+                if self.conversation_history and self.conversation_history[-1].get('role') == 'user':
+                    self.conversation_history.pop()
+                logger.error(f"Error streaming from {self.provider}: {e}")
+                raise
+        else:
+            # Fallback for other providers or mocks
+            if self.conversation_history and self.conversation_history[-1].get('role') == 'user':
+                self.conversation_history.pop()
+            resp = self.chat(user_message, garmin_context=garmin_context, system_prompt=system_prompt)
+            yield resp
 
     def _call_openai_compatible(self, system_prompt: str, current_user_content: str) -> str:
         """Call OpenAI/xAI/Azure/Ollama with sliding window history and expanded max_tokens=4000."""

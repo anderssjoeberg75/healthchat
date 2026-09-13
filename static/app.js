@@ -64,6 +64,7 @@ function onAuthSuccess() {
 
   refreshDashboard();
   loadChatHistory();
+  initChatModelSelect();
 }
 
 function switchAuthTab(tab) {
@@ -1467,6 +1468,22 @@ async function clearChatHistory() {
   }
 }
 
+function initChatModelSelect() {
+  const modelSelect = document.getElementById('chat-model-select');
+  if (!modelSelect) return;
+  const savedModel = localStorage.getItem('healthchat_selected_model');
+  if (savedModel) {
+    modelSelect.value = savedModel;
+  }
+}
+
+function handleModelChange() {
+  const modelSelect = document.getElementById('chat-model-select');
+  if (modelSelect) {
+    localStorage.setItem('healthchat_selected_model', modelSelect.value);
+  }
+}
+
 async function handleSendChatMessage(event) {
   event.preventDefault();
   const input = document.getElementById('chat-input-field');
@@ -1480,11 +1497,14 @@ async function handleSendChatMessage(event) {
 
   const botBubble = appendChatMessage('bot', 'Tänker...');
 
+  const modelSelect = document.getElementById('chat-model-select');
+  const selectedModel = modelSelect ? modelSelect.value : 'qwen2.5:latest';
+
   try {
     const res = await apiFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message, model: selectedModel })
     });
 
     if (!res.ok) {

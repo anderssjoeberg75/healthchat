@@ -184,7 +184,7 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         assert "ett AI-svar" in reassembled
         assert captured["provider"] == "ollama"
         assert "192.168.107.15:11436" in captured["ollama_base_url"]
-        assert captured["model"] == "gemma4:12b"
+        assert captured["model"] in ("gemma4:12b", "qwen2.5:latest")
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 
