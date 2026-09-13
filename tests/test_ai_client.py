@@ -110,3 +110,79 @@ def test_sliding_window_caps_history_at_20_messages(monkeypatch):
     # Verify that garmin_context is NOT stored in user message in history
     assert client.conversation_history[0]["content"] == "Question 5"
 
+
+# --- Preload Ollama Model -----------------------------------------------------
+
+def test_preload_ollama_model_already_resident(monkeypatch):
+    from ai_client import preload_ollama_model
+
+    called_urls = []
+    class DummyResponse:
+        def __init__(self, status_code, json_data):
+            self.status_code = status_code
+            self._json = json_data
+            self.text = ""
+        def json(self):
+            return self._json
+
+    def mock_get(url, timeout=3):
+        called_urls.append(("GET", url))
+        return DummyResponse(200, {"models": [{"name": "gemma4:12b:latest"}]})
+
+    def mock_post(url, json=None, timeout=30):
+        called_urls.append(("POST", url, json))
+        return DummyResponse(200, {"response": ""})
+
+    monkeypatch.setattr("requests.get", mock_get)
+    monkeypatch.setattr("requests.post", mock_post)
+
+    result = preload_ollama_model(base_url="http://192.168.107.15:11436", model="gemma4:12b")
+    assert result is True
+    # Verify GET /api/ps was called, but POST /api/generate was NOT called because model was already resident
+    assert any(c[0] == "GET" and "/api/ps" in c[1] for c in called_urls)
+    assert not any(c[0] == "POST" for c in called_urls)
+
+
+def test_preload_ollama_model_not_resident_triggers_generate(monkeypatch):
+    from ai_client import preload_ollama_model
+
+    called_urls = []
+    class DummyResponse:
+        def __init__(self, status_code, json_data):
+            self.status_code = status_code
+            self._json = json_data
+            self.text = ""
+        def json(self):
+            return self._json
+
+    def mock_get(url, timeout=3):
+        called_urls.append(("GET", url))
+        return DummyResponse(200, {"models": [{"name": "llama3:latest"}]})
+
+    def mock_post(url, json=None, timeout=30):
+        called_urls.append(("POST", url, json))
+        return DummyResponse(200, {"response": ""})
+
+    monkeypatch.setattr("requests.get", mock_get)
+    monkeypatch.setattr("requests.post", mock_post)
+
+    result = preload_ollama_model(base_url="http://192.168.107.15:11436", model="gemma4:12b", keep_alive="45m")
+    assert result is True
+    # Verify both GET /api/ps and POST /api/generate were called
+    assert any(c[0] == "GET" and "/api/ps" in c[1] for c in called_urls)
+    post_calls = [c for c in called_urls if c[0] == "POST"]
+    assert len(post_calls) == 1
+    assert "/api/generate" in post_calls[0][1]
+    assert post_calls[0][2] == {"model": "gemma4:12b", "keep_alive": "45m"}
+
+
+def test_preload_ollama_model_unreachable_returns_false(monkeypatch):
+    from ai_client import preload_ollama_model
+
+    def mock_get(url, timeout=3):
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr("requests.get", mock_get)
+    result = preload_ollama_model(base_url="http://non-existent-host:11434", model="gemma4:12b")
+    assert result is False
+

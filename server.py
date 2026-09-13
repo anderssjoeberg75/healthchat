@@ -22,7 +22,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
-from fastapi import FastAPI, Request, Response, HTTPException, status, Depends, Cookie, Query, Header
+from fastapi import FastAPI, Request, Response, HTTPException, status, Depends, Cookie, Query, Header, BackgroundTasks
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -110,6 +110,35 @@ _sessions_lock = threading.Lock()
 
 SESSION_COOKIE_NAME = "healthchat_session"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(86400 * 30)))  # 30 days
+
+
+_last_preload_time = 0.0
+_preload_lock = threading.Lock()
+
+
+def trigger_model_preload():
+    """Trigger non-blocking background model preload for Ollama with cooldown."""
+    global _last_preload_time
+    now = time.time()
+    with _preload_lock:
+        if now - _last_preload_time < 120:  # 2 minute cooldown between check attempts
+            return
+        _last_preload_time = now
+
+    ollama_url = (
+        secret_store.get_secret("ollama_base_url")
+        or os.environ.get("OLLAMA_BASE_URL")
+        or "http://192.168.107.15:11436"
+    )
+    ollama_model = (
+        secret_store.get_secret("ollama_model")
+        or os.environ.get("OLLAMA_MODEL")
+        or "gemma4:12b"
+    )
+    try:
+        ai_client.preload_ollama_model(base_url=ollama_url, model=ollama_model, keep_alive="30m")
+    except Exception as e:
+        logger.debug(f"Preload exception ignored: {e}")
 
 
 def store_active_session(session_id: str, session: UserSession, max_age: int = SESSION_MAX_AGE_SECONDS):
@@ -483,7 +512,7 @@ def get_current_session(
 # --- AUTH ENDPOINTS ---
 
 @app.post("/api/auth/register")
-def register(req: RegisterRequest, response: Response, request: Request):
+def register(req: RegisterRequest, response: Response, request: Request, background_tasks: BackgroundTasks):
     db = get_db()
     conn = get_db_conn(db)
     try:
@@ -507,6 +536,7 @@ def register(req: RegisterRequest, response: Response, request: Request):
             samesite="lax",
             max_age=SESSION_MAX_AGE_SECONDS
         )
+        background_tasks.add_task(trigger_model_preload)
         return {
             "status": "success",
             "message": "Konto skapat!",
@@ -529,7 +559,7 @@ def register(req: RegisterRequest, response: Response, request: Request):
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest, response: Response, request: Request):
+def login(req: LoginRequest, response: Response, request: Request, background_tasks: BackgroundTasks):
     db = get_db()
     conn = None
     try:
@@ -546,6 +576,7 @@ def login(req: LoginRequest, response: Response, request: Request):
             samesite="lax",
             max_age=SESSION_MAX_AGE_SECONDS
         )
+        background_tasks.add_task(trigger_model_preload)
         return {
             "status": "success",
             "message": "Inloggningen lyckades!",
@@ -624,7 +655,8 @@ def auto_sync_user_profile(conn, session: UserSession, db: GarminDatabase):
 
 
 @app.get("/api/auth/me")
-def get_me(session: UserSession = Depends(get_current_session)):
+def get_me(background_tasks: BackgroundTasks, session: UserSession = Depends(get_current_session)):
+    background_tasks.add_task(trigger_model_preload)
     db = bind_user_db(session)
     conn = get_db_conn(db)
     try:
@@ -940,6 +972,16 @@ def clear_chat_history(
         _session_chat_histories.pop(healthchat_session, None)
     _user_chat_histories.pop(session.user_id, None)
     return {"status": "cleared"}
+
+
+@app.post("/api/ai/preload")
+def preload_ai_endpoint(
+    background_tasks: BackgroundTasks,
+    session: UserSession = Depends(get_current_session)
+):
+    """Trigger asynchronous preloading of the AI model into Ollama memory."""
+    background_tasks.add_task(trigger_model_preload)
+    return {"status": "success", "message": "Förladdning av AI-modell startad i bakgrunden."}
 
 
 # --- PROFILE ENDPOINTS ---

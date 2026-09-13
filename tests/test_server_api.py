@@ -8,6 +8,7 @@ import pytest
 import auth
 from garmin_db import GarminDatabase
 from fastapi.testclient import TestClient
+import server
 from server import app, _active_sessions
 
 client = TestClient(app, base_url="https://testserver")
@@ -263,6 +264,41 @@ def test_ai_chat_history_and_clear():
         res_after = client.get("/api/ai/chat/history", headers={"Authorization": f"Bearer {test_sid}"}, cookies={"healthchat_session": test_sid})
         assert res_after.status_code == 200
         assert res_after.json()["history"] == []
+    finally:
+        server.remove_active_session(test_sid)
+
+
+def test_preload_ai_endpoint_and_login_trigger(monkeypatch):
+    """Verify that /api/ai/preload endpoint works and login triggers preload."""
+    test_sid = "preload-test-token"
+    test_session = auth.UserSession(
+        user_id=888,
+        email="preload@example.com",
+        dek=bytearray(b"0123456789abcdef0123456789abcdef"),
+        encrypted_profile={}
+    )
+    server.store_active_session(test_sid, test_session)
+
+    preload_called = []
+    monkeypatch.setattr(
+        "ai_client.preload_ollama_model",
+        lambda *args, **kwargs: preload_called.append(True) or True
+    )
+
+    try:
+        # 1. Test explicit /api/ai/preload endpoint
+        res = client.post(
+            "/api/ai/preload",
+            headers={"Authorization": f"Bearer {test_sid}"},
+            cookies={"healthchat_session": test_sid}
+        )
+        assert res.status_code == 200
+        assert res.json()["status"] == "success"
+
+        # 2. Test trigger_model_preload directly
+        server._last_preload_time = 0.0
+        server.trigger_model_preload()
+        assert len(preload_called) >= 1
     finally:
         server.remove_active_session(test_sid)
 

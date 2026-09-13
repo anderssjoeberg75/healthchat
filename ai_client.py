@@ -762,5 +762,51 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
         return fallback
 
 
-# Module-level alias
+# Module-level aliases and helpers
 normalize_ollama_url = AIClient.normalize_ollama_url
+
+
+def preload_ollama_model(base_url: Optional[str] = None, model: Optional[str] = None, keep_alive: str = "30m") -> bool:
+    """Preload specified model into Ollama memory (GPU/VRAM) if not already active.
+    
+    1. Checks /api/ps to see if the model is already resident in GPU/VRAM.
+    2. If not, sends a preload request to /api/generate with an empty prompt and keep_alive.
+    """
+    target_model = model or "gemma4:12b"
+    url = base_url or os.environ.get("OLLAMA_BASE_URL") or "http://192.168.107.15:11436"
+    base_host = url.rstrip("/").replace("/v1", "")
+    hosts_to_try = [base_host]
+    if "localhost" in base_host:
+        hosts_to_try.append(base_host.replace("localhost", "127.0.0.1"))
+    elif "127.0.0.1" in base_host:
+        hosts_to_try.append(base_host.replace("127.0.0.1", "localhost"))
+
+    import requests
+    for h in hosts_to_try:
+        try:
+            # 1. Check if model is already loaded in VRAM
+            ps_resp = requests.get(f"{h}/api/ps", timeout=3)
+            if ps_resp.status_code == 200:
+                loaded_models = ps_resp.json().get("models", [])
+                for m in loaded_models:
+                    m_name = m.get("name", "") or m.get("model", "")
+                    if target_model == m_name or target_model in m_name or m_name.startswith(target_model):
+                        logger.info(f"Ollama-modell '{target_model}' ligger redan aktiv i minnet på {h}.")
+                        return True
+
+            # 2. Not loaded, trigger preload via /api/generate without prompt
+            logger.info(f"Förladdar Ollama-modell '{target_model}' till minnet på {h} (keep_alive={keep_alive})...")
+            gen_resp = requests.post(
+                f"{h}/api/generate",
+                json={"model": target_model, "keep_alive": keep_alive},
+                timeout=30
+            )
+            if gen_resp.status_code == 200:
+                logger.info(f"Ollama-modell '{target_model}' har förladdats i minnet på {h}.")
+                return True
+            else:
+                logger.warning(f"Kunde inte förladda Ollama-modell på {h}: HTTP {gen_resp.status_code}")
+        except Exception as e:
+            logger.debug(f"Kunde inte ansluta till Ollama för förladdning på {h}: {e}")
+
+    return False
