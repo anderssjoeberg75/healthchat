@@ -366,8 +366,22 @@ function setDaysRange(days) {
 let _isHeaderRefreshing = false;
 
 async function handleHeaderRefresh() {
-  if (_isHeaderRefreshing) return;
+  console.log('[HeaderRefresh] Klick på Uppdatera mottaget.');
+  if (_isHeaderRefreshing) {
+    console.warn('[HeaderRefresh] Uppdatering pågår redan, ignorerar.');
+    return;
+  }
   _isHeaderRefreshing = true;
+
+  // Säkerhetstimer för att inte låsa knappen om något oväntat sker
+  const safetyTimeout = setTimeout(() => {
+    _isHeaderRefreshing = false;
+    const b = document.getElementById('btn-refresh-dashboard');
+    if (b && b.disabled) {
+      b.disabled = false;
+      b.innerHTML = '🔄 Uppdatera';
+    }
+  }, 35000);
 
   const btn = document.getElementById('btn-refresh-dashboard');
   const originalHtml = btn ? btn.innerHTML : '🔄 Uppdatera';
@@ -380,37 +394,50 @@ async function handleHeaderRefresh() {
 
     // 1. Synka alla anslutna externa datakällor (Garmin, Withings, Strava, Fitbit)
     try {
-      const syncRes = await apiFetch('/api/datasources/sync_all', { method: 'POST' });
+      console.log('[HeaderRefresh] Anropar /api/datasources/sync_all...');
+      const syncRes = await apiFetch('/api/datasources/sync_all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
       if (syncRes.ok) {
         const syncData = await syncRes.json();
+        console.log('[HeaderRefresh] sync_all svar:', syncData);
         if (syncData.count > 0) {
           // Poll för att vänta in att synkroniseringen blir klar
           let attempts = 0;
-          while (attempts < 18) {
-            await new Promise(r => setTimeout(r, 1200));
+          while (attempts < 20) {
+            await new Promise(r => setTimeout(r, 1000));
             const stRes = await apiFetch('/api/datasources/sync_all_status');
             if (stRes.ok) {
               const st = await stRes.json();
+              console.log('[HeaderRefresh] sync_all_status:', st);
               if (!st.running) break;
             }
             attempts++;
           }
         }
+      } else {
+        console.warn('[HeaderRefresh] sync_all status inte ok:', syncRes.status);
       }
     } catch (syncErr) {
-      console.warn('Synkronisering av datakällor gav varning:', syncErr);
+      console.warn('[HeaderRefresh] Varning vid anrop till datakällor:', syncErr);
     }
 
     // 2. Hämta färsk data från databasen och rita om grafer/kort
     if (btn) btn.innerHTML = '⏳ Uppdaterar grafer...';
+    console.log('[HeaderRefresh] Uppdaterar grafer...');
     await refreshDashboard();
 
     // 3. Om användaren står i Datakällor-fliken, uppdatera även den
-    if (currentTab === 'datasources') {
-      await loadDatasources();
+    if (typeof currentTab !== 'undefined' && currentTab === 'datasources') {
+      if (typeof loadDatasources === 'function') {
+        await loadDatasources();
+      }
     }
 
     // 4. Bekräfta att uppdateringen är klar
+    clearTimeout(safetyTimeout);
     if (btn) {
       btn.innerHTML = '✓ Uppdaterad!';
       setTimeout(() => {
@@ -422,7 +449,8 @@ async function handleHeaderRefresh() {
       _isHeaderRefreshing = false;
     }
   } catch (err) {
-    console.error('Fel vid uppdatering av dashboard:', err);
+    clearTimeout(safetyTimeout);
+    console.error('[HeaderRefresh] Fel vid uppdatering av dashboard:', err);
     if (btn) {
       btn.innerHTML = '⚠️ Fel vid uppdatering';
       setTimeout(() => {
@@ -435,6 +463,8 @@ async function handleHeaderRefresh() {
     }
   }
 }
+window.handleHeaderRefresh = handleHeaderRefresh;
+
 
 async function refreshDashboard() {
   try {

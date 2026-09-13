@@ -95,6 +95,9 @@ async def add_security_headers(request: Request, call_next):
         "connect-src 'self'; "
         "frame-ancestors 'none';"
     )
+    if request.url.path.startswith("/static") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
