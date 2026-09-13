@@ -844,7 +844,7 @@ async def chat_stream(
         req.model
         or secret_store.get_secret("ollama_model")
         or os.environ.get("OLLAMA_MODEL")
-        or "qwen2.5:latest"
+        or "gemma4:12b"
     )
 
     client = AIClient(

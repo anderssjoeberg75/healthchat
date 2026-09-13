@@ -1497,6 +1497,8 @@ function initChatModelSelect() {
   const savedModel = localStorage.getItem('healthchat_selected_model');
   if (savedModel) {
     modelSelect.value = savedModel;
+  } else {
+    modelSelect.value = 'gemma4:12b';
   }
 }
 
@@ -1521,7 +1523,7 @@ async function handleSendChatMessage(event) {
   const botBubble = appendChatMessage('bot', 'Tänker...');
 
   const modelSelect = document.getElementById('chat-model-select');
-  const selectedModel = modelSelect ? modelSelect.value : 'qwen2.5:latest';
+  const selectedModel = modelSelect ? modelSelect.value : 'gemma4:12b';
 
   try {
     const res = await apiFetch('/api/ai/chat', {
