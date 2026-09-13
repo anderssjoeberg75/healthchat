@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=10.0.0">
+  <link rel="stylesheet" href="/static/styles.css?v=10.2.0">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -267,8 +267,8 @@
       <!-- TAB 2: TRÄNING -->
       <section id="tab-training" class="content-tab hidden">
         
-        <!-- 1. Top 4 Training Summary Cards Grid (including Weather) -->
-        <div class="cards-row cards-row-4" style="margin-bottom:15px;">
+        <!-- 1. Top 4 Training Summary Cards Grid (strictly 4 cards on a single row) -->
+        <div class="cards-row cards-row-4" style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin-bottom:15px; width:100%;">
           
           <!-- CARD 1: RUNNING & FITNESS INDEX -->
           <div class="summary-card">
@@ -654,7 +654,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=10.1.0"></script>
+  <script src="/static/app.js?v=10.2.0"></script>
 
 </body>
 </html>

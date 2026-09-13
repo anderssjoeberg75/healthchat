@@ -309,3 +309,62 @@ def test_preload_ai_endpoint_and_login_trigger(monkeypatch):
     finally:
         server.remove_active_session(test_sid)
 
+
+def test_get_weather_endpoint(monkeypatch):
+    """Verify that /api/weather returns weather data and advice."""
+    test_sid = "weather-test-token"
+    test_session = auth.UserSession(
+        user_id=777,
+        email="weather@example.com",
+        dek=bytearray(b"0123456789abcdef0123456789abcdef"),
+        encrypted_profile={}
+    )
+    server.store_active_session(test_sid, test_session)
+
+    class DummyResponse:
+        def __init__(self, status_code, data):
+            self.status_code = status_code
+            self._data = data
+        def json(self):
+            return self._data
+
+    def mock_requests_get(url, timeout=5):
+        if "open-meteo" in url:
+            return DummyResponse(200, {
+                "current": {
+                    "temperature_2m": 15.5,
+                    "apparent_temperature": 15.0,
+                    "wind_speed_10m": 4.2,
+                    "precipitation": 0.0,
+                    "weather_code": 1,
+                    "relative_humidity_2m": 60
+                },
+                "hourly": {
+                    "precipitation_probability": [5]
+                }
+            })
+        elif "reverse-geocode" in url:
+            return DummyResponse(200, {"city": "Göteborg"})
+        elif "ip-api" in url:
+            return DummyResponse(200, {"city": "Göteborg", "lat": 57.70, "lon": 11.97})
+        return DummyResponse(404, {})
+
+    monkeypatch.setattr("requests.get", mock_requests_get)
+
+    try:
+        res = client.get(
+            "/api/weather?lat=57.70&lon=11.97",
+            headers={"Authorization": f"Bearer {test_sid}"},
+            cookies={"healthchat_session": test_sid}
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "success"
+        assert data["locationName"] == "Göteborg"
+        assert data["temp"] == 15.5
+        assert data["wind"] == 4.2
+        assert "Mestadels klart" in data["weatherDesc"]
+        assert "Fina förhållanden" in data["advice"]
+    finally:
+        server.remove_active_session(test_sid)
+

@@ -992,6 +992,165 @@ def preload_ai_endpoint(
     return {"status": "success", "message": "Förladdning av AI-modell startad i bakgrunden."}
 
 
+# --- WEATHER ENDPOINT ---
+
+_weather_cache: Dict[str, Any] = {}
+
+
+def _get_wmo_code_info(code: int):
+    c = int(code)
+    if c == 0:
+        return "Klart & soligt", "☀️"
+    elif c == 1:
+        return "Mestadels klart", "🌤️"
+    elif c == 2:
+        return "Halvklart", "⛅"
+    elif c == 3:
+        return "Mulet", "☁️"
+    elif c in (45, 48):
+        return "Dimmigt", "🌫️"
+    elif c in (51, 53, 55):
+        return "Duggregn", "🌦️"
+    elif c in (61, 63, 65):
+        return "Regn", "🌧️"
+    elif c in (71, 73, 75, 77):
+        return "Snöfall", "🌨️"
+    elif c in (80, 81, 82):
+        return "Regnskurar", "🌧️"
+    elif c in (85, 86):
+        return "Snöbyar", "🌨️"
+    elif c in (95, 96, 99):
+        return "Åskväder", "⛈️"
+    return "Växlande", "⛅"
+
+
+def _evaluate_weather_advice(temp: float, wind: float, precip: float, code: int):
+    c = int(code)
+    if temp < -10:
+        return "🥶 Mycket kallt – skydda luftvägarna eller kör inomhus", "#DC2626"
+    elif temp < 0:
+        return "❄️ Minusgrader & halkrisk – broddar/lager på lager", "#D97706"
+    elif c in (95, 96, 99):
+        return "⛈️ Åska & oväder – välj inomhusträning idag", "#DC2626"
+    elif precip > 2.0 or c in (63, 65, 81, 82):
+        return "🌧️ Kraftigt regn – regnställ eller inomhuspass", "#2563EB"
+    elif wind > 11.0:
+        return "💨 Mycket blåsigt – välj skogsslinga eller läig rutt", "#D97706"
+    elif temp > 26:
+        return "☀️ Varmt – drick extra vätska, träna gärna morgon/kväll", "#D97706"
+    elif precip > 0.2 or c in (51, 53, 55, 61, 80):
+        return "🌦️ Lätt regn – tunn regnjacka/keps rekommenderas", "#0284C7"
+    else:
+        return "🏃 Fina förhållanden för utomhusträning!", "#10B981"
+
+
+@app.get("/api/weather")
+def get_weather(
+    lat: Optional[float] = Query(None),
+    lon: Optional[float] = Query(None),
+    request: Request = None,
+    session: UserSession = Depends(get_current_session)
+):
+    """Fetch current weather and outdoor running conditions via Open-Meteo with fallback."""
+    global _weather_cache
+    import requests
+
+    now = time.time()
+    resolved_lat = lat
+    resolved_lon = lon
+    location_name = None
+
+    # 1. If lat/lon not provided by browser GPS, detect via IP
+    if resolved_lat is None or resolved_lon is None:
+        try:
+            ip_resp = requests.get("http://ip-api.com/json", timeout=3)
+            if ip_resp.status_code == 200:
+                ip_data = ip_resp.json()
+                resolved_lat = ip_data.get("lat")
+                resolved_lon = ip_data.get("lon")
+                location_name = ip_data.get("city")
+        except Exception as e:
+            logger.debug(f"IP geocoding fallback failed: {e}")
+
+    # 2. Fallback to default Sweden coordinates (Stockholm)
+    if resolved_lat is None or resolved_lon is None:
+        resolved_lat = 59.3293
+        resolved_lon = 18.0686
+        location_name = "Stockholm"
+
+    cache_key = f"{round(resolved_lat, 2)}_{round(resolved_lon, 2)}"
+    if cache_key in _weather_cache and (now - _weather_cache[cache_key]["time"] < 600):
+        return _weather_cache[cache_key]["data"]
+
+    # 3. Resolve location name if not already resolved
+    if not location_name:
+        try:
+            geo_resp = requests.get(
+                f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={resolved_lat}&longitude={resolved_lon}&localityLanguage=sv",
+                timeout=3
+            )
+            if geo_resp.status_code == 200:
+                g_data = geo_resp.json()
+                location_name = g_data.get("city") or g_data.get("locality") or g_data.get("principalSubdivision")
+        except Exception:
+            pass
+    if not location_name:
+        location_name = "Din plats"
+
+    # 4. Fetch from Open-Meteo
+    try:
+        meteo_url = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={resolved_lat}&longitude={resolved_lon}"
+            f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m"
+            f"&hourly=precipitation_probability&forecast_days=1&timezone=auto"
+        )
+        m_resp = requests.get(meteo_url, timeout=5)
+        if m_resp.status_code != 200:
+            raise HTTPException(status_code=502, detail="Kunde inte hämta data från Open-Meteo")
+
+        w_data = m_resp.json()
+        curr = w_data.get("current", {})
+        temp = round(curr.get("temperature_2m", 0), 1)
+        feels_like = round(curr.get("apparent_temperature", temp), 1)
+        wind = round(curr.get("wind_speed_10m", 0), 1)
+        precip = curr.get("precipitation", 0.0)
+        code = curr.get("weather_code", 0)
+        humidity = curr.get("relative_humidity_2m", 50)
+        rain_prob = 0
+        hourly = w_data.get("hourly", {})
+        if hourly.get("precipitation_probability"):
+            rain_prob = hourly["precipitation_probability"][0]
+
+        weather_desc, weather_icon = _get_wmo_code_info(code)
+        advice, advice_color = _evaluate_weather_advice(temp, wind, precip, code)
+
+        sign = "+" if temp > 0 else ""
+        data = {
+            "status": "success",
+            "lat": resolved_lat,
+            "lon": resolved_lon,
+            "locationName": location_name,
+            "temp": temp,
+            "feelsLike": feels_like,
+            "wind": wind,
+            "precip": precip,
+            "rainProb": rain_prob,
+            "humidity": humidity,
+            "code": code,
+            "weatherDesc": weather_desc,
+            "weatherIcon": weather_icon,
+            "advice": advice,
+            "adviceColor": advice_color,
+            "summaryText": f"{location_name}: {sign}{temp}°C ({weather_desc}), Vind {wind} m/s, Nederbörd {precip} mm ({rain_prob}% risk). {advice}"
+        }
+
+        _weather_cache[cache_key] = {"time": now, "data": data}
+        return data
+    except Exception as ex:
+        logger.error(f"Väderfel: {ex}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Kunde inte hämta väder: {ex}")
+
+
 # --- PROFILE ENDPOINTS ---
 
 @app.post("/api/profile/update")

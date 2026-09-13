@@ -1569,124 +1569,50 @@ async function fetchLocalWeather(forceRefresh = false) {
 
   if (!tempEl) return;
 
-  // Check cached weather in sessionStorage (valid for 20 mins)
+  // 1. Check cached weather in sessionStorage (valid for 10 mins)
   const cached = sessionStorage.getItem('healthchat_weather');
   if (!forceRefresh && cached) {
     try {
       const parsed = JSON.parse(cached);
-      if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < 20 * 60 * 1000)) {
+      if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < 10 * 60 * 1000)) {
         renderWeatherToCard(parsed.data);
         currentWeatherData = parsed.data;
         return;
       }
-    } catch (e) {
-      console.warn("Could not read cached weather:", e);
-    }
+    } catch (_) {}
   }
 
   if (locEl) locEl.innerText = "📍 Söker din position...";
   if (adviceEl) adviceEl.innerText = "🏃 Hämtar lokala väderdata...";
 
-  // Get coords via navigator.geolocation or saved coords
-  let coords = null;
-  const savedCoords = localStorage.getItem('healthchat_coords');
-  if (!forceRefresh && savedCoords) {
+  // 2. Try browser geolocation quickly (timeout 2500ms)
+  let queryParams = "";
+  if (navigator.geolocation && (window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     try {
-      coords = JSON.parse(savedCoords);
-    } catch (_) {}
-  }
-
-  if (!coords) {
-    try {
-      coords = await new Promise((resolve, reject) => {
-        if (!navigator.geolocation) {
-          return reject(new Error("Geolokalisering stöds inte i webbläsaren"));
-        }
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-          (err) => reject(err),
-          { timeout: 7000, enableHighAccuracy: false }
-        );
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 2500, enableHighAccuracy: false });
       });
-      localStorage.setItem('healthchat_coords', JSON.stringify(coords));
-    } catch (geoErr) {
-      console.info("Geolocation failed or denied, trying IP fallback...", geoErr);
-      try {
-        const ipRes = await fetch('https://ipapi.co/json/');
-        if (ipRes.ok) {
-          const ipData = await ipRes.json();
-          if (ipData.latitude && ipData.longitude) {
-            coords = { lat: ipData.latitude, lon: ipData.longitude, cityName: ipData.city };
-          }
-        }
-      } catch (ipErr) {
-        console.warn("IP geolocation fallback failed:", ipErr);
+      if (pos && pos.coords) {
+        queryParams = `?lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`;
       }
+    } catch (_) {
+      // Browser GPS denied, timed out, or blocked - server will detect user location via IP!
     }
   }
 
-  // If still no coords, default to Stockholm
-  if (!coords) {
-    coords = { lat: 59.3293, lon: 18.0686, cityName: "Stockholm (Standard)" };
-  }
-
+  // 3. Fetch from backend proxy endpoint (/api/weather)
   try {
-    const lat = Number(coords.lat).toFixed(4);
-    const lon = Number(coords.lon).toFixed(4);
-
-    let locationName = coords.cityName || "";
-    if (!locationName) {
-      try {
-        const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=sv`);
-        if (geoRes.ok) {
-          const geoData = await geoRes.json();
-          locationName = geoData.city || geoData.locality || geoData.principalSubdivision || "Din plats";
-        }
-      } catch (_) {
-        locationName = "Lokal plats";
-      }
+    const res = await apiFetch(`/api/weather${queryParams}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data && data.status === 'success') {
+      currentWeatherData = data;
+      sessionStorage.setItem('healthchat_weather', JSON.stringify({ timestamp: Date.now(), data }));
+      renderWeatherToCard(data);
     }
-
-    const meteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m&hourly=precipitation_probability&forecast_days=1&timezone=auto`;
-    const res = await fetch(meteoUrl);
-    if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
-    const wData = await res.json();
-    const current = wData.current || {};
-    const temp = current.temperature_2m !== undefined ? Math.round(current.temperature_2m * 10) / 10 : 0;
-    const feelsLike = current.apparent_temperature !== undefined ? Math.round(current.apparent_temperature * 10) / 10 : temp;
-    const wind = current.wind_speed_10m !== undefined ? Math.round(current.wind_speed_10m * 10) / 10 : 0;
-    const precip = current.precipitation !== undefined ? current.precipitation : 0;
-    const code = current.weather_code !== undefined ? current.weather_code : 0;
-    const humidity = current.relative_humidity_2m !== undefined ? current.relative_humidity_2m : 50;
-    
-    const rainProb = (wData.hourly && wData.hourly.precipitation_probability && wData.hourly.precipitation_probability[0] !== undefined)
-      ? wData.hourly.precipitation_probability[0] : 0;
-
-    const weatherInfo = getWeatherCodeDescription(code);
-    const evalCond = evaluateTrainingConditions(temp, wind, precip, code);
-
-    const payload = {
-      locationName,
-      temp,
-      feelsLike,
-      wind,
-      precip,
-      rainProb,
-      humidity,
-      code,
-      weatherDesc: weatherInfo.desc,
-      weatherIcon: weatherInfo.icon,
-      advice: evalCond.advice,
-      adviceColor: evalCond.color,
-      summaryText: `${locationName}: ${temp > 0 ? '+' : ''}${temp}°C (${weatherInfo.desc}), Vind ${wind} m/s, Nederbörd ${precip} mm (${rainProb}% risk). ${evalCond.advice}`
-    };
-
-    currentWeatherData = payload;
-    sessionStorage.setItem('healthchat_weather', JSON.stringify({ timestamp: Date.now(), data: payload }));
-    renderWeatherToCard(payload);
   } catch (err) {
     console.error("Fel vid väderhämtning:", err);
-    if (locEl) locEl.innerText = "📍 Kunde inte hämta väder";
+    if (locEl) locEl.innerText = "📍 Väder otillgängligt";
     if (adviceEl) {
       adviceEl.innerText = "Klicka 🔄 för att försöka igen";
       adviceEl.style.color = "#DC2626";
