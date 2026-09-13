@@ -1644,6 +1644,68 @@ def datasource_sync_status(provider: str, session: UserSession = Depends(get_cur
     }
 
 
+@app.post("/api/datasources/sync_all")
+def sync_all_datasources(
+    req: Optional[DatasourceSyncRequest] = None,
+    session: UserSession = Depends(get_current_session)
+):
+    """Start background sync for all connected data sources for this user."""
+    with datasource_errors("Synkronisering av datakällor"), datasource_session(session) as (_db, conn):
+        providers = datasource_store.list_status(conn, session.user_id, bytes(session.dek), lambda p: "")
+
+    connected_providers = [p["provider"] for p in providers if p.get("connected")]
+    started = []
+    days = req.days if req and req.days else None
+    force_full = bool(req.force_full) if req else False
+
+    for provider in connected_providers:
+        meta = datasource_store.PROVIDERS.get(provider, {"name": provider})
+        key = _sync_job_key(session.user_id, provider)
+        with _sync_jobs_lock:
+            existing = _sync_jobs.get(key)
+            if existing and existing.get("state") == "running":
+                started.append(provider)
+                continue
+            _sync_jobs[key] = {
+                "state": "running",
+                "provider": provider,
+                "message": f"Startar synkronisering med {meta.get('name', provider)}...",
+                "count": 0,
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        thread = threading.Thread(
+            target=_run_datasource_sync,
+            args=(session.user_id, bytes(session.dek), provider, days, force_full),
+            daemon=True,
+        )
+        thread.start()
+        started.append(provider)
+
+    return {
+        "status": "running" if started else "idle",
+        "providers": started,
+        "count": len(started),
+        "message": f"Startade synkronisering för {len(started)} anslutna datakällor." if started else "Inga anslutna datakällor att synkronisera."
+    }
+
+
+@app.get("/api/datasources/sync_all_status")
+def sync_all_status(session: UserSession = Depends(get_current_session)):
+    """Return summary status of all sync jobs for current user."""
+    result = {}
+    with _sync_jobs_lock:
+        for provider in datasource_store.PROVIDERS:
+            key = _sync_job_key(session.user_id, provider)
+            if key in _sync_jobs:
+                result[provider] = dict(_sync_jobs[key])
+    
+    is_any_running = any(j.get("state") == "running" for j in result.values())
+    return {
+        "running": is_any_running,
+        "jobs": result
+    }
+
+
 # --- STATIC FILES & INDEX HTML ---
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")

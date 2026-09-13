@@ -424,6 +424,26 @@ def test_sync_status_is_idle_before_any_sync(ds_api):
     assert res.json()["status"] == "idle"
 
 
+def test_sync_all_and_status(ds_api):
+    client, db = ds_api
+    # Check status before sync_all
+    st_res = client.get("/api/datasources/sync_all_status")
+    assert st_res.status_code == 200
+    data = st_res.json()
+    assert "running" in data
+    assert "jobs" in data
+
+    # Trigger sync_all when no providers are connected
+    sync_res = client.post("/api/datasources/sync_all")
+    assert sync_res.status_code == 200
+    res_data = sync_res.json()
+    assert res_data["status"] in ("idle", "started")
+    assert "count" in res_data
+
+
+
+
+
 def test_disconnect_clears_stored_credentials(ds_api):
     client, db = ds_api
     conn = db.get_connection()

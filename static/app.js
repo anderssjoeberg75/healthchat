@@ -363,6 +363,79 @@ function setDaysRange(days) {
 
 // --- DASHBOARD DATA & REFRESH ---
 
+let _isHeaderRefreshing = false;
+
+async function handleHeaderRefresh() {
+  if (_isHeaderRefreshing) return;
+  _isHeaderRefreshing = true;
+
+  const btn = document.getElementById('btn-refresh-dashboard');
+  const originalHtml = btn ? btn.innerHTML : '🔄 Uppdatera';
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Synkar datakällor...';
+    }
+
+    // 1. Synka alla anslutna externa datakällor (Garmin, Withings, Strava, Fitbit)
+    try {
+      const syncRes = await apiFetch('/api/datasources/sync_all', { method: 'POST' });
+      if (syncRes.ok) {
+        const syncData = await syncRes.json();
+        if (syncData.count > 0) {
+          // Poll för att vänta in att synkroniseringen blir klar
+          let attempts = 0;
+          while (attempts < 18) {
+            await new Promise(r => setTimeout(r, 1200));
+            const stRes = await apiFetch('/api/datasources/sync_all_status');
+            if (stRes.ok) {
+              const st = await stRes.json();
+              if (!st.running) break;
+            }
+            attempts++;
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.warn('Synkronisering av datakällor gav varning:', syncErr);
+    }
+
+    // 2. Hämta färsk data från databasen och rita om grafer/kort
+    if (btn) btn.innerHTML = '⏳ Uppdaterar grafer...';
+    await refreshDashboard();
+
+    // 3. Om användaren står i Datakällor-fliken, uppdatera även den
+    if (currentTab === 'datasources') {
+      await loadDatasources();
+    }
+
+    // 4. Bekräfta att uppdateringen är klar
+    if (btn) {
+      btn.innerHTML = '✓ Uppdaterad!';
+      setTimeout(() => {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        _isHeaderRefreshing = false;
+      }, 1500);
+    } else {
+      _isHeaderRefreshing = false;
+    }
+  } catch (err) {
+    console.error('Fel vid uppdatering av dashboard:', err);
+    if (btn) {
+      btn.innerHTML = '⚠️ Fel vid uppdatering';
+      setTimeout(() => {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        _isHeaderRefreshing = false;
+      }, 2000);
+    } else {
+      _isHeaderRefreshing = false;
+    }
+  }
+}
+
 async function refreshDashboard() {
   try {
     const res = await apiFetch(`/api/dashboard/summary?days=${currentDaysRange}`);
