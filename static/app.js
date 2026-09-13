@@ -404,10 +404,33 @@ function escapeHtml(str) {
 
 function renderMarkdown(text) {
   if (!text) return '';
-  const escaped = escapeHtml(text);
-  return escaped
+
+  let t = text;
+
+  // 1. Ensure line breaks before section headers (e.g. 📊 Analys, 💡 Rekommenderat, 📚 Data) if output inline
+  t = t.replace(/([^\n])\s*([📊💡📚🏋️🛌🏃⚡⚖️❤️🎯]\s*[^:\n]+:)/g, '$1\n\n**$2**\n');
+
+  // 2. Ensure line breaks before list items (- item) if output inline
+  t = t.replace(/([^\n])\s+-\s+/g, '$1\n- ');
+
+  // 3. Ensure line breaks before numbered steps (1. , 2. ) if output inline
+  t = t.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
+
+  let escaped = escapeHtml(t);
+
+  // 4. Headers: ### Header -> <h4>Header</h4>, ## Header -> <h3>Header</h3>
+  escaped = escaped.replace(/^###\s+(.*$)/gim, '<h4 class="chat-section-header">$1</h4>');
+  escaped = escaped.replace(/^##\s+(.*$)/gim, '<h3 class="chat-section-header">$1</h3>');
+
+  // 5. Bold & Italic
+  escaped = escaped
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // 6. Normalize excessive blank lines
+  escaped = escaped.replace(/\n{3,}/g, '\n\n');
+
+  return escaped;
 }
 
 function floatVal(v, defaultVal = 0.0) {

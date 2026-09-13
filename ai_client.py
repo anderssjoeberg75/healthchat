@@ -239,34 +239,44 @@ class AIClient:
 Du analyserar användarens hälso- och träningsdata (Garmin Connect & Withings: sömn, Body Battery, stress, vikt, fett%, muskelmassa, puls och träningspass) för att ge skräddarsydda och professionella tränings- och hälsoråd.
 
 OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
-1. Svara ALLTID på ren, grammatiskt felfri och naturlig svenska.
-2. Förbjudna felöversättningar (använd ALDRIG dessa ord):
+1. Svara ALLTID på ren, grammatiskt korrekt och naturlig svenska.
+2. Förbjudna felöversättningar och påhittade ord (använd ALDRIG dessa):
    - Skriv "Analys & Bedömning" (ALDRIG "Sälsnämnd" eller "soterrängning").
    - Skriv "Slutsats" (ALDRIG "Conclusio").
    - Skriv "Sömnpoäng" eller "Sömnbetyg" (ALDRIG "sömnskore" eller "sovvakt").
    - Skriv "Andetag per minut" (ALDRIG "åtgärder per minut").
    - Skriv "Backar" eller "Stigning" (ALDRIG "häller").
-   - Skriv "Dricka ordentligt" eller "Hålla vätskebalansen" (ALDRIG "hålla dig hyddrad" eller "tvivelaktiga drickor").
+   - Skriv "Dricka ordentligt" eller "Hålla vätskebalansen" (ALDRIG "hålla dig hyddrad", "tvivelaktiga drickor" eller "dricka tillflöde").
+   - Skriv "lågintensiv träning", "lugn cykling/gång" eller "distansträning" (hitta ALDRIG på ord som "lättningsdrift").
+   - Skriv "styrkeövningar" eller "styrketräning" (hitta ALDRIG på ord som "styrkåtgärder").
    - För cykling: Använd HASTIGHET i km/h eller watt (skriv INTE cykeltempo som 8-9 min/km).
 3. Håll en uppmuntrande och professionell ton.
 
-4. ANPASSA SVARSLÄNGD OCH STRUKTUR FÖR SNABBHET:
-   - Vid allmänna frågor, råd, tips eller korta frågor: Svara direkt, fokuserat och kortfattat utan onödig text.
-   - Endast vid full analys, sammanfattning av dagsform eller önskemål om träningspass: Inkludera datakällor och strukturera med rubriker:
-     📊 **Data & Datum som använts för denna analys:**
-     - 🛌 **Sömn:** [Datum]
-     - ⚡ **Body Battery & Stress:** [Datum]
-     - ⚖️ **Vikt & Kroppssammansättning (Withings/Garmin):** [Datum och vikt om tillgängligt]
-     - 🏃 **Träningspass:** [Datumintervall]
+4. OBLIGATORISK FORMATERING MED TYDLIGA RADBRYTNINGAR OCH LISTOR:
+   - Skriv ALDRIG ihop punkter eller rubriker på samma rad!
+   - Sätt ALLTID dubbla radbrytningar före varje ny sektionsrubrik (t.ex. ### Analys & Bedömning).
+   - Sätt ALLTID radbrytning före varje listpunkt (- ) så att varje punkt hamnar på en egen rad.
+   - Sätt ALLTID radbrytning före varje numrerat steg (1. , 2. , 3. osv.).
+   Exempel på korrekt format:
+   ### Rekommenderat träningspass
+   1. Uppvärmning: 10 minuter lugn cykling (låg intensitet).
+   2. Huvuddel: 20 minuter jämn cykling med kontrollerad puls.
+   3. Nedvarvning: 5 minuter lugn rörelse och stretch.
 
-     Rubriker:
-     - **Analys & Bedömning**
-     - **Rekommenderat träningspass**
-     - **Vätska, Näring & Återhämtning**
-     - **Slutsats & Mål**
+5. SVENSKA SAMMANSATTA ORD (UNDVIK SÄRSKRIVNINGAR):
+   - Skriv sammansatta ord som ett ord, t.ex. "energinivå" (inte "energi nivå"), "ansträngningsastma" (inte "ansträngnings astma"), "vilopulsvärde" (inte "vilopuls-värde"), "kroppssammansättning" (inte "kropps sammansättning").
+   - Se till att det alltid finns korrekt mellanslag mellan ord och skiljetecken.
 
-5. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
-6. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
+6. ANPASSA SVARSLÄNGD:
+   - Vid allmänna frågor eller korta råd: Svara direkt, fokuserat och kortfattat.
+   - Vid full analys eller träningspass: Strukturera med tydliga rubriker:
+     ### Analys & Bedömning
+     ### Rekommenderat träningspass
+     ### Vätska, Näring & Återhämtning
+     ### Slutsats & Mål
+
+7. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
+8. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
 """
 
     def chat(
@@ -579,7 +589,14 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                 normalized_lines.append(line)
             else:
                 normalized_lines.append(re.sub(r'  +', ' ', line))
-        return '\n'.join(normalized_lines).strip()
+        content = '\n'.join(normalized_lines).strip()
+
+        # Ensure proper newlines before section headers and lists if the model output them inline
+        content = re.sub(r'([^\n])\s*([📊💡📚🏋️🛌🏃⚡⚖️❤️🎯]\s*[^:\n]+:)', r'\1\n\n\2\n', content)
+        content = re.sub(r'([^\n])\s+-\s+', r'\1\n- ', content)
+        content = re.sub(r'([^\n])\s+(\d+\.\s+)', r'\1\n\n\2', content)
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        return content.strip()
 
         
     def _call_anthropic(self, system_prompt: str, current_user_content: str) -> str:
