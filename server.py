@@ -220,6 +220,7 @@ class ProfileUpdateRequest(BaseModel):
     bone_mass_kg: Optional[float] = None
     water_pct: Optional[float] = None
     bmi: Optional[float] = None
+    training_goals: Optional[str] = None
     injuries: Optional[str] = None
 
 
@@ -807,6 +808,13 @@ async def chat_stream(
     context_lines = [f"Användar-ID: {session.user_id}"]
     
     profile = session.encrypted_profile or {}
+    if profile.get("training_goals"):
+        context_lines.append(f"🎯 MÅL MED TRÄNINGEN: {profile.get('training_goals')}")
+        context_lines.append(
+            "VIKTIGT OM TRÄNINGSMÅL & TRÄNINGSPASS: Användaren har ovanstående träningsmål angivna. "
+            "Du SKALL aktivt ta hänsyn till dessa mål när du föreslår träningspass, övningsupplägg, "
+            "intervaller, intensitetszoner, reps/set och progression så att passet effektivt för användaren mot sina mål."
+        )
     if profile.get("injuries"):
         context_lines.append(f"⚠️ KÄNDA SKADOR / FYSISKA BEGRÄNSNINGAR: {profile.get('injuries')}")
         context_lines.append(
@@ -970,6 +978,8 @@ def update_profile(
             current_profile["water_pct"] = req.water_pct
         if req.bmi is not None:
             current_profile["bmi"] = req.bmi
+        if req.training_goals is not None:
+            current_profile["training_goals"] = req.training_goals.strip()
         if req.injuries is not None:
             current_profile["injuries"] = req.injuries.strip()
 

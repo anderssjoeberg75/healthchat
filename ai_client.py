@@ -277,6 +277,7 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
 
 7. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
 8. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
+9. Om användaren har angivit mål med träningen i sitt sammanhang, SKALL tränings- och passförslag utformas och anpassas för att aktivt hjälpa användaren att nå dessa mål (t.ex. muskelbygge, styrka, kondition, viktnedgång eller specifik idrottsprestation).
 """
 
     def chat(

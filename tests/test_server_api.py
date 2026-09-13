@@ -68,13 +68,14 @@ def test_register_login_and_me_flow(monkeypatch):
     # Test update profile
     update_res = client.post(
         "/api/profile/update",
-        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "resting_hr": 55.0, "max_hr": 185.0, "injuries": "Känning i höger hälsena"},
+        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "resting_hr": 55.0, "max_hr": 185.0, "training_goals": "Milen under 45 min och öka muskelmassa", "injuries": "Känning i höger hälsena"},
         cookies=reg_res.cookies
     )
     assert update_res.status_code == 200
     assert update_res.json()["profile"]["weight_kg"] == 68.0
     assert update_res.json()["profile"]["resting_hr"] == 55.0
     assert update_res.json()["profile"]["max_hr"] == 185.0
+    assert update_res.json()["profile"]["training_goals"] == "Milen under 45 min och öka muskelmassa"
     assert update_res.json()["profile"]["injuries"] == "Känning i höger hälsena"
 
     # Test fetch external profile endpoint
@@ -87,6 +88,7 @@ def test_register_login_and_me_flow(monkeypatch):
     assert me_updated.status_code == 200
     assert me_updated.json()["profile"]["weight_kg"] == 68.0
     assert me_updated.json()["profile"]["age"] == 30
+    assert me_updated.json()["profile"]["training_goals"] == "Milen under 45 min och öka muskelmassa"
     assert me_updated.json()["profile"]["injuries"] == "Känning i höger hälsena"
 
     # Test rotate recovery key
@@ -148,7 +150,7 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         user_id=102,
         email=test_email,
         dek=bytearray(b"0123456789abcdef0123456789abcdef"),
-        encrypted_profile={"sex": "male", "age": 35, "injuries": "Känning i höger hälsena"}
+        encrypted_profile={"sex": "male", "age": 35, "training_goals": "Bli starkare i marklyft och springa milen", "injuries": "Känning i höger hälsena"}
     )
 
     test_db = GarminDatabase(db_path=tmp_path / "test_chat.db")
@@ -185,6 +187,8 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         assert captured["provider"] == "ollama"
         assert "192.168.107.15:11436" in captured["ollama_base_url"]
         assert captured["model"] in ("gemma4:12b", "qwen2.5:latest")
+        assert "🎯 MÅL MED TRÄNINGEN: Bli starkare i marklyft och springa milen" in captured["garmin_context"]
+        assert "⚠️ KÄNDA SKADOR / FYSISKA BEGRÄNSNINGAR: Känning i höger hälsena" in captured["garmin_context"]
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 
