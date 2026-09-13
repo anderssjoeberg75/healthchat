@@ -430,8 +430,11 @@
       <section id="tab-ai-chat" class="content-tab hidden">
         <div class="ai-chat-card-box">
           <div class="chat-controls-bar">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span class="ai-engine-badge" title="All AI-analys körs mot din lokala Ollama-server (192.168.107.15). Inga hälsodata lämnar ditt nätverk.">🖥️ Lokal AI (Ollama)</span>
+            <div style="display:flex; align-items:center; justify-content:space-between; width:100%; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="ai-engine-badge" title="All AI-analys körs mot din lokala Ollama-server (192.168.107.15). Inga hälsodata lämnar ditt nätverk.">🖥️ Lokal AI (Ollama)</span>
+              </div>
+              <button type="button" class="btn-clear-chat" id="btn-clear-chat" onclick="clearChatHistory()" title="Rensa chatthistorik">🗑️ Rensa chatt</button>
             </div>
             <div class="quick-chips-row">
               <button class="chip-btn" onclick="sendQuickPrompt('Ge mig en sammanfattning av min sömn denna vecka.')">🛌 Sömnanalys</button>
@@ -623,7 +626,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=9.4.0"></script>
+  <script src="/static/app.js?v=9.5.0"></script>
 
 </body>
 </html>

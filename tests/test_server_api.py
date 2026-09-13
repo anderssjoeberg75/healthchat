@@ -221,3 +221,44 @@ def test_auth_me_with_bearer_token():
         assert data["profile"]["sex"] == "female"
     finally:
         server.remove_active_session(test_sid)
+
+
+def test_ai_chat_history_and_clear():
+    """Verify that chat history can be retrieved and cleared via API."""
+    import server
+    test_sid = "test-chat-history-session-999"
+    test_session = auth.UserSession(
+        user_id=999,
+        email="historytest@example.com",
+        dek=bytearray(b"0123456789abcdef0123456789abcdef"),
+        encrypted_profile={"sex": "male", "age": 30}
+    )
+    server.store_active_session(test_sid, test_session)
+    # Populate mock history
+    server._session_chat_histories[test_sid] = [
+        {"role": "user", "content": "Hej!"},
+        {"role": "assistant", "content": "Hej! Hur kan jag hjälpa dig?"}
+    ]
+    server._user_chat_histories[999] = list(server._session_chat_histories[test_sid])
+
+    try:
+        # 1. Fetch history
+        res = client.get("/api/ai/chat/history", headers={"Authorization": f"Bearer {test_sid}"}, cookies={"healthchat_session": test_sid})
+        assert res.status_code == 200
+        data = res.json()
+        assert "history" in data
+        assert len(data["history"]) == 2
+        assert data["history"][0]["content"] == "Hej!"
+
+        # 2. Clear history
+        res_clear = client.post("/api/ai/chat/clear", headers={"Authorization": f"Bearer {test_sid}"}, cookies={"healthchat_session": test_sid})
+        assert res_clear.status_code == 200
+        assert res_clear.json()["status"] == "cleared"
+
+        # 3. Verify history is empty
+        res_after = client.get("/api/ai/chat/history", headers={"Authorization": f"Bearer {test_sid}"}, cookies={"healthchat_session": test_sid})
+        assert res_after.status_code == 200
+        assert res_after.json()["history"] == []
+    finally:
+        server.remove_active_session(test_sid)
+

@@ -63,6 +63,7 @@ function onAuthSuccess() {
   }
 
   refreshDashboard();
+  loadChatHistory();
 }
 
 function switchAuthTab(tab) {
@@ -200,6 +201,8 @@ function showTab(tabId) {
     renderHealthCharts();
   } else if (tabId === 'training') {
     renderTrainingCharts();
+  } else if (tabId === 'ai-chat') {
+    loadChatHistory();
   } else if (tabId === 'profile') {
     populateProfileInputs();
   } else if (tabId === 'datasources') {
@@ -1342,7 +1345,127 @@ function createChart(canvasId, type, data, options = {}) {
 }
 
 
-// --- STREAMING AI CHAT (SSE) ---
+// --- STREAMING AI CHAT (SSE) & PERSISTENCE ---
+
+const DEFAULT_CHAT_WELCOME_HTML = `
+  <div class="chat-msg-row bot">
+    <span style="font-size:1.4rem;">🤖</span>
+    <div class="chat-msg-bubble">
+      Hej! Jag är din personliga AI-hälsocoach. Jag har tillgång till din krypterade Garmin/Fitbit/Withings-historik och kan hjälpa dig med träning, återhämtningsanalys och kost. Vad vill du diskutera idag?
+    </div>
+  </div>
+`;
+
+function getChatStorageKey() {
+  const uid = (currentUser && (currentUser.user_id || currentUser.id || currentUser.email)) || 'default';
+  return `healthchat_chat_history_${uid}`;
+}
+
+function getStoredChatHistory() {
+  try {
+    const raw = localStorage.getItem(getChatStorageKey());
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveStoredChatHistory(history) {
+  try {
+    localStorage.setItem(getChatStorageKey(), JSON.stringify(history));
+  } catch (e) {
+    console.error('Kunde inte spara chatthistorik i localStorage:', e);
+  }
+}
+
+function recordChatMessage(role, content) {
+  if (!content) return;
+  const hist = getStoredChatHistory();
+  hist.push({ role, content });
+  if (hist.length > 50) {
+    hist.splice(0, hist.length - 50);
+  }
+  saveStoredChatHistory(hist);
+}
+
+function renderChatMessagesFromHistory(history) {
+  const container = document.getElementById('chat-messages-list');
+  if (!container) return;
+
+  container.innerHTML = DEFAULT_CHAT_WELCOME_HTML;
+  if (!history || !history.length) return;
+
+  for (const msg of history) {
+    const role = (msg.role === 'user') ? 'user' : 'bot';
+    const row = document.createElement('div');
+    row.className = `chat-msg-row ${role}`;
+    const icon = role === 'user' ? '👤' : '🤖';
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-msg-bubble';
+    if (role === 'user') {
+      bubble.innerText = msg.content;
+    } else {
+      bubble.innerHTML = renderMarkdown(msg.content);
+    }
+    row.innerHTML = `<span style="font-size:1.4rem;">${icon}</span>`;
+    row.appendChild(bubble);
+    container.appendChild(row);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+let _chatHistoryLoaded = false;
+
+async function loadChatHistory() {
+  const container = document.getElementById('chat-messages-list');
+  if (!container) return;
+
+  const localHist = getStoredChatHistory();
+  if (localHist && localHist.length > 0) {
+    renderChatMessagesFromHistory(localHist);
+    _chatHistoryLoaded = true;
+    return;
+  }
+
+  // Om ingen historik finns i webbläsaren, hämta från serverns sessionshistorik
+  try {
+    const res = await apiFetch('/api/ai/chat/history');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.history && data.history.length > 0) {
+        saveStoredChatHistory(data.history);
+        renderChatMessagesFromHistory(data.history);
+      }
+    }
+  } catch (err) {
+    console.debug('Kunde inte läsa backend chat-historik:', err);
+  }
+  _chatHistoryLoaded = true;
+}
+
+async function clearChatHistory() {
+  if (!confirm('Är du säker på att du vill rensa hela chatthistoriken?')) {
+    return;
+  }
+
+  // Töm lokal historik
+  try {
+    localStorage.removeItem(getChatStorageKey());
+  } catch (e) {}
+
+  // Återställ UI till välkomstmeddelande
+  const container = document.getElementById('chat-messages-list');
+  if (container) {
+    container.innerHTML = DEFAULT_CHAT_WELCOME_HTML;
+  }
+
+  // Töm serverns konversationsminne
+  try {
+    await apiFetch('/api/ai/chat/clear', { method: 'POST' });
+  } catch (err) {
+    console.error('Kunde inte rensa backend-chatthistorik:', err);
+  }
+}
 
 async function handleSendChatMessage(event) {
   event.preventDefault();
@@ -1353,6 +1476,8 @@ async function handleSendChatMessage(event) {
   input.value = '';
 
   appendChatMessage('user', message);
+  recordChatMessage('user', message);
+
   const botBubble = appendChatMessage('bot', 'Tänker...');
 
   try {
@@ -1372,8 +1497,9 @@ async function handleSendChatMessage(event) {
     botBubble.innerText = '';
     let fullText = '';
     let buffer = '';
+    let streamDone = false;
 
-    while (true) {
+    while (!streamDone) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -1385,16 +1511,19 @@ async function handleSendChatMessage(event) {
         if (trimmed.startsWith('data: ')) {
           const dataStr = trimmed.slice(6).trim();
           if (dataStr === '[DONE]') {
-            return;
+            streamDone = true;
+            break;
           }
           try {
             const parsed = JSON.parse(dataStr);
             if (parsed.error) {
               botBubble.innerText = `⚠️ Fel från AI: ${parsed.error}`;
-              return;
+              streamDone = true;
+              break;
             }
             if (parsed.done) {
-              return;
+              streamDone = true;
+              break;
             }
             if (parsed.chunk) {
               fullText += parsed.chunk;
@@ -1406,6 +1535,10 @@ async function handleSendChatMessage(event) {
           } catch (e) {}
         }
       }
+    }
+
+    if (fullText && fullText.trim()) {
+      recordChatMessage('assistant', fullText.trim());
     }
   } catch (err) {
     botBubble.innerText = '⚠️ Nätverksfel vid kommunikation med AI-tjänsten.';

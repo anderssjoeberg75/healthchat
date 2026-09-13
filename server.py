@@ -102,6 +102,7 @@ async def add_security_headers(request: Request, call_next):
 _active_sessions: Dict[str, UserSession] = {}
 _session_expirations: Dict[str, datetime] = {}
 _session_chat_histories: Dict[str, List[Dict[str, str]]] = {}
+_user_chat_histories: Dict[int, List[Dict[str, str]]] = {}
 _sessions_lock = threading.Lock()
 
 SESSION_COOKIE_NAME = "healthchat_session"
@@ -852,9 +853,12 @@ async def chat_stream(
         ollama_base_url=ollama_url
     )
 
-    # Restore prior conversation history for this active session
-    if healthchat_session and healthchat_session in _session_chat_histories:
-        client.conversation_history = list(_session_chat_histories[healthchat_session])
+    # Restore prior conversation history for this active session or user
+    hist_key = healthchat_session or f"user_{session.user_id}"
+    if hist_key in _session_chat_histories:
+        client.conversation_history = list(_session_chat_histories[hist_key])
+    elif session.user_id in _user_chat_histories:
+        client.conversation_history = list(_user_chat_histories[session.user_id])
 
     async def event_generator():
         try:
@@ -865,6 +869,7 @@ async def chat_stream(
             )
 
             # Persist updated conversation history
+            _user_chat_histories[session.user_id] = list(client.conversation_history)
             if healthchat_session:
                 _session_chat_histories[healthchat_session] = list(client.conversation_history)
             
@@ -886,6 +891,32 @@ async def chat_stream(
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/ai/chat/history")
+def get_chat_history(
+    healthchat_session: Optional[str] = Cookie(None),
+    session: UserSession = Depends(get_current_session)
+):
+    """Retrieve chat history for the current session or user."""
+    hist = []
+    if healthchat_session and healthchat_session in _session_chat_histories:
+        hist = _session_chat_histories[healthchat_session]
+    elif session.user_id in _user_chat_histories:
+        hist = _user_chat_histories[session.user_id]
+    return {"history": hist}
+
+
+@app.post("/api/ai/chat/clear")
+def clear_chat_history(
+    healthchat_session: Optional[str] = Cookie(None),
+    session: UserSession = Depends(get_current_session)
+):
+    """Clear chat history for the current session and user."""
+    if healthchat_session:
+        _session_chat_histories.pop(healthchat_session, None)
+    _user_chat_histories.pop(session.user_id, None)
+    return {"status": "cleared"}
 
 
 # --- PROFILE ENDPOINTS ---
