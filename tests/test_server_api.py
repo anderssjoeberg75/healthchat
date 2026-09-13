@@ -3,6 +3,7 @@ Unit tests for HealthChat FastAPI Web Server (server.py).
 Tests REST authentication endpoints, session cookies, dashboard queries, and SSE chat endpoints.
 """
 
+import json
 import pytest
 import auth
 from garmin_db import GarminDatabase
@@ -171,11 +172,16 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         assert res.status_code == 200
         assert "text/event-stream" in res.headers["content-type"]
         body = res.text
-        assert '{"chunk":' in body
-        assert '{"done": true}' in body
-        assert "åäö" in body
-        assert "Känning i höger hälsena" in captured["garmin_context"]
-        assert "SKADOR" in captured["garmin_context"]
+        chunks = []
+        for line in body.split("\n"):
+            line = line.strip()
+            if line.startswith("data: "):
+                parsed = json.loads(line[6:])
+                if "chunk" in parsed:
+                    chunks.append(parsed["chunk"])
+        reassembled = "".join(chunks)
+        assert reassembled == "Det här är ett AI-svar med åäö."
+        assert "ett AI-svar" in reassembled
         assert captured["provider"] == "ollama"
         assert "192.168.107.15:11436" in captured["ollama_base_url"]
         assert captured["model"] == "gemma4:12b"

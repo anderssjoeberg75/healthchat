@@ -872,11 +872,14 @@ async def chat_stream(
             # - data: {"chunk": "<text>"} for streamed text pieces
             # - data: {"done": true} to signal successful completion
             # - data: {"error": "<message>"} to signal failure
-            words = response_text.split(" ")
-            for i in range(0, len(words), 3):
-                chunk = " ".join(words[i:i+3]) + " "
+            import re
+            tokens = re.findall(r"\S+\s*|\s+", response_text)
+            if not tokens:
+                tokens = [response_text]
+            for i in range(0, len(tokens), 3):
+                chunk = "".join(tokens[i:i+3])
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.03)
+                await asyncio.sleep(0.02)
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             logger.error(f"Error streaming AI response: {e}")

@@ -586,6 +586,8 @@ body {
   border-radius: var(--radius-md);
   font-size: 0.9rem;
   line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .chat-msg-row.user .chat-msg-bubble {

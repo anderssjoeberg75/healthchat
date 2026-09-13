@@ -398,6 +398,14 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function renderMarkdown(text) {
+  if (!text) return '';
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>');
+}
+
 function floatVal(v, defaultVal = 0.0) {
   const parsed = parseFloat(v);
   return isNaN(parsed) ? defaultVal : parsed;
@@ -1362,6 +1370,7 @@ async function handleSendChatMessage(event) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
     botBubble.innerText = '';
+    let fullText = '';
     let buffer = '';
 
     while (true) {
@@ -1388,9 +1397,11 @@ async function handleSendChatMessage(event) {
               return;
             }
             if (parsed.chunk) {
-              botBubble.innerText += parsed.chunk;
+              fullText += parsed.chunk;
+              botBubble.innerHTML = renderMarkdown(fullText);
             } else if (parsed.content) {
-              botBubble.innerText += parsed.content;
+              fullText += parsed.content;
+              botBubble.innerHTML = renderMarkdown(fullText);
             }
           } catch (e) {}
         }
