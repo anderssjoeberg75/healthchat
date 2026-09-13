@@ -837,7 +837,7 @@ async def chat_stream(
     ollama_url = (
         secret_store.get_secret("ollama_base_url")
         or os.environ.get("OLLAMA_BASE_URL")
-        or "http://192.168.107.15:11434"
+        or "http://192.168.107.15:11435"
     )
     ollama_model = (
         secret_store.get_secret("ollama_model")
