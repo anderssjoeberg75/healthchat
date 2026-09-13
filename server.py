@@ -837,12 +837,12 @@ async def chat_stream(
     ollama_url = (
         secret_store.get_secret("ollama_base_url")
         or os.environ.get("OLLAMA_BASE_URL")
-        or "http://192.168.107.15:11435"
+        or "http://192.168.107.15:11436"
     )
     ollama_model = (
         secret_store.get_secret("ollama_model")
         or os.environ.get("OLLAMA_MODEL")
-        or "qwen3.5:9b-q8_0"
+        or "gemma4:12b"
     )
 
     client = AIClient(

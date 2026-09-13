@@ -177,7 +177,8 @@ def test_ai_chat_sse_stream_format(monkeypatch, tmp_path):
         assert "Känning i höger hälsena" in captured["garmin_context"]
         assert "SKADOR" in captured["garmin_context"]
         assert captured["provider"] == "ollama"
-        assert "192.168.107.15" in captured["ollama_base_url"]
+        assert "192.168.107.15:11436" in captured["ollama_base_url"]
+        assert captured["model"] == "gemma4:12b"
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 

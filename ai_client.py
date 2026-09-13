@@ -59,8 +59,8 @@ class AIClient:
         'ollama': {
             'name': 'Ollama (Local)',
             'base_url': 'http://localhost:11434/v1',
-            'models': ['llama3.2', 'llama3.1', 'llama3', 'mistral', 'mixtral', 'gemma2', 'phi3', 'qwen2.5', 'deepseek-r1'],
-            'default_model': 'llama3.2',
+            'models': ['gemma4:12b', 'llama3.2', 'llama3.1', 'llama3', 'mistral', 'mixtral', 'gemma2', 'phi3', 'qwen2.5', 'deepseek-r1'],
+            'default_model': 'gemma4:12b',
             'supports_streaming': True,
             'local': True,
             'note': 'Requires Ollama running locally (https://ollama.com). No API key needed.'
