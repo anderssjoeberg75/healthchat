@@ -15,6 +15,7 @@ import json
 import shutil
 import logging
 import asyncio
+import ipaddress
 import tempfile
 import threading
 from pathlib import Path
@@ -1044,6 +1045,69 @@ def _evaluate_weather_advice(temp: float, wind: float, precip: float, code: int)
         return "🏃 Fina förhållanden för utomhusträning!", "#10B981"
 
 
+def _get_client_ip(request: Optional[Request]) -> Optional[str]:
+    """Return the public IP of the visiting browser, or None on a LAN/unknown client.
+
+    Behind a reverse proxy the browser address arrives in X-Forwarded-For
+    (client first, then each proxy) or X-Real-IP. Private, loopback and
+    link-local addresses are ignored - they say nothing about where the
+    visitor is, and looking them up would silently fall back to the server's
+    own location.
+    """
+    if request is None:
+        return None
+
+    candidates: List[str] = []
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        candidates.extend(part.strip() for part in forwarded.split(","))
+    real_ip = request.headers.get("x-real-ip", "")
+    if real_ip:
+        candidates.append(real_ip.strip())
+    if request.client and request.client.host:
+        candidates.append(request.client.host)
+
+    for raw in candidates:
+        if not raw:
+            continue
+        host = raw.strip()
+        if host.startswith("[") and "]" in host:  # [::1]:1234
+            host = host[1:host.index("]")]
+        elif host.count(":") == 1 and "." in host:  # 1.2.3.4:1234
+            host = host.split(":")[0]
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            continue
+        return str(addr)
+    return None
+
+
+def _lookup_ip_location(client_ip: Optional[str]):
+    """Geolocate an IP via ip-api.com. Returns (lat, lon, city).
+
+    With client_ip set we ask about the visitor. Without one (browser on the
+    same LAN as the server) we ask about our own outbound IP, which is the
+    closest approximation available - the same broadband connection.
+    """
+    import requests
+
+    query = "?fields=status,message,city,lat,lon&lang=sv"
+    url = f"http://ip-api.com/json/{client_ip}{query}" if client_ip else f"http://ip-api.com/json{query}"
+    try:
+        ip_resp = requests.get(url, timeout=3)
+        if ip_resp.status_code == 200:
+            ip_data = ip_resp.json()
+            if ip_data.get("status") == "success":
+                return ip_data.get("lat"), ip_data.get("lon"), ip_data.get("city")
+            logger.debug(f"IP-uppslag misslyckades: {ip_data.get('message')}")
+    except Exception as e:
+        logger.debug(f"IP geocoding fallback failed: {e}")
+    return None, None, None
+
+
 @app.get("/api/weather")
 def get_weather(
     lat: Optional[float] = Query(None),
@@ -1056,29 +1120,34 @@ def get_weather(
     import requests
 
     now = time.time()
+    location_name = None
+    location_source = None
+
+    # 1. Browser position wins - it is the only source that describes where the
+    #    visitor actually is.
     resolved_lat = lat
     resolved_lon = lon
-    location_name = None
+    if resolved_lat is not None and resolved_lon is not None:
+        if -90 <= resolved_lat <= 90 and -180 <= resolved_lon <= 180:
+            location_source = "gps"
+        else:
+            resolved_lat = resolved_lon = None
 
-    # 1. If lat/lon not provided by browser GPS, detect via IP
+    # 2. No browser position: geolocate the VISITOR's IP (never the server's).
     if resolved_lat is None or resolved_lon is None:
-        try:
-            ip_resp = requests.get("http://ip-api.com/json", timeout=3)
-            if ip_resp.status_code == 200:
-                ip_data = ip_resp.json()
-                resolved_lat = ip_data.get("lat")
-                resolved_lon = ip_data.get("lon")
-                location_name = ip_data.get("city")
-        except Exception as e:
-            logger.debug(f"IP geocoding fallback failed: {e}")
+        ip_lat, ip_lon, ip_city = _lookup_ip_location(_get_client_ip(request))
+        if ip_lat is not None and ip_lon is not None:
+            resolved_lat, resolved_lon, location_name = ip_lat, ip_lon, ip_city
+            location_source = "ip"
 
-    # 2. Fallback to default Sweden coordinates (Stockholm)
+    # 3. Fallback to default Sweden coordinates (Stockholm)
     if resolved_lat is None or resolved_lon is None:
         resolved_lat = 59.3293
         resolved_lon = 18.0686
         location_name = "Stockholm"
+        location_source = "default"
 
-    cache_key = f"{round(resolved_lat, 2)}_{round(resolved_lon, 2)}"
+    cache_key = f"{round(resolved_lat, 2)}_{round(resolved_lon, 2)}_{location_source}"
     if cache_key in _weather_cache and (now - _weather_cache[cache_key]["time"] < 600):
         return _weather_cache[cache_key]["data"]
 
@@ -1130,6 +1199,7 @@ def get_weather(
             "lat": resolved_lat,
             "lon": resolved_lon,
             "locationName": location_name,
+            "locationSource": location_source,
             "temp": temp,
             "feelsLike": feels_like,
             "wind": wind,
