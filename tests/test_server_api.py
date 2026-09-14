@@ -368,3 +368,34 @@ def test_get_weather_endpoint(monkeypatch):
     finally:
         server.remove_active_session(test_sid)
 
+
+
+def _fake_request(headers=None, client_host=None):
+    """Minimal stand-in for a Starlette Request for IP resolution tests."""
+    class _Client:
+        def __init__(self, host):
+            self.host = host
+
+    class _Request:
+        def __init__(self):
+            self.headers = headers or {}
+            self.client = _Client(client_host) if client_host else None
+
+    return _Request()
+
+
+def test_client_ip_prefers_visitor_address_over_server():
+    """Weather location must follow the visiting browser, not where the server runs."""
+    # X-Forwarded-For lists the client first, then each proxy hop.
+    assert server._get_client_ip(_fake_request({"x-forwarded-for": "81.229.10.5, 10.0.0.1"})) == "81.229.10.5"
+    assert server._get_client_ip(_fake_request({"x-real-ip": "81.229.10.5"})) == "81.229.10.5"
+    assert server._get_client_ip(_fake_request({}, client_host="81.229.10.5:51234")) == "81.229.10.5"
+    assert server._get_client_ip(_fake_request({"x-real-ip": "[2a00:1450:4001:80f::200e]"})) == "2a00:1450:4001:80f::200e"
+
+
+def test_client_ip_ignores_lan_and_missing_addresses():
+    """LAN/loopback clients carry no location - never geolocate them."""
+    assert server._get_client_ip(_fake_request({"x-forwarded-for": "192.168.1.7"}, client_host="127.0.0.1")) is None
+    assert server._get_client_ip(_fake_request({"x-real-ip": "not-an-ip"})) is None
+    assert server._get_client_ip(_fake_request()) is None
+    assert server._get_client_ip(None) is None

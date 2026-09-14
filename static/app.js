@@ -1560,23 +1560,76 @@ function evaluateTrainingConditions(temp, wind, precip, code) {
   }
 }
 
+const GEO_STORAGE_KEY = 'healthchat_last_position';
+const WEATHER_CACHE_KEY = 'healthchat_weather';
+let lastWeatherNote = "";
+
+function geolocationAvailable() {
+  if (!navigator.geolocation) return false;
+  // getCurrentPosition is blocked on plain http:// (except localhost) by every
+  // modern browser - the widget then has to fall back to IP lookup.
+  return window.isSecureContext
+    || window.location.hostname === 'localhost'
+    || window.location.hostname === '127.0.0.1';
+}
+
+function readStoredPosition() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GEO_STORAGE_KEY) || 'null');
+    if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lon)) return parsed;
+  } catch (_) {}
+  return null;
+}
+
+function storePosition(lat, lon) {
+  try {
+    localStorage.setItem(GEO_STORAGE_KEY, JSON.stringify({ lat, lon, timestamp: Date.now() }));
+  } catch (_) {}
+}
+
+// Asks the browser where the visitor is. Returns {lat, lon} or null.
+async function requestBrowserPosition(timeoutMs) {
+  if (!geolocationAvailable()) return null;
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        timeout: timeoutMs,
+        maximumAge: 5 * 60 * 1000,
+        enableHighAccuracy: false
+      });
+    });
+    if (pos && pos.coords && Number.isFinite(pos.coords.latitude) && Number.isFinite(pos.coords.longitude)) {
+      const lat = Number(pos.coords.latitude.toFixed(4));
+      const lon = Number(pos.coords.longitude.toFixed(4));
+      storePosition(lat, lon);
+      return { lat, lon };
+    }
+  } catch (err) {
+    if (err && err.code === 1) {
+      console.info("Platsdelning nekad i webbläsaren - faller tillbaka på IP-uppslag.");
+    } else {
+      console.info("Kunde inte hämta webbläsarens position:", err && err.message);
+    }
+  }
+  return null;
+}
+
 async function fetchLocalWeather(forceRefresh = false) {
   const tempEl = document.getElementById('val-weather-temp');
   const locEl = document.getElementById('val-weather-location');
-  const windEl = document.getElementById('val-weather-wind');
-  const rainEl = document.getElementById('val-weather-rain');
   const adviceEl = document.getElementById('val-weather-advice');
 
   if (!tempEl) return;
 
   // 1. Check cached weather in sessionStorage (valid for 10 mins)
-  const cached = sessionStorage.getItem('healthchat_weather');
+  const cached = sessionStorage.getItem(WEATHER_CACHE_KEY);
   if (!forceRefresh && cached) {
     try {
       const parsed = JSON.parse(cached);
       if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < 10 * 60 * 1000)) {
-        renderWeatherToCard(parsed.data);
         currentWeatherData = parsed.data;
+        lastWeatherNote = parsed.note || "";
+        renderWeatherToCard(parsed.data);
         return;
       }
     } catch (_) {}
@@ -1585,20 +1638,25 @@ async function fetchLocalWeather(forceRefresh = false) {
   if (locEl) locEl.innerText = "📍 Söker din position...";
   if (adviceEl) adviceEl.innerText = "🏃 Hämtar lokala väderdata...";
 
-  // 2. Try browser geolocation quickly (timeout 2500ms)
-  let queryParams = "";
-  if (navigator.geolocation && (window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    try {
-      const pos = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 2500, enableHighAccuracy: false });
-      });
-      if (pos && pos.coords) {
-        queryParams = `?lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`;
-      }
-    } catch (_) {
-      // Browser GPS denied, timed out, or blocked - server will detect user location via IP!
+  // 2. Ask the browser for the visitor's position. A first-time permission
+  //    prompt needs time to be answered, so give it a generous timeout - and a
+  //    longer one when the user explicitly pressed refresh.
+  let coords = await requestBrowserPosition(forceRefresh ? 20000 : 10000);
+  let note = "";
+  if (!coords) {
+    // Reuse the last position the browser gave us before falling back to IP.
+    const stored = readStoredPosition();
+    if (stored && Date.now() - (stored.timestamp || 0) < 24 * 60 * 60 * 1000) {
+      coords = { lat: stored.lat, lon: stored.lon };
+      note = "senast kända position";
+    } else if (!geolocationAvailable()) {
+      note = "ungefärlig – platsdelning kräver HTTPS";
+    } else {
+      note = "ungefärlig – tillåt platsdelning för exakt plats";
     }
   }
+
+  const queryParams = coords ? `?lat=${coords.lat}&lon=${coords.lon}` : "";
 
   // 3. Fetch from backend proxy endpoint (/api/weather)
   try {
@@ -1606,8 +1664,12 @@ async function fetchLocalWeather(forceRefresh = false) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data && data.status === 'success') {
+      if (!coords && data.locationSource !== 'gps') {
+        note = note || "ungefärlig plats via IP";
+      }
       currentWeatherData = data;
-      sessionStorage.setItem('healthchat_weather', JSON.stringify({ timestamp: Date.now(), data }));
+      lastWeatherNote = note;
+      sessionStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data, note }));
       renderWeatherToCard(data);
     }
   } catch (err) {
@@ -1631,7 +1693,11 @@ function renderWeatherToCard(payload) {
     tempEl.innerHTML = `${payload.temp > 0 ? '+' : ''}${payload.temp}°C <span style="font-size:1.3rem;">${payload.weatherIcon}</span>`;
   }
   if (locEl) {
-    locEl.innerText = `📍 ${payload.locationName} | ${payload.weatherDesc}`;
+    const noteText = lastWeatherNote ? ` (${lastWeatherNote})` : '';
+    locEl.innerText = `📍 ${payload.locationName}${noteText} | ${payload.weatherDesc}`;
+    locEl.title = payload.locationSource === 'gps'
+      ? 'Position från din webbläsare'
+      : 'Ungefärlig position – webbläsaren delade ingen plats, så IP-adressen används';
   }
   if (windEl) {
     windEl.innerText = `💨 Vind: ${payload.wind} m/s (Känns som ${payload.feelsLike}°C)`;
