@@ -2554,35 +2554,54 @@ function handleDatasourceReturn() {
 // --- CHART INFO POPOVERS ---
 window.toggleChartInfo = function(infoId, event) {
   if (event) {
-    event.stopPropagation();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (typeof event.preventDefault === 'function') event.preventDefault();
   }
-  const target = document.getElementById(infoId);
-  if (!target) return;
-  const isHidden = target.classList.contains('hidden');
+  var popover = document.getElementById(infoId);
+  if (!popover) return;
+  var isCurrentlyOpen = !popover.classList.contains('hidden') && popover.style.display === 'block';
+  
   // Stäng alla andra öppna popovers först
-  document.querySelectorAll('.chart-info-popover').forEach(el => el.classList.add('hidden'));
-  if (isHidden) {
-    target.classList.remove('hidden');
+  document.querySelectorAll('.chart-info-popover').forEach(function(el) {
+    el.classList.add('hidden');
+    el.style.display = 'none';
+  });
+
+  if (!isCurrentlyOpen) {
+    popover.classList.remove('hidden');
+    popover.style.display = 'block';
   }
 };
 
-window.closeChartInfo = function(infoId) {
-  const target = document.getElementById(infoId);
-  if (target) {
-    target.classList.add('hidden');
+window.closeChartInfo = function(infoId, event) {
+  if (event) {
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+  }
+  var popover = document.getElementById(infoId);
+  if (popover) {
+    popover.classList.add('hidden');
+    popover.style.display = 'none';
   }
 };
 
 // Stäng popover vid klick utanför eller vid Esc-tryck
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.chart-info-popover') && !e.target.closest('.chart-info-btn')) {
-    document.querySelectorAll('.chart-info-popover').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.chart-info-popover').forEach(function(el) {
+      el.classList.add('hidden');
+      el.style.display = 'none';
+    });
   }
 });
 
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
-    document.querySelectorAll('.chart-info-popover').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.chart-info-popover').forEach(function(el) {
+      el.classList.add('hidden');
+      el.style.display = 'none';
+    });
   }
 });
+
 

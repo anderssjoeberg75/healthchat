@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings och Strava.">
-  <link rel="stylesheet" href="/static/styles.css?v=10.2.1">
+  <link rel="stylesheet" href="/static/styles.css?v=10.3.1">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -204,17 +204,15 @@
         <!-- 8 Charts Grid (2 Columns x 4 Rows) -->
         <div class="charts-grid-2col">
           
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>⚖️ Vikt trend (kg)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-weight', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-weight" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-weight', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>⚖️ Vikt trend (kg)</h4>
+            <div id="chart-info-weight" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Vikt trend</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-weight')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-weight', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Dagliga och periodiska vägningar (kg) registrerade från din personvåg.</div>
@@ -226,17 +224,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🔥 Kaloriförbränning per dag (Staplad dags-trend)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-calories', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-calories" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-calories', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🔥 Kaloriförbränning per dag (Staplad dags-trend)</h4>
+            <div id="chart-info-calories" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Kaloriförbränning</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-calories')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-calories', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Total dygnsförbränning (kcal) staplad i vila (BMR), vardagsrörelse (steg) och aktiva träningspass.</div>
@@ -248,17 +244,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🫀 Vilo-Hjärtfrekvens / Vilopuls (bpm)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-rhr', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-rhr" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-rhr', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🫀 Vilo-Hjärtfrekvens / Vilopuls (bpm)</h4>
+            <div id="chart-info-rhr" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Vilopuls (RHR)</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-rhr')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-rhr', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Din lägsta registrerade hjärtfrekvens i vila per dygn (bpm), vanligen mätt under nattens sömn.</div>
@@ -270,17 +264,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>📈 Nattlig HRV Trend (ms)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-hrv', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-hrv" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-hrv', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>📈 Nattlig HRV Trend (ms)</h4>
+            <div id="chart-info-hrv" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Nattlig HRV</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-hrv')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-hrv', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Hjärtfrekvensvariabilitet i millisekunder (rMSSD) mätt under natten via det autonoma nervsystemet.</div>
@@ -292,17 +284,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🛌 Sömn (Timmar / natt)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-sleep', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-sleep" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-sleep', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🛌 Sömn (Timmar / natt)</h4>
+            <div id="chart-info-sleep" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Sömntid</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-sleep')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-sleep', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Total registrerad sömntid i timmar för varje natt.</div>
@@ -314,17 +304,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🌟 Sömnkvalitet / Sleep Score (0–100)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-sleep-score', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-sleep-score" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-sleep-score', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🌟 Sömnkvalitet / Sleep Score (0–100)</h4>
+            <div id="chart-info-sleep-score" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Sömnkvalitet (Sleep Score)</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-sleep-score')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-sleep-score', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Ett sammanvägt betyg (0–100) baserat på djupsömn, REM-sömn, vakenhet och nattlig puls/HRV.</div>
@@ -336,17 +324,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>⚡ Body Battery Uppladdat (+)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-bb', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-bb" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-bb', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>⚡ Body Battery Uppladdat (+)</h4>
+            <div id="chart-info-bb" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Body Battery (+)</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-bb')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-bb', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Hur många poäng din energireserv (Body Battery) laddades upp med under nattens vila och sömn.</div>
@@ -358,17 +344,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🧘 Genomsnittlig Stress Level</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-stress', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-stress" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-stress', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🧘 Genomsnittlig Stress Level</h4>
+            <div id="chart-info-stress" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Stressnivå</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-stress')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-stress', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Genomsnittlig fysiologisk stress (0–100) per dygn mätt via kontinuerlig pulsvariabilitet.</div>
@@ -480,17 +464,15 @@
         <!-- 3. 4 Charts Grid (2 Columns x 2 Rows) -->
         <div class="charts-grid-2col" style="margin-bottom:15px;">
           
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>📈 Träningsbelastning & Distans Trend (km)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-train-load', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-train-load" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-train-load', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>📈 Träningsbelastning & Distans Trend (km)</h4>
+            <div id="chart-info-train-load" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Träningsbelastning</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-train-load')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-train-load', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Sammanlagd träningsbelastning (Training Load / EPOC) och total distans (km) över tid.</div>
@@ -502,17 +484,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🫀 Pulszonsfördelning Träning (Z1-Z5)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-hr-zones', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-hr-zones" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-hr-zones', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🫀 Pulszonsfördelning Träning (Z1-Z5)</h4>
+            <div id="chart-info-hr-zones" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Pulszonsfördelning</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-hr-zones')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-hr-zones', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Träningstid fördelad på de 5 pulszonerna (Z1 Återhämtning till Z5 Maxansträngning).</div>
@@ -524,17 +504,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🏋️ Träningsvolym & Kalorier (per pass)</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-training-volume', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-training-volume" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-training-volume', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🏋️ Träningsvolym & Kalorier (per pass)</h4>
+            <div id="chart-info-training-volume" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Träningsvolym & Passkalorier</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-training-volume')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-training-volume', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Tid (minuter) och beräknad energiförbrukning (kcal) för respektive träningspass under perioden.</div>
@@ -546,17 +524,15 @@
             </div>
           </div>
 
-          <div class="chart-card-box">
-            <div class="chart-card-header">
-              <h4>🏃 Aktivitetsfördelning per Sport / Typ</h4>
-              <button type="button" class="chart-info-btn" onclick="toggleChartInfo('chart-info-train-types', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </button>
-            </div>
-            <div id="chart-info-train-types" class="chart-info-popover hidden" onclick="event.stopPropagation()">
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-train-types', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>🏃 Aktivitetsfördelning per Sport / Typ</h4>
+            <div id="chart-info-train-types" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Aktivitetsfördelning</span>
-                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-train-types')" aria-label="Stäng">&times;</button>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-train-types', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
                 <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Andelen av dina träningspass uppdelat på olika sporttyper (löpning, cykling, styrka etc.).</div>
@@ -834,8 +810,61 @@
 
   </div>
 
-  <script src="/static/app.js?v=10.2.1"></script>
+  <script>
+    window.toggleChartInfo = function(infoId, event) {
+      if (event) {
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+      }
+      var popover = document.getElementById(infoId);
+      if (!popover) return;
+      var isCurrentlyOpen = !popover.classList.contains('hidden') && popover.style.display === 'block';
+      
+      document.querySelectorAll('.chart-info-popover').forEach(function(el) {
+        el.classList.add('hidden');
+        el.style.display = 'none';
+      });
+
+      if (!isCurrentlyOpen) {
+        popover.classList.remove('hidden');
+        popover.style.display = 'block';
+      }
+    };
+
+    window.closeChartInfo = function(infoId, event) {
+      if (event) {
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+      }
+      var popover = document.getElementById(infoId);
+      if (popover) {
+        popover.classList.add('hidden');
+        popover.style.display = 'none';
+      }
+    };
+
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.chart-info-popover') && !e.target.closest('.chart-info-btn')) {
+        document.querySelectorAll('.chart-info-popover').forEach(function(el) {
+          el.classList.add('hidden');
+          el.style.display = 'none';
+        });
+      }
+    });
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.chart-info-popover').forEach(function(el) {
+          el.classList.add('hidden');
+          el.style.display = 'none';
+        });
+      }
+    });
+  </script>
+
+  <script src="/static/app.js?v=10.3.1"></script>
 
 </body>
 </html>
+
 

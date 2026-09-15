@@ -528,22 +528,26 @@ body {
   margin-bottom: 12px;
 }
 
-/* Info button in the top-right of the chart card */
+/* Info button strictly in the top-right of the chart card */
 .chart-info-btn {
+  position: absolute;
+  top: 14px;
+  right: 16px;
   background: #F3F4F6;
   border: 1px solid #D1D5DB;
   border-radius: 50%;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #6B7280;
+  color: #4B5563;
   transition: all 0.15s ease;
   padding: 0;
   flex-shrink: 0;
   outline: none;
+  z-index: 20;
 }
 
 .chart-info-btn:hover,
@@ -558,15 +562,15 @@ body {
 /* Info Popover / Tooltip Card */
 .chart-info-popover {
   position: absolute;
-  top: 48px;
+  top: 46px;
   right: 16px;
   width: min(340px, calc(100% - 32px));
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
   padding: 14px 16px;
-  z-index: 50;
+  z-index: 100;
   animation: fadeInChartPop 0.18s ease-out forwards;
 }
 
