@@ -2550,3 +2550,39 @@ function handleDatasourceReturn() {
   // Drop the query string so a reload does not repeat the message.
   window.history.replaceState({}, '', window.location.pathname);
 }
+
+// --- CHART INFO POPOVERS ---
+window.toggleChartInfo = function(infoId, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  const target = document.getElementById(infoId);
+  if (!target) return;
+  const isHidden = target.classList.contains('hidden');
+  // Stäng alla andra öppna popovers först
+  document.querySelectorAll('.chart-info-popover').forEach(el => el.classList.add('hidden'));
+  if (isHidden) {
+    target.classList.remove('hidden');
+  }
+};
+
+window.closeChartInfo = function(infoId) {
+  const target = document.getElementById(infoId);
+  if (target) {
+    target.classList.add('hidden');
+  }
+};
+
+// Stäng popover vid klick utanför eller vid Esc-tryck
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.chart-info-popover') && !e.target.closest('.chart-info-btn')) {
+    document.querySelectorAll('.chart-info-popover').forEach(el => el.classList.add('hidden'));
+  }
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.chart-info-popover').forEach(el => el.classList.add('hidden'));
+  }
+});
+

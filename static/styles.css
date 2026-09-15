@@ -503,13 +503,131 @@ body {
   border-radius: var(--radius-md);
   padding: 16px 20px;
   box-shadow: var(--shadow-main);
+  position: relative;
 }
 
-.chart-card-box h4 {
+.chart-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 10px;
+}
+
+.chart-card-header h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0;
+}
+
+.chart-card-box > h4 {
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--text-main);
   margin-bottom: 12px;
+}
+
+/* Info button in the top-right of the chart card */
+.chart-info-btn {
+  background: #F3F4F6;
+  border: 1px solid #D1D5DB;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #6B7280;
+  transition: all 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.chart-info-btn:hover,
+.chart-info-btn:focus-visible {
+  background: #EFF6FF;
+  border-color: #3B82F6;
+  color: #1D4ED8;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  transform: scale(1.08);
+}
+
+/* Info Popover / Tooltip Card */
+.chart-info-popover {
+  position: absolute;
+  top: 48px;
+  right: 16px;
+  width: min(340px, calc(100% - 32px));
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  padding: 14px 16px;
+  z-index: 50;
+  animation: fadeInChartPop 0.18s ease-out forwards;
+}
+
+@keyframes fadeInChartPop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chart-info-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #F1F5F9;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.chart-info-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1E293B;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-info-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.chart-info-close-btn:hover {
+  color: #1E293B;
+  background: #F1F5F9;
+}
+
+.chart-info-popover-body {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #475569;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chart-info-desc strong,
+.chart-info-guidance strong {
+  color: #1E293B;
 }
 
 .chart-canvas-wrapper {
