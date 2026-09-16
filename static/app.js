@@ -1266,8 +1266,8 @@ function renderTrainingCharts() {
     if (charged !== null) {
       statusMetricsEl.innerHTML = `
         <div>📊 7-dagars belastning: ${Math.round(charged * 5)} / 300–600 (Optimal)</div>
-        <div>📈 Load Ratio (7d vs 28d): 1.12</div>
-        <div>🛌 Anbefalld vila: 18 timmar vila kvar</div>
+        <div>📈 Belastningskvot (7 d vs 28 d): 1.12</div>
+        <div>🛌 Rekommenderad vila: 18 timmar kvar</div>
       `;
     } else {
       statusMetricsEl.innerHTML = '<div>Ingen träningsbelastningsdata tillgänglig för perioden.</div>';

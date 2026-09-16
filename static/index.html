@@ -169,16 +169,42 @@
         <div class="cards-row">
           
           <!-- CARD 1: RECOVERY SCORE & AI-ANALYS -->
-          <div class="summary-card">
-            <h3>🔋 Recovery Score & Efficiency</h3>
+          <div class="summary-card" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('card-info-recovery', event)" title="Visa förklaring av återhämtning och dagsform" aria-label="Information om återhämtningspoäng">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h3>🔋 Återhämtningspoäng & Effektivitet</h3>
+            <div id="card-info-recovery" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
+              <div class="chart-info-popover-header">
+                <span class="chart-info-title">💡 Om Återhämtningspoäng & Effektivitet</span>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('card-info-recovery', event)" aria-label="Stäng">&times;</button>
+              </div>
+              <div class="chart-info-popover-body">
+                <div class="chart-info-desc"><strong>Vad kortet visar:</strong> Din återhämtningsnivå och dagsform (0–100 %) baserad på Garmin Body Battery, vilopuls, HRV och sömnkvalitet.</div>
+                <div class="chart-info-guidance"><strong>Tolkning & Riktvärden:</strong> 75–100 % = Mycket god återhämtning, redo för tuffa pass; 45–74 % = God form för distansträning eller normal belastning; under 45 % = Kroppen är sliten och behöver vila eller lätt aktiv återhämtning. AI-rutan ger personliga råd anpassade efter dina mål och skador.</div>
+              </div>
+            </div>
             <div class="summary-value" id="val-bb-level">72%</div>
             <div class="summary-status-header" id="val-recovery-status">Återhämtad och redo för dagen!</div>
             <div class="ai-advice-box" id="val-recovery-ai-box">Laddar AI-analys...</div>
           </div>
 
           <!-- CARD 2: WEIGHT & BODY COMP (WITHINGS) -->
-          <div class="summary-card">
-            <h3>⚖️ Weight & Body Comp (Withings)</h3>
+          <div class="summary-card" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('card-info-weight-comp', event)" title="Visa förklaring av vikt och kroppssammansättning" aria-label="Information om kroppssammansättning">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h3>⚖️ Vikt & Kroppssammansättning (Withings)</h3>
+            <div id="card-info-weight-comp" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
+              <div class="chart-info-popover-header">
+                <span class="chart-info-title">💡 Om Vikt & Kroppssammansättning</span>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('card-info-weight-comp', event)" aria-label="Stäng">&times;</button>
+              </div>
+              <div class="chart-info-popover-body">
+                <div class="chart-info-desc"><strong>Vad kortet visar:</strong> Din aktuella kroppsvikt, 30-dagars trend, beräknat BMI samt fördelning av fettprocent och muskelmassa från din personvåg (Withings).</div>
+                <div class="chart-info-guidance"><strong>Tolkning:</strong> Kroppssammansättningen ger en mycket mer rättvisande bild av formen än enbart vikt, då ökad muskelmassa kan kompensera för fettminskning på vågen. Dagliga svängningar beror främst på vätskebalans; titta på den långsiktiga trenden.</div>
+              </div>
+            </div>
             <div class="summary-value" id="val-weight-kg">98.3 kg</div>
             <div class="summary-trend" id="val-weight-trend">📉 -1.2 kg (-1.2%) under 30 d</div>
             <div class="summary-subtext" id="val-bmi-text">BMI: 28.2 (📉 -0.4)</div>
@@ -187,8 +213,21 @@
           </div>
 
           <!-- CARD 3: ACTIVE CALORIES BURNED -->
-          <div class="summary-card">
-            <h3>🔥 Kaloriförbränning idag</h3>
+          <div class="summary-card" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('card-info-calorie-burn', event)" title="Visa förklaring av kaloriförbrukning" aria-label="Information om kaloriförbrukning">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h3>🔥 Kaloriförbrukning idag</h3>
+            <div id="card-info-calorie-burn" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
+              <div class="chart-info-popover-header">
+                <span class="chart-info-title">💡 Om Kaloriförbrukning</span>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('card-info-calorie-burn', event)" aria-label="Stäng">&times;</button>
+              </div>
+              <div class="chart-info-popover-body">
+                <div class="chart-info-desc"><strong>Vad kortet visar:</strong> Beräknad total kaloriförbrukning (kcal) hittills idag, uppdelad i basalförbränning (BMR i vila), vardagsrörelse (steg) och aktiva träningspass.</div>
+                <div class="chart-info-guidance"><strong>Tolkning:</strong> Vardagssteg justeras så att steg under träningspass inte dubbelräknas. Detta ger dig full koll på energibalansen för viktkontroll, prestation och återhämtning.</div>
+              </div>
+            </div>
             <div class="summary-value" id="val-calories-total" style="color:#EA580C; font-size:1.8rem; font-weight:bold;">🔥 1 195 kcal</div>
             <div class="summary-subtext" id="val-calories-subtext" style="color:#6B7280; font-size:0.85rem; margin-bottom:6px;">Förbränt hittills idag (ungefärligt)</div>
             <div id="val-calories-breakdown" style="font-size:0.9rem; color:#4B5563; line-height:1.6;">
@@ -208,7 +247,7 @@
             <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-weight', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             </button>
-            <h4>⚖️ Vikt trend (kg)</h4>
+            <h4>⚖️ Vikttrend (kg)</h4>
             <div id="chart-info-weight" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Vikt trend</span>
@@ -268,7 +307,7 @@
             <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-hrv', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             </button>
-            <h4>📈 Nattlig HRV Trend (ms)</h4>
+            <h4>📈 Nattlig HRV-trend (ms)</h4>
             <div id="chart-info-hrv" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Nattlig HRV</span>
@@ -308,10 +347,10 @@
             <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-sleep-score', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             </button>
-            <h4>🌟 Sömnkvalitet / Sleep Score (0–100)</h4>
+            <h4>🌟 Sömnkvalitet (0–100)</h4>
             <div id="chart-info-sleep-score" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
-                <span class="chart-info-title">💡 Om Sömnkvalitet (Sleep Score)</span>
+                <span class="chart-info-title">💡 Om Sömnkvalitet</span>
                 <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-sleep-score', event)" aria-label="Stäng">&times;</button>
               </div>
               <div class="chart-info-popover-body">
@@ -348,7 +387,7 @@
             <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-stress', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             </button>
-            <h4>🧘 Genomsnittlig Stress Level</h4>
+            <h4>🧘 Genomsnittlig stressnivå</h4>
             <div id="chart-info-stress" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Stressnivå</span>
@@ -376,7 +415,7 @@
           
           <!-- CARD 1: RUNNING & FITNESS INDEX -->
           <div class="summary-card">
-            <h3>🏃 Running & Fitness Index</h3>
+            <h3>🏃 Löp- & Konditionsindex</h3>
             <div class="summary-value" id="val-train-fitness-score" style="color:#0078D4;">54.5</div>
             <div class="summary-status-header" id="val-train-fitness-status">VO2max / Löpkonditionsindex (God form)</div>
             <div class="summary-subtext" id="val-train-fitness-subtext" style="color:#4B5563; line-height:1.5; margin-top:6px;">
@@ -387,13 +426,13 @@
 
           <!-- CARD 2: TRAINING STATUS & LOAD IMPACT -->
           <div class="summary-card">
-            <h3>⚡ Training Status & Load Impact</h3>
+            <h3>⚡ Träningsstatus & Belastningspåverkan</h3>
             <div class="summary-value" id="val-train-status-title" style="color:#10B981; font-size:1.6rem;">⚡ Produktiv Träning</div>
             <div class="summary-status-header" id="val-train-status-subtext">Akut belastning i perfekt balans med återhämtningen.</div>
             <div id="val-train-status-metrics" style="font-size:0.85rem; color:#4B5563; line-height:1.5; margin-top:6px;">
               <div>📊 7-dagars belastning: 420 / 300–600 (Optimal)</div>
-              <div>📈 Load Ratio (7d vs 28d): 1.12</div>
-              <div>🛌 Anbefalld vila: 18 timmar vila kvar</div>
+              <div>📈 Belastningskvot (7 d vs 28 d): 1.12</div>
+              <div>🛌 Rekommenderad vila: 18 timmar kvar</div>
             </div>
           </div>
 
@@ -468,7 +507,7 @@
             <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-train-load', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             </button>
-            <h4>📈 Träningsbelastning & Distans Trend (km)</h4>
+            <h4>📈 Träningsbelastning & Distanstrend (km)</h4>
             <div id="chart-info-train-load" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
               <div class="chart-info-popover-header">
                 <span class="chart-info-title">💡 Om Träningsbelastning</span>
@@ -737,8 +776,8 @@
           <div style="display:flex; flex-direction:column; gap:15px;">
             
             <div class="table-card-box">
-              <h3>🔐 Byt lösenord (Re-wrap DEK)</h3>
-              <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Krypteringsnyckeln packas om med ditt nya lösenord uten att datan behöver dekrypteras om.</p>
+              <h3>🔐 Byt lösenord (Krypteringsnyckel)</h3>
+              <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Krypteringsnyckeln packas om med ditt nya lösenord utan att datan behöver dekrypteras om.</p>
               <form onsubmit="handleChangePassword(event)" style="margin-top:12px;">
                 <div class="input-group">
                   <label for="pwd-current">Nuvarande lösenord</label>

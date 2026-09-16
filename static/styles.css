@@ -420,6 +420,7 @@ body {
 }
 
 .summary-card {
+  position: relative;
   background: #FFFFFF;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -434,6 +435,7 @@ body {
   font-weight: 700;
   color: var(--text-main);
   margin-bottom: 8px;
+  padding-right: 30px;
 }
 
 .summary-value {
