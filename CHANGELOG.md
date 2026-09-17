@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Editable prompts (`prompts/`)**: COACH AI's system prompt now lives in
+  `prompts/coach_system.md` instead of being hardcoded in `ai_client.py`. The file is
+  hot-reloaded on `mtime` change, so the prompt can be tuned in production without a
+  restart or a deploy. HTML comments in the file are stripped before the prompt is sent,
+  so it can carry editing notes the model never sees. `HEALTHCHAT_PROMPTS_DIR` points the
+  loader at a directory outside the repo when local, uncommitted tweaks are wanted.
+  - New module `prompt_store.py` (`get_prompt`, `list_prompts`, `clear_cache`).
+  - The previous prompt is preserved verbatim in
+    `prompts/archive/coach_system_v1_2026-09-17.md`, extracted straight from the code.
+  - A missing or empty prompt file never breaks the chat: `AIClient.FALLBACK_COACH_PROMPT`
+    takes over and the failure is logged at ERROR level.
+
+- **Absolute no-diagnosis rule for COACH AI**: section 0 of the system prompt forbids the
+  AI from stating, implying, confirming *or ruling out* a medical diagnosis, without
+  exception - including when the user asks for one directly. It also forbids declaring the
+  user healthy ("det är inget farligt"), interpreting measurements as signs of disease, and
+  advising on medication, supplements or treatment. The AI refers to vårdcentral/1177, and
+  to 112 for acute symptoms, and must not present HealthChat as a medical device.
+  - The same rule is duplicated in `FALLBACK_COACH_PROMPT` so a lost prompt file cannot
+    silently remove it.
+  - `tests/test_prompt_store.py` fails if any of the safety rules disappears from either
+    the prompt file or the fallback. Verified by removing the section and confirming
+    6 tests go red.
+
+### Changed
+- `AIClient.get_default_system_prompt()` reads from `prompts/coach_system.md` rather than
+  returning a hardcoded string. The prompt was rewritten around coaching substance:
+  concrete training principles (max ~10 % weekly volume increase, easy sessions must feel
+  easy, rest days are part of the plan, never stack missed sessions), recovery thresholds
+  (RHR +5 %, HRV -10 %), a conversation playbook, and a guide for what to say when no data
+  source is connected. The Swedish terminology list is kept as its own editable section.
 - **Datakallor page (web)**: A new "Datakallor" tab next to "Profil & Konto" where
   each user connects and configures Strava, Garmin Connect, Withings and Fitbit
   themselves, mirroring the connect dialogs in the desktop app.
