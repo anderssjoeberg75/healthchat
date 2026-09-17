@@ -32,13 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the prompt file or the fallback. Verified by removing the section and confirming
     6 tests go red.
 
-### Changed
-- `AIClient.get_default_system_prompt()` reads from `prompts/coach_system.md` rather than
-  returning a hardcoded string. The prompt was rewritten around coaching substance:
-  concrete training principles (max ~10 % weekly volume increase, easy sessions must feel
-  easy, rest days are part of the plan, never stack missed sessions), recovery thresholds
-  (RHR +5 %, HRV -10 %), a conversation playbook, and a guide for what to say when no data
-  source is connected. The Swedish terminology list is kept as its own editable section.
 - **Datakallor page (web)**: A new "Datakallor" tab next to "Profil & Konto" where
   each user connects and configures Strava, Garmin Connect, Withings and Fitbit
   themselves, mirroring the connect dialogs in the desktop app.
@@ -66,6 +59,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     be charted over time.
   - Garmin sync now also stores the daily summary (steps / calories / BMR),
     which previously had a table but was never populated.
+
+- **Recovery trends in the AI context (`health_trends.py`)**: COACH AI previously received a
+  single overnight value - "Senaste HRV: 46 ms" - with nothing to compare it against, so the
+  model could not tell whether that number was good *for this user*. `/api/ai/chat` now also
+  sends a trend block: the 7-day average for resting heart rate, HRV and sleep against a
+  baseline built from the 14 days immediately before, with the percentage change and a flag
+  when it crosses the thresholds in the system prompt (RHR +5 %, HRV -10 %, sleep -10 %).
+  - Zero values are treated as missing, not as measurements: `upsert_daily_summary` stores
+    `resting_hr=0` when Garmin returned nothing, and counting those zeros would invent a
+    downward trend.
+  - Below 3 recent or 5 baseline days the block reports insufficient data instead of a
+    percentage, and tells the model not to draw conclusions about direction.
+  - The chat endpoint now reads 21 days of sleep/HRV/daily-summary history (was 7) to fill
+    both windows.
+  - The profile's resting heart rate is labelled "Vilopuls enligt profil" so it cannot be
+    confused with the measured value in the trend block.
+
+### Changed
+- `AIClient.get_default_system_prompt()` reads from `prompts/coach_system.md` rather than
+  returning a hardcoded string. The prompt was rewritten around coaching substance:
+  concrete training principles (max ~10 % weekly volume increase, easy sessions must feel
+  easy, rest days are part of the plan, never stack missed sessions), recovery thresholds
+  (RHR +5 %, HRV -10 %), a conversation playbook, and a guide for what to say when no data
+  source is connected. The Swedish terminology list is kept as its own editable section.
+- Streaming chat responses are no longer truncated mid-sentence: `max_tokens` on the
+  streaming path was 2000 while both non-streaming paths used 4000. The web chat streams,
+  so a full four-section analysis could be cut off silently. Raised to 4000 to match.
 
 ## [4.0.5] - 2026-08-20
 

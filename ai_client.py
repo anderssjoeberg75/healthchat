@@ -495,7 +495,10 @@ aldrig ett missat pass, och avsluta alltid med en tydlig åtgärd eller fråga."
                 response = self.client.chat.completions.create(
                     model=model_param,
                     messages=messages,
-                    max_tokens=2000,
+                    # Samma tak som de icke-strömmande vägarna (_call_openai_compatible,
+                    # _call_anthropic). Med 2000 kapades en full analys med fyra rubriker
+                    # tyst mitt i meningen.
+                    max_tokens=4000,
                     temperature=0.5 if self.provider == 'ollama' else 0.7,
                     timeout=timeout_val,
                     stream=True
