@@ -38,6 +38,7 @@ import ai_client
 from ai_client import AIClient
 import calorie_calc
 import hr_zones_calc
+import health_trends
 import profile_sync
 import datasource_store
 
@@ -834,9 +835,12 @@ async def chat_stream(
     session: UserSession = Depends(get_current_session)
 ):
     db = bind_user_db(session)
+    # Trendfönstren (7 dagar mot de 14 närmast före) kräver 21 dagars historik.
+    trend_days = health_trends.history_days_needed()
     activities = db.get_activities_history(30)
-    sleep = db.get_sleep_history(7)
-    hrv = db.get_hrv_history(7)
+    sleep = db.get_sleep_history(trend_days)
+    hrv = db.get_hrv_history(trend_days)
+    daily_summary = db.get_daily_summary_history(trend_days)
     body_comp = db.get_latest_body_composition() or {}
     
     context_lines = [f"Användar-ID: {session.user_id}"]
@@ -860,7 +864,9 @@ async def chat_stream(
     if profile.get("age"):
         context_lines.append(f"Ålder: {profile.get('age')} år")
     if profile.get("resting_hr"):
-        context_lines.append(f"Vilopuls: {profile.get('resting_hr')} bpm")
+        # Uttryckligen märkt som profilvärde: trendraderna längre ned rapporterar
+        # uppmätt vilopuls, och två olika tal under samma etikett förvirrar modellen.
+        context_lines.append(f"Vilopuls enligt profil: {profile.get('resting_hr')} bpm")
     if profile.get("max_hr"):
         context_lines.append(f"Maxpuls: {profile.get('max_hr')} bpm")
     if profile.get("bmi"):
@@ -878,6 +884,16 @@ async def chat_stream(
         context_lines.append(f"Senaste sömn: {sleep[-1].get('total_sleep_hours', 0)}h (Score: {sleep[-1].get('sleep_score', 'N/A')})")
     if hrv:
         context_lines.append(f"Senaste HRV: {hrv[-1].get('last_night_avg', 'N/A')} ms (Status: {hrv[-1].get('status', 'N/A')})")
+
+    # Återhämtningstrender: enstaka nattvärden säger inget utan en baslinje att
+    # jämföra mot. Trösklarna som tolkar raderna står i prompts/coach_system.md.
+    trend_lines = health_trends.build_trend_lines(
+        daily_summary=daily_summary, hrv=hrv, sleep=sleep
+    )
+    if trend_lines:
+        context_lines.append("")
+        context_lines.append("ÅTERHÄMTNINGSTRENDER (senaste 7 dagarna mot de 14 närmast före):")
+        context_lines.extend(trend_lines)
     if req.weather_context:
         context_lines.append(f"⛅ AKTUELLT LOKALT VÄDER: {req.weather_context.strip()}")
         context_lines.append(

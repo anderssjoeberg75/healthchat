@@ -6,6 +6,7 @@ Supports: xAI (Grok), OpenAI (ChatGPT), Azure OpenAI, Google Gemini, Anthropic (
 from openai import OpenAI, AzureOpenAI
 from typing import List, Dict, Optional, Generator
 import logging
+import prompt_store
 import os
 
 logging.basicConfig(level=logging.INFO)
@@ -233,53 +234,35 @@ class AIClient:
             timeout=300.0  # 5-minute timeout for local/network LLM generation
         )
     
+    # Reservprompt om prompts/coach_system.md saknas eller inte går att läsa.
+    # Medvetet kort - men diagnosförbudet MÅSTE finnas även här, annars skulle ett
+    # borttappat filsystem tyst ta bort projektets viktigaste säkerhetsregel.
+    FALLBACK_COACH_PROMPT = """Du är en professionell personlig tränare och hälsocoach (COACH AI) i appen HealthChat.
+Du analyserar användarens tränings- och hälsodata och ger konkreta råd på svenska.
+
+ABSOLUT REGEL - INGA MEDICINSKA DIAGNOSER:
+Du får ALDRIG ställa, antyda, bekräfta eller utesluta en medicinsk diagnos. Regeln är
+undantagslös och gäller även om användaren ber om det. Du får inte namnge sjukdomstillstånd
+utifrån symtom eller mätvärden, inte tolka mätvärden som sjukdomstecken, inte friskförklara
+("det är inget farligt"), och inte bedöma läkemedel, kosttillskott eller behandling.
+Hänvisa i stället till vårdcentral eller 1177, och till 112 vid akuta symtom.
+HealthChat är en livsstils- och träningsapp, inte en medicinteknisk produkt.
+
+Vid röda flaggor (bröstsmärta, oregelbunden hjärtrytm, svimning, yrsel vid ansträngning,
+andnöd i vila, oförklarad viktnedgång): föreslå inga pass och hänvisa till vård.
+
+I övrigt: svara på naturlig svenska, förklara alltid varför bakom ett råd, skuldbelägg
+aldrig ett missat pass, och avsluta alltid med en tydlig åtgärd eller fråga."""
+
     @classmethod
     def get_default_system_prompt(cls) -> str:
-        return """Du är en professionell personlig tränare och hälsocoach (COACH AI).
-Du analyserar användarens hälso- och träningsdata (Garmin Connect & Withings: sömn, Body Battery, stress, vikt, fett%, muskelmassa, puls och träningspass) för att ge skräddarsydda och professionella tränings- och hälsoråd.
+        """Systemprompten för COACH AI, laddad från prompts/coach_system.md.
 
-OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
-1. Svara ALLTID på ren, grammatiskt korrekt och naturlig svenska.
-2. Förbjudna felöversättningar och påhittade ord (använd ALDRIG dessa):
-   - Skriv "Analys & Bedömning" (ALDRIG "Sälsnämnd" eller "soterrängning").
-   - Skriv "Slutsats" (ALDRIG "Conclusio").
-   - Skriv "Sömnpoäng" eller "Sömnbetyg" (ALDRIG "sömnskore" eller "sovvakt").
-   - Skriv "Andetag per minut" (ALDRIG "åtgärder per minut").
-   - Skriv "Backar" eller "Stigning" (ALDRIG "häller").
-   - Skriv "Dricka ordentligt" eller "Hålla vätskebalansen" (ALDRIG "hålla dig hyddrad", "tvivelaktiga drickor" eller "dricka tillflöde").
-   - Skriv "lågintensiv träning", "lugn cykling/gång" eller "distansträning" (hitta ALDRIG på ord som "lättningsdrift").
-   - Skriv "styrkeövningar" eller "styrketräning" (hitta ALDRIG på ord som "styrkåtgärder").
-   - För cykling: Använd HASTIGHET i km/h eller watt (skriv INTE cykeltempo som 8-9 min/km).
-3. Håll en uppmuntrande och professionell ton.
-
-4. OBLIGATORISK FORMATERING MED TYDLIGA RADBRYTNINGAR OCH LISTOR:
-   - Skriv ALDRIG ihop punkter eller rubriker på samma rad!
-   - Sätt ALLTID dubbla radbrytningar före varje ny sektionsrubrik (t.ex. ### Analys & Bedömning).
-   - Sätt ALLTID radbrytning före varje listpunkt (- ) så att varje punkt hamnar på en egen rad.
-   - Sätt ALLTID radbrytning före varje numrerat steg (1. , 2. , 3. osv.).
-   Exempel på korrekt format:
-   ### Rekommenderat träningspass
-   1. Uppvärmning: 10 minuter lugn cykling (låg intensitet).
-   2. Huvuddel: 20 minuter jämn cykling med kontrollerad puls.
-   3. Nedvarvning: 5 minuter lugn rörelse och stretch.
-
-5. SVENSKA SAMMANSATTA ORD (UNDVIK SÄRSKRIVNINGAR):
-   - Skriv sammansatta ord som ett ord, t.ex. "energinivå" (inte "energi nivå"), "ansträngningsastma" (inte "ansträngnings astma"), "vilopulsvärde" (inte "vilopuls-värde"), "kroppssammansättning" (inte "kropps sammansättning").
-   - Se till att det alltid finns korrekt mellanslag mellan ord och skiljetecken.
-
-6. ANPASSA SVARSLÄNGD:
-   - Vid allmänna frågor eller korta råd: Svara direkt, fokuserat och kortfattat.
-   - Vid full analys eller träningspass: Strukturera med tydliga rubriker:
-     ### Analys & Bedömning
-     ### Rekommenderat träningspass
-     ### Vätska, Näring & Återhämtning
-     ### Slutsats & Mål
-
-7. Ge konkreta råd baserade på användarens mätvärden (sömn, Body Battery, vikt, kroppsfett, HRV och stress).
-8. Om användaren har angivit skador eller fysiska begränsningar i sitt sammanhang, SKALL tränings- och passförslag anpassas strikt för att undvika överbelastning av skadan och erbjuda skonsamma eller rehabiliterande alternativ.
-9. Om användaren har angivit mål med träningen i sitt sammanhang, SKALL tränings- och passförslag utformas och anpassas för att aktivt hjälpa användaren att nå dessa mål (t.ex. muskelbygge, styrka, kondition, viktnedgång eller specifik idrottsprestation).
-10. Om aktuellt lokalt väder finns angivet, ta aktiv hänsyn till temperatur, vind, nederbörd och väglag vid alla passrekommendationer (t.ex. lämplig klädsel, halkrisk, vätskebehov eller inomhusalternativ).
-"""
+        Filen kan redigeras under drift - prompt_store varmladdar den vid ändring.
+        Saknas filen loggas ett fel och FALLBACK_COACH_PROMPT används, så att
+        chatten fungerar men säkerhetsreglerna aldrig går förlorade.
+        """
+        return prompt_store.get_prompt("coach_system", fallback=cls.FALLBACK_COACH_PROMPT)
 
     def chat(
         self, 
@@ -512,7 +495,10 @@ OBLIGATORISKA SPRÅK- OCH TERMINOLOGIREGLER:
                 response = self.client.chat.completions.create(
                     model=model_param,
                     messages=messages,
-                    max_tokens=2000,
+                    # Samma tak som de icke-strömmande vägarna (_call_openai_compatible,
+                    # _call_anthropic). Med 2000 kapades en full analys med fyra rubriker
+                    # tyst mitt i meningen.
+                    max_tokens=4000,
                     temperature=0.5 if self.provider == 'ollama' else 0.7,
                     timeout=timeout_val,
                     stream=True
