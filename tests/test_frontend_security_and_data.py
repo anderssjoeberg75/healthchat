@@ -39,30 +39,34 @@ def test_ui_2_escape_html_present_and_applied_to_activity_tables():
     assert "escapeHtml(z.name" in content or "escapeHtml(z.title" in content, "Heart zone fields must be escaped"
 
 
-def test_profile_page_hr_zones_and_maf_table_under_bmi():
+def test_profile_page_fields_and_no_hr_zones_table():
     index_path = Path(__file__).resolve().parent.parent / "static" / "index.html"
     assert index_path.exists(), f"static/index.html not found at {index_path}"
     html = index_path.read_text(encoding="utf-8")
 
-    # Verify elements exist on profile page
+    # Verify profile fields exist
     assert 'id="prof-bone"' in html, "prof-bone must be in index.html"
     assert 'id="prof-water"' in html, "prof-water must be in index.html"
     assert 'id="prof-waist"' in html, "prof-waist must be in index.html"
     assert 'id="prof-bmi"' in html, "prof-bmi must be in index.html"
-    assert 'id="prof-hr-zones-header-info"' in html, "prof-hr-zones-header-info must be in index.html"
-    assert 'id="prof-hr-zones-table-body"' in html, "prof-hr-zones-table-body must be in index.html"
-    assert 'id="prof-maf-title"' in html, "prof-maf-title must be in index.html"
-    assert 'id="prof-maf-info"' in html, "prof-maf-info must be in index.html"
+    assert 'id="prof-training-goals"' in html, "prof-training-goals must be in index.html"
 
-    # Verify placement: waist is under bone/water and before/at BMI row, and HR zones table is placed after prof-bmi row and before prof-training-goals
+    # Verify HR zones table was removed from profile page
+    assert 'id="prof-hr-zones-table-body"' not in html, "prof-hr-zones-table-body should not be in index.html"
+    assert 'id="prof-hr-zones-header-info"' not in html, "prof-hr-zones-header-info should not be in index.html"
+
+    # Verify training page HR zones still exists
+    assert 'id="hr-zones-table-body"' in html, "hr-zones-table-body must be on training page"
+    assert 'id="val-hr-zones-header-info"' in html, "val-hr-zones-header-info must be on training page"
+
+    # Verify placement: waist is under bone/water and alongside BMI row, before training goals
     water_pos = html.find('id="prof-water"')
     waist_pos = html.find('id="prof-waist"')
     bmi_pos = html.find('id="prof-bmi"')
-    zones_pos = html.find('id="prof-hr-zones-table-body"')
     goals_pos = html.find('id="prof-training-goals"')
 
-    assert water_pos != -1 and waist_pos != -1 and bmi_pos != -1 and zones_pos != -1 and goals_pos != -1
-    assert water_pos < waist_pos <= bmi_pos < zones_pos < goals_pos, (
-        "Midjemått must be under skelettmassa/kroppsvatten and before HR zones"
+    assert water_pos != -1 and waist_pos != -1 and bmi_pos != -1 and goals_pos != -1
+    assert water_pos < waist_pos <= bmi_pos < goals_pos, (
+        "Midjemått must be under skelettmassa/kroppsvatten and before training goals"
     )
 

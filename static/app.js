@@ -329,9 +329,6 @@ function updateLiveMaxHr() {
   if (summaryHeader) {
     summaryHeader.innerText = `👤 Ålder: ${age} år | 💖 Vilopuls: ${restingHr} bpm | ⚡ Maxpuls: ${maxHr} bpm | 📊 Pulsreserv (HRR): ${hrr} bpm`;
   }
-
-  const calcData = calculateKarvonenZones(age, restingHr, maxHr);
-  renderHrZonesUI('prof', calcData);
 }
 
 function calculateKarvonenZones(age, restingHr, maxHr) {
