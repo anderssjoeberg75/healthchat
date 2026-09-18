@@ -255,6 +255,8 @@ async function populateProfileInputs(profile) {
   if (boneEl && p.bone_mass_kg !== undefined && p.bone_mass_kg !== null && p.bone_mass_kg !== '') boneEl.value = p.bone_mass_kg;
   const watEl = document.getElementById('prof-water');
   if (watEl && p.water_pct !== undefined && p.water_pct !== null && p.water_pct !== '') watEl.value = p.water_pct;
+  const waistEl = document.getElementById('prof-waist');
+  if (waistEl && p.waist_cm !== undefined && p.waist_cm !== null && p.waist_cm !== '') waistEl.value = p.waist_cm;
   const bmiEl = document.getElementById('prof-bmi');
   const heightNum = parseFloat(document.getElementById('prof-height')?.value || p.height_cm || 0);
   const weightNum = parseFloat(document.getElementById('prof-weight')?.value || p.weight_kg || 0);
@@ -325,7 +327,87 @@ function updateLiveMaxHr() {
 
   const summaryHeader = document.getElementById('prof-summary-header-info');
   if (summaryHeader) {
-    summaryHeader.innerText = `👤 Ålder: ${age} år | ❤️ Vilopuls: ${restingHr} bpm | ⚡ Maxpuls: ${maxHr} bpm | 📊 Pulsreserv (HRR): ${hrr} bpm`;
+    summaryHeader.innerText = `👤 Ålder: ${age} år | 💖 Vilopuls: ${restingHr} bpm | ⚡ Maxpuls: ${maxHr} bpm | 📊 Pulsreserv (HRR): ${hrr} bpm`;
+  }
+
+  const calcData = calculateKarvonenZones(age, restingHr, maxHr);
+  renderHrZonesUI('prof', calcData);
+}
+
+function calculateKarvonenZones(age, restingHr, maxHr) {
+  const vAge = Number(age) > 0 ? Number(age) : 40;
+  const vRest = Number(restingHr) > 0 ? Number(restingHr) : 60;
+  const vMax = Number(maxHr) > 0 ? Number(maxHr) : Math.max(100, Math.round(220 - vAge));
+  const hrr = Math.max(10, vMax - vRest);
+
+  const zoneDefs = [
+    { name: 'Zon 1', title: 'Uppvärmning & Återhämtning', pct: '50–60%', pctLow: 0.50, pctHigh: 0.60, desc: 'Mycket lätt effort, aktiv återhämtning' },
+    { name: 'Zon 2', title: 'Lågintensiv / Fettförbränning', pct: '60–70%', pctLow: 0.60, pctHigh: 0.70, desc: 'Aerob basbygge, maximal fettförbränning' },
+    { name: 'Zon 3', title: 'Aerob Kondition', pct: '70–80%', pctLow: 0.70, pctHigh: 0.80, desc: 'Förbättrar kondition och syreupptag' },
+    { name: 'Zon 4', title: 'Anaerob Tröskel', pct: '80–90%', pctLow: 0.80, pctHigh: 0.90, desc: 'Mjölksyraträning, hög ansträngning' },
+    { name: 'Zon 5', title: 'Maximal Ansträngning', pct: '90–100%', pctLow: 0.90, pctHigh: 1.00, desc: 'Spurt och kortvarig maxansträngning' }
+  ];
+
+  const zones = zoneDefs.map(z => {
+    const low = Math.round(vRest + z.pctLow * hrr);
+    const high = Math.round(vRest + z.pctHigh * hrr);
+    return {
+      name: z.name,
+      title: z.title,
+      pct_range_str: z.pct,
+      bpm_range_str: `${low} – ${high} bpm`,
+      desc: z.desc
+    };
+  });
+
+  const mafTarget = Math.round(180 - vAge);
+  const mafMin = mafTarget - 10;
+
+  return {
+    age: vAge,
+    restingHr: vRest,
+    maxHr: vMax,
+    hrr,
+    zones,
+    mafTarget,
+    mafMin
+  };
+}
+
+function renderHrZonesUI(target, data, customZones = null) {
+  const isProf = target === 'prof';
+  const headerInfoEl = document.getElementById(isProf ? 'prof-hr-zones-header-info' : 'val-hr-zones-header-info');
+  const tbodyEl = document.getElementById(isProf ? 'prof-hr-zones-table-body' : 'hr-zones-table-body');
+  const mafTitleEl = document.getElementById(isProf ? 'prof-maf-title' : 'val-maf-title');
+  const mafInfoEl = document.getElementById(isProf ? 'prof-maf-info' : 'val-maf-info');
+
+  if (headerInfoEl) {
+    headerInfoEl.innerText = `👤 Ålder: ${data.age} år | 💖 Vilopuls: ${data.restingHr} bpm | ⚡ Maxpuls: ${data.maxHr} bpm | 📊 Pulsreserv (HRR): ${data.hrr} bpm`;
+  }
+
+  const zonesToRender = (customZones && customZones.length > 0) ? customZones : data.zones;
+  if (tbodyEl) {
+    tbodyEl.innerHTML = zonesToRender.map(z => `
+      <tr>
+        <td><strong>${escapeHtml(z.name || z.zone || '')}</strong></td>
+        <td>${escapeHtml(z.title || '')}</td>
+        <td>${escapeHtml(z.pct_range_str || z.pct || '')}</td>
+        <td><strong>${escapeHtml(z.bpm_range_str || ((z.low !== undefined && z.high !== undefined) ? `${z.low} – ${z.high} bpm` : ''))}</strong></td>
+        <td>${escapeHtml(z.desc || z.effect || '')}</td>
+      </tr>
+    `).join('');
+  }
+
+  if (mafTitleEl) {
+    mafTitleEl.innerText = `🎯 Philip Maffetone MAF 180 Puls: ${data.mafTarget} bpm (Aerobt träningstak: ${data.mafMin} – ${data.mafTarget} bpm)`;
+  }
+
+  if (mafInfoEl) {
+    mafInfoEl.innerHTML = `
+      <div>📊 Formel: 180 – ${data.age} år = ${data.mafTarget} bpm | Maximal aerob fettförbränning utan mjölksyra.</div>
+      <div>• Håll pulsen i intervallet ${data.mafMin}–${data.mafTarget} bpm under distanspass för maximal fettförbränning och aerob uthållighet.</div>
+      <div>• Träning över ${data.mafTarget} bpm aktiverar anaerob förbränning och övergår i mjölksyrabelastning.</div>
+    `;
   }
 }
 
@@ -1346,49 +1428,10 @@ function renderTrainingCharts() {
   const age = Number(profile.age || 40);
   const restingHr = Number(profile.resting_hr || 54);
   const maxHr = Number(profile.max_hr || Math.round(220 - age));
-  const hrr = maxHr - restingHr;
 
-  const headerInfoEl = document.getElementById('val-hr-zones-header-info');
-  if (headerInfoEl) {
-    headerInfoEl.innerText = `👤 Ålder: ${age} år | ❤️ Vilopuls: ${restingHr} bpm | ⚡ Maxpuls: ${maxHr} bpm | 📊 Pulsreserv (HRR): ${hrr} bpm`;
-  }
-
-  const defaultZones = [
-    { name: 'Zon 1', title: 'Aktiv återhämtning', pct: '< 60%', low: restingHr, high: Math.round(restingHr + hrr * 0.6), desc: 'Lugn uppvärmning & återhämtning' },
-    { name: 'Zon 2', title: 'Aerob uthållighet (MAF)', pct: '60–70%', low: Math.round(restingHr + hrr * 0.6), high: Math.round(restingHr + hrr * 0.7), desc: 'Basbyggande, maximal fettförbränning' },
-    { name: 'Zon 3', title: 'Tempo / Aerob zon', pct: '70–80%', low: Math.round(restingHr + hrr * 0.7), high: Math.round(restingHr + hrr * 0.8), desc: 'Kapacitetsökning, uthållighetstempo' },
-    { name: 'Zon 4', title: 'Tröskel / Mjölksyra', pct: '80–90%', low: Math.round(restingHr + hrr * 0.8), high: Math.round(restingHr + hrr * 0.9), desc: 'Anaerob tröskelträning & fartutveckling' },
-    { name: 'Zon 5', title: 'Maximal ansträngning', pct: '90–100%', low: Math.round(restingHr + hrr * 0.9), high: maxHr, desc: 'VO2max & kortintervaller' }
-  ];
-
-  const zonesList = (hrZonesData && hrZonesData.zones) || defaultZones;
-  const tbody = document.getElementById('hr-zones-table-body');
-  if (tbody) {
-    tbody.innerHTML = zonesList.map(z => `
-      <tr>
-        <td><strong>${escapeHtml(z.name || z.zone)}</strong></td>
-        <td>${escapeHtml(z.title)}</td>
-        <td>${escapeHtml(z.pct_range_str || z.pct)}</td>
-        <td><strong>${escapeHtml(z.bpm_range_str || (z.low + '–' + z.high + ' bpm'))}</strong></td>
-        <td>${escapeHtml(z.desc || z.effect)}</td>
-      </tr>
-    `).join('');
-  }
-
-  const mafTarget = Math.round(180 - age);
-  const mafMin = mafTarget - 10;
-  const mafTitleEl = document.getElementById('val-maf-title');
-  if (mafTitleEl) {
-    mafTitleEl.innerText = `🎯 Philip Maffetone MAF 180 Puls: ${mafTarget} bpm (Aerobt träningstak: ${mafMin} – ${mafTarget} bpm)`;
-  }
-  const mafInfoEl = document.getElementById('val-maf-info');
-  if (mafInfoEl) {
-    mafInfoEl.innerHTML = `
-      <div>📊 Formel: 180 – ${age} år = ${mafTarget} bpm | Maximal aerob fettförbränning utan mjölksyra.</div>
-      <div>• Håll pulsen i intervallet ${mafMin}–${mafTarget} bpm under distanspass för maximal fettförbränning och aerob uthållighet.</div>
-      <div>• Träning över ${mafTarget} bpm aktiverar anaerob förbränning och övergår i mjölksyrabelastning.</div>
-    `;
-  }
+  const trainCalc = calculateKarvonenZones(age, restingHr, maxHr);
+  const customZones = (hrZonesData && hrZonesData.zones && hrZonesData.zones.length > 0) ? hrZonesData.zones : null;
+  renderHrZonesUI('train', trainCalc, customZones);
 
 
   // --- 3. RENDER 4 CHARTS (2x2 GRID) ---
@@ -1982,6 +2025,7 @@ async function handleUpdateProfile(event) {
   const musVal = document.getElementById('prof-muscle') ? document.getElementById('prof-muscle').value.trim() : '';
   const boneVal = document.getElementById('prof-bone') ? document.getElementById('prof-bone').value.trim() : '';
   const watVal = document.getElementById('prof-water') ? document.getElementById('prof-water').value.trim() : '';
+  const waistVal = document.getElementById('prof-waist') ? document.getElementById('prof-waist').value.trim() : '';
   const bmiVal = document.getElementById('prof-bmi') ? document.getElementById('prof-bmi').value.trim() : '';
   const trainingGoalsVal = document.getElementById('prof-training-goals') ? document.getElementById('prof-training-goals').value.trim() : '';
   const injuriesVal = document.getElementById('prof-injuries') ? document.getElementById('prof-injuries').value.trim() : '';
@@ -1989,6 +2033,7 @@ async function handleUpdateProfile(event) {
   const age = ageVal ? parseFloat(ageVal) : null;
   const height_cm = heightVal ? parseFloat(heightVal.replace(',', '.')) : null;
   const weight_kg = weightVal ? parseFloat(weightVal.replace(',', '.')) : null;
+  const waist_cm = waistVal ? parseFloat(waistVal.replace(',', '.')) : null;
   const resting_hr = rHrVal ? parseFloat(rHrVal.replace(',', '.')) : null;
   const max_hr = mHrVal ? parseFloat(mHrVal.replace(',', '.')) : null;
   const fat_ratio_pct = fatVal ? parseFloat(fatVal.replace(',', '.')) : null;
@@ -2006,11 +2051,11 @@ async function handleUpdateProfile(event) {
     const res = await apiFetch('/api/profile/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi, training_goals, injuries })
+      body: JSON.stringify({ sex, age, height_cm, weight_kg, waist_cm, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi, training_goals, injuries })
     });
     const data = await res.json();
     if (res.ok) {
-      const updated = data.profile || { sex, age, height_cm, weight_kg, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi, training_goals, injuries };
+      const updated = data.profile || { sex, age, height_cm, weight_kg, waist_cm, resting_hr, max_hr, fat_ratio_pct, muscle_mass_kg, bone_mass_kg, water_pct, bmi, training_goals, injuries };
       if (currentUser) currentUser.profile = updated;
       if (cachedSummary) cachedSummary.profile = updated;
       populateProfileInputs(updated);

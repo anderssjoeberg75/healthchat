@@ -464,9 +464,9 @@
 
         <!-- 2. Pulszoner & MAF-beräkning Card (Philip Maffetone) -->
         <div class="table-card-box" style="margin-bottom:15px;">
-          <h3>❤️ Personliga Pulszoner & MAF-beräkning (Philip Maffetone 180-Formel)</h3>
+          <h3>💖 Personliga Pulszoner & MAF-beräkning (Philip Maffetone 180-Formel)</h3>
           <p id="val-hr-zones-header-info" style="font-size:0.85rem; font-weight:600; color:#374151; margin-top:4px; margin-bottom:10px;">
-            👤 Ålder: 42 år | ❤️ Vilopuls: 54 bpm | ⚡ Maxpuls: 178 bpm | 📊 Pulsreserv (HRR): 124 bpm
+            👤 Ålder: 42 år | 💖 Vilopuls: 54 bpm | ⚡ Maxpuls: 178 bpm | 📊 Pulsreserv (HRR): 124 bpm
           </p>
 
           <!-- Zones Table -->
@@ -741,8 +741,52 @@
               </div>
               <div class="input-row">
                 <div class="input-group">
+                  <label for="prof-waist">Midjemått (cm)</label>
+                  <input type="number" id="prof-waist" step="0.1" min="40" max="250" placeholder="t.ex. 85">
+                </div>
+                <div class="input-group">
                   <label for="prof-bmi">BMI</label>
                   <input type="number" id="prof-bmi" step="0.1" min="10" max="60" placeholder="t.ex. 24.2">
+                </div>
+              </div>
+
+              <!-- Personliga Pulszoner & MAF-beräkning (Philip Maffetone) under BMI -->
+              <div class="profile-hr-zones-box">
+                <h4 style="font-size:0.95rem; font-weight:700; color:var(--text-main); margin-bottom:4px;">
+                  💖 Personliga Pulszoner & MAF-beräkning (Philip Maffetone 180-Formel)
+                </h4>
+                <p id="prof-hr-zones-header-info" style="font-size:0.85rem; font-weight:600; color:#374151; margin-top:4px; margin-bottom:10px;">
+                  👤 Ålder: -- år | 💖 Vilopuls: -- bpm | ⚡ Maxpuls: -- bpm | 📊 Pulsreserv (HRR): -- bpm
+                </p>
+
+                <!-- Zones Table -->
+                <div class="table-responsive" style="margin-bottom:12px;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Zon</th>
+                        <th>Beskrivning</th>
+                        <th>Intensitet (% HRR)</th>
+                        <th>Pulsintervall (bpm)</th>
+                        <th>Träningsfokus & Effekt</th>
+                      </tr>
+                    </thead>
+                    <tbody id="prof-hr-zones-table-body">
+                      <tr><td colspan="5" style="text-align:center;">Laddar pulszoner...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- MAF 180 Info Box -->
+                <div style="background:#FFFBEB; border:1px solid #FCD34D; border-radius:var(--radius-sm); padding:12px; margin-top:8px;">
+                  <h4 id="prof-maf-title" style="color:#D97706; font-size:0.95rem; font-weight:700; margin-bottom:4px;">
+                    🎯 Philip Maffetone MAF 180 Puls: 129 bpm (Aerobt träningstak: 119 – 129 bpm)
+                  </h4>
+                  <div id="prof-maf-info" style="font-size:0.85rem; color:#4B5563; line-height:1.5;">
+                    <div>📊 Formel: 180 – Ålder = Bas-MAF | Maximal aerob fettförbränning utan mjölksyra.</div>
+                    <div>• Håll pulsen i intervallet under distanspass för maximal fettförbränning och aerob uthållighet.</div>
+                    <div>• Träning över MAF-puls aktiverar anaerob förbränning och övergår i mjölksyrabelastning.</div>
+                  </div>
                 </div>
               </div>
               <div class="input-row">

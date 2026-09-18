@@ -242,6 +242,7 @@ class ProfileUpdateRequest(BaseModel):
     height_cm: Optional[float] = None
     age: Optional[float] = None
     weight_kg: Optional[float] = None
+    waist_cm: Optional[float] = None
     resting_hr: Optional[float] = None
     max_hr: Optional[float] = None
     fat_ratio_pct: Optional[float] = None
@@ -864,6 +865,8 @@ async def chat_stream(
         context_lines.append(f"Maxpuls: {profile.get('max_hr')} bpm")
     if profile.get("bmi"):
         context_lines.append(f"BMI: {profile.get('bmi')}")
+    if profile.get("waist_cm"):
+        context_lines.append(f"Midjemått: {profile.get('waist_cm')} cm")
 
     if body_comp.get("weight_kg"):
         context_lines.append(f"Vikt: {body_comp.get('weight_kg')} kg (Fett%: {body_comp.get('fat_ratio_pct', 'N/A')}%)")
@@ -1173,6 +1176,8 @@ def update_profile(
             current_profile["age"] = req.age
         if req.weight_kg is not None:
             current_profile["weight_kg"] = req.weight_kg
+        if req.waist_cm is not None:
+            current_profile["waist_cm"] = req.waist_cm
         if req.resting_hr is not None:
             current_profile["resting_hr"] = req.resting_hr
         if req.max_hr is not None:

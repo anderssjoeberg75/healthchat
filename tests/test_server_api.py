@@ -69,11 +69,12 @@ def test_register_login_and_me_flow(monkeypatch):
     # Test update profile
     update_res = client.post(
         "/api/profile/update",
-        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "resting_hr": 55.0, "max_hr": 185.0, "training_goals": "Milen under 45 min och öka muskelmassa", "injuries": "Känning i höger hälsena"},
+        json={"sex": "female", "age": 30, "height_cm": 175.0, "weight_kg": 68.0, "waist_cm": 78.5, "resting_hr": 55.0, "max_hr": 185.0, "training_goals": "Milen under 45 min och öka muskelmassa", "injuries": "Känning i höger hälsena"},
         cookies=reg_res.cookies
     )
     assert update_res.status_code == 200
     assert update_res.json()["profile"]["weight_kg"] == 68.0
+    assert update_res.json()["profile"]["waist_cm"] == 78.5
     assert update_res.json()["profile"]["resting_hr"] == 55.0
     assert update_res.json()["profile"]["max_hr"] == 185.0
     assert update_res.json()["profile"]["training_goals"] == "Milen under 45 min och öka muskelmassa"
@@ -88,6 +89,7 @@ def test_register_login_and_me_flow(monkeypatch):
     me_updated = client.get("/api/auth/me", cookies=reg_res.cookies)
     assert me_updated.status_code == 200
     assert me_updated.json()["profile"]["weight_kg"] == 68.0
+    assert me_updated.json()["profile"]["waist_cm"] == 78.5
     assert me_updated.json()["profile"]["age"] == 30
     assert me_updated.json()["profile"]["training_goals"] == "Milen under 45 min och öka muskelmassa"
     assert me_updated.json()["profile"]["injuries"] == "Känning i höger hälsena"
