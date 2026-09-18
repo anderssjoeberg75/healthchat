@@ -316,7 +316,7 @@ async def runtime_database_error_handler(request: Request, exc: RuntimeError):
         logger.error(f"MariaDB unavailable on {request.url.path}: {msg}")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "Databasen är inte tillgänglig för tillfället (MariaDB krävs)."}
+            content={"detail": "Databasen är inte tillgänglig för tillfället."}
         )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

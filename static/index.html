@@ -681,7 +681,7 @@
           <!-- CARD 1: Personliga Mått & BMR -->
           <div class="table-card-box">
             <h3>👤 Personliga Mått & BMR</h3>
-            <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Dessa uppgifter sparas klientside-krypterat i MariaDB och används för BMR- och kaloriberäkning.</p>
+            <p style="font-size:0.8rem; color:#6b7280; margin-top:2px;">Dessa uppgifter sparas klientside-krypterat och används för BMR- och kaloriberäkning.</p>
             <p id="prof-summary-header-info" style="font-size:0.85rem; font-weight:600; color:#374151; margin-top:8px; margin-bottom:8px; padding:6px 10px; background:#f3f4f6; border-radius:6px; display:inline-block;">
               👤 Ålder: 42 år | ❤️ Vilopuls: 54 bpm | ⚡ Maxpuls: 178 bpm | 📊 Pulsreserv (HRR): 124 bpm
             </p>
@@ -814,7 +814,7 @@
             <div class="table-card-box danger-card-box">
               <h3 style="color:#991B1B;">⚠️ Farlig zon: Radera konto</h3>
               <p style="font-size:0.8rem; color:#7F1D1D; margin-top:2px; line-height:1.4;">
-                Om du raderar ditt konto tas all din krypterade hälsodata permanent bort från MariaDB-servern. Denna åtgärd kan <strong>INTE</strong> ångras!
+                Om du raderar ditt konto tas all din krypterade hälsodata permanent bort från databasen. Denna åtgärd kan <strong>INTE</strong> ångras!
               </p>
               <button class="btn danger-btn" onclick="handleDeleteAccount()" style="margin-top:12px;">🗑️ Radera konto och all hälsodata</button>
             </div>
@@ -831,7 +831,7 @@
           <h3>🔌 Datakällor</h3>
           <p style="font-size:0.85rem; color:#6b7280; margin-top:4px; line-height:1.5;">
             Koppla HealthChat till dina tränings- och hälsotjänster. Alla API-uppgifter och OAuth-tokens
-            krypteras med din personliga nyckel innan de sparas i MariaDB – exakt som din hälsodata.
+            krypteras med din personliga nyckel innan de sparas i databasen – exakt som din hälsodata.
             Varje tjänst hämtar sina data till samma databas som graferna och AI-coachen läser ifrån.
           </p>
           <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">

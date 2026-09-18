@@ -2015,8 +2015,8 @@ async function handleUpdateProfile(event) {
       if (cachedSummary) cachedSummary.profile = updated;
       populateProfileInputs(updated);
       const statusMsg = document.getElementById('prof-status-msg');
-      if (statusMsg) statusMsg.textContent = '✓ Profilen har sparats klientside-krypterat i MariaDB!';
-      else alert('Profilen har sparats klientside-krypterat i MariaDB!');
+      if (statusMsg) statusMsg.textContent = '✓ Profilen har sparats klientside-krypterat i databasen!';
+      else alert('Profilen har sparats klientside-krypterat i databasen!');
       refreshDashboard();
     } else {
       alert(data.detail || 'Kunde inte uppdatera profilen.');
