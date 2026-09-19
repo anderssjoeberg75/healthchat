@@ -270,11 +270,12 @@ def test_history_queries_empty_by_default(db, query):
     assert getattr(db, query)(days=30) == []
 
 
-def test_deduplicate_activities_merges_duplicates(db):
+def test_deduplicate_activities_merges_duplicates(db, days_ago):
+    dt = f"{days_ago(2)} 08:00:00"
     db.upsert_activity({
         "activityId": 101,
         "activityName": "Morgonlöpning",
-        "startTimeLocal": "2026-08-19 08:00:00",
+        "startTimeLocal": dt,
         "distance": 10000,
         "duration": 3000,
         "source": "Garmin"
@@ -282,7 +283,7 @@ def test_deduplicate_activities_merges_duplicates(db):
     db.upsert_activity({
         "activityId": 202,
         "activityName": "Morning Run",
-        "startTimeLocal": "2026-08-19 08:00:00",
+        "startTimeLocal": dt,
         "distance": 10050,
         "duration": 3010,
         "source": "Strava"

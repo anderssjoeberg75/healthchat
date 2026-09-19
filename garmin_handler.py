@@ -10,6 +10,7 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
     GarminConnectConnectionError,
 )
+import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
@@ -101,42 +102,16 @@ class GarminDataHandler:
                         except Exception:
                             pass
 
-                    try:
-                        # Sleep
-                        sleep = self.client.get_sleep_data(d)
-                        if sleep and "dailySleepDTO" in sleep:
-                            sd = sleep["dailySleepDTO"]
-                            scores_dict = sd.get("sleepScores", {})
-                            if isinstance(scores_dict, dict) and "overall" in scores_dict:
-                                overall = scores_dict.get("overall", {})
-                                score_val = overall.get("value", 0) if isinstance(overall, dict) else 0
-                            else:
-                                score_val = sd.get("sleepQualityScore") or sd.get("overallSleepScore", {}).get("value") or sleep.get("sleepScores", {}).get("overall", {}).get("value") or 0
+                    bb_charged = None
+                    avg_stress = None
 
-                            try:
-                                score_val = int(score_val or 0)
-                            except (TypeError, ValueError):
-                                score_val = 0
-
-                            self.db.upsert_sleep(
-                                date=d,
-                                total_hours=(sd.get("sleepTimeSeconds", 0) or 0) / 3600.0,
-                                deep_hours=(sd.get("deepSleepSeconds", 0) or 0) / 3600.0,
-                                light_hours=(sd.get("lightSleepSeconds", 0) or 0) / 3600.0,
-                                rem_hours=(sd.get("remSleepSeconds", 0) or 0) / 3600.0,
-                                awake_hours=(sd.get("awakeSleepSeconds", 0) or 0) / 3600.0,
-                                score=score_val,
-                                raw_data=sleep
-                            )
-                    except Exception as e:
-                        logger.debug(f"Sync sleep failed for {d}: {e}")
-                        
                     try:
                         # Body Battery
                         bb = self.client.get_body_battery(d)
                         if bb:
                             bb_metrics = self.extract_bb_metrics(bb, d)
                             if bb_metrics:
+                                bb_charged = bb_metrics.get("charged", 0) or 0
                                 self.db.upsert_body_battery(
                                     date=d,
                                     charged=bb_metrics.get("charged", 0) or 0,
@@ -152,6 +127,7 @@ class GarminDataHandler:
                         # Stress
                         st = self.client.get_stress_data(d)
                         if st and isinstance(st, dict):
+                            avg_stress = st.get("avgStressLevel", st.get("averageStressLevel", 0)) or 0
                             self.db.upsert_stress(
                                 date=d,
                                 average=st.get("avgStressLevel", st.get("averageStressLevel", 0)) or 0,
@@ -164,6 +140,64 @@ class GarminDataHandler:
                             )
                     except Exception as e:
                         logger.debug(f"Sync stress failed for {d}: {e}")
+
+                    try:
+                        # Sleep
+                        sleep = self.client.get_sleep_data(d)
+                        if sleep and (isinstance(sleep, dict) and ("dailySleepDTO" in sleep or "sleepTimeSeconds" in sleep)):
+                            sd = sleep.get("dailySleepDTO") if isinstance(sleep, dict) and "dailySleepDTO" in sleep else sleep
+                            scores_dict = sd.get("sleepScores", {}) if isinstance(sd, dict) else {}
+                            if isinstance(scores_dict, dict) and "overall" in scores_dict:
+                                overall = scores_dict.get("overall", {})
+                                score_val = overall.get("value", 0) if isinstance(overall, dict) else 0
+                            else:
+                                score_val = (
+                                    (sd.get("sleepQualityScore") if isinstance(sd, dict) else None)
+                                    or (sd.get("overallSleepScore", {}).get("value") if isinstance(sd, dict) and isinstance(sd.get("overallSleepScore"), dict) else None)
+                                    or (sleep.get("sleepScores", {}).get("overall", {}).get("value") if isinstance(sleep, dict) and isinstance(sleep.get("sleepScores"), dict) and isinstance(sleep.get("sleepScores", {}).get("overall"), dict) else None)
+                                    or 0
+                                )
+
+                            try:
+                                score_val = int(score_val or 0)
+                            except (TypeError, ValueError):
+                                score_val = 0
+
+                            total_hours = (sd.get("sleepTimeSeconds", 0) or 0) / 3600.0 if isinstance(sd, dict) else 0.0
+                            deep_hours = (sd.get("deepSleepSeconds", 0) or 0) / 3600.0 if isinstance(sd, dict) else 0.0
+                            light_hours = (sd.get("lightSleepSeconds", 0) or 0) / 3600.0 if isinstance(sd, dict) else 0.0
+                            rem_hours = (sd.get("remSleepSeconds", 0) or 0) / 3600.0 if isinstance(sd, dict) else 0.0
+                            awake_hours = (sd.get("awakeSleepSeconds", 0) or 0) / 3600.0 if isinstance(sd, dict) else 0.0
+
+                            if score_val <= 0 and total_hours > 0:
+                                score_val = self.calculate_sleep_score(
+                                    total_hours=total_hours,
+                                    deep_hours=deep_hours,
+                                    light_hours=light_hours,
+                                    rem_hours=rem_hours,
+                                    awake_hours=awake_hours,
+                                    body_battery_charged=bb_charged,
+                                    avg_stress=avg_stress
+                                )
+                                if isinstance(sleep, dict):
+                                    sleep["_calculated_sleep_score"] = True
+                                    if "dailySleepDTO" in sleep and isinstance(sleep["dailySleepDTO"], dict):
+                                        if "sleepScores" not in sleep["dailySleepDTO"] or not isinstance(sleep["dailySleepDTO"]["sleepScores"], dict):
+                                            sleep["dailySleepDTO"]["sleepScores"] = {}
+                                        sleep["dailySleepDTO"]["sleepScores"]["overall"] = {"value": score_val, "qualifierKey": "CALCULATED"}
+
+                            self.db.upsert_sleep(
+                                date=d,
+                                total_hours=total_hours,
+                                deep_hours=deep_hours,
+                                light_hours=light_hours,
+                                rem_hours=rem_hours,
+                                awake_hours=awake_hours,
+                                score=score_val,
+                                raw_data=sleep
+                            )
+                    except Exception as e:
+                        logger.debug(f"Sync sleep failed for {d}: {e}")
                         
                     try:
                         # HRV
@@ -257,6 +291,12 @@ class GarminDataHandler:
                         self.db.set_metadata("garmin_max_hr", str(int(g_max)))
                 except Exception as e:
                     logger.debug(f"Sync Garmin Max HR settings failed: {e}")
+
+                # Recalculate any missing sleep scores in DB (e.g., from older syncs or devices without native sleep score)
+                try:
+                    self.recalculate_stored_sleep_scores(days=sync_days)
+                except Exception as r_err:
+                    logger.debug(f"Recalculate stored sleep scores failed: {r_err}")
 
                 # Save metadata for last sync
                 self.db.set_metadata("last_garmin_sync", datetime.now().strftime("%Y-%m-%d"))
@@ -897,6 +937,24 @@ class GarminDataHandler:
                 data = self.client.get_sleep_data(d)
                 if data and (data.get("dailySleepDTO") or data.get("sleepTimeSeconds")):
                     data["_retrieved_date"] = d
+                    sd = data.get("dailySleepDTO") if isinstance(data, dict) and "dailySleepDTO" in data else data
+                    scores_d = sd.get("sleepScores", {}) if isinstance(sd, dict) else {}
+                    overall_val = scores_d.get("overall", {}).get("value") if isinstance(scores_d, dict) and isinstance(scores_d.get("overall"), dict) else None
+                    if not overall_val and isinstance(sd, dict):
+                        tot_h = (sd.get("sleepTimeSeconds", 0) or 0) / 3600.0
+                        if tot_h > 0:
+                            calc_score = self.calculate_sleep_score(
+                                total_hours=tot_h,
+                                deep_hours=(sd.get("deepSleepSeconds", 0) or 0) / 3600.0,
+                                light_hours=(sd.get("lightSleepSeconds", 0) or 0) / 3600.0,
+                                rem_hours=(sd.get("remSleepSeconds", 0) or 0) / 3600.0,
+                                awake_hours=(sd.get("awakeSleepSeconds", 0) or 0) / 3600.0,
+                            )
+                            if "sleepScores" not in sd or not isinstance(sd["sleepScores"], dict):
+                                sd["sleepScores"] = {}
+                            sd["sleepScores"]["overall"] = {"value": calc_score, "qualifierKey": "CALCULATED"}
+                            if isinstance(data, dict):
+                                data["_calculated_sleep_score"] = True
                     return data
             except Exception as e:
                 logger.debug(f"Sleep data for {d} not available: {e}")
@@ -1056,6 +1114,220 @@ class GarminDataHandler:
         if records:
             return records[-1]
         return {}
+
+    @staticmethod
+    def calculate_sleep_score(
+        total_hours: float,
+        deep_hours: float = 0.0,
+        light_hours: float = 0.0,
+        rem_hours: float = 0.0,
+        awake_hours: float = 0.0,
+        body_battery_charged: Optional[int] = None,
+        avg_stress: Optional[int] = None,
+    ) -> int:
+        """
+        Calculate an estimated sleep score (0-100) based on sleep duration,
+        sleep stages (deep, REM, light), awake time, and physiological recovery
+        (Body Battery charged or nocturnal stress) for watches lacking native Firstbeat Sleep Score.
+        """
+        try:
+            total_hours = float(total_hours or 0.0)
+            deep_hours = max(0.0, float(deep_hours or 0.0))
+            light_hours = max(0.0, float(light_hours or 0.0))
+            rem_hours = max(0.0, float(rem_hours or 0.0))
+            awake_hours = max(0.0, float(awake_hours or 0.0))
+        except (TypeError, ValueError):
+            return 0
+
+        if total_hours <= 0.0:
+            return 0
+
+        # 1. Duration score (max 35 points) - optimal range: 7.0 - 8.5 hours
+        if 7.0 <= total_hours <= 8.5:
+            duration_pts = 35.0
+        elif total_hours < 7.0:
+            if total_hours >= 6.0:
+                duration_pts = 30.0 + (total_hours - 6.0) * 5.0  # 30.0 -> 35.0
+            elif total_hours >= 4.5:
+                duration_pts = 18.0 + (total_hours - 4.5) * 8.0  # 18.0 -> 30.0
+            elif total_hours >= 3.0:
+                duration_pts = 8.0 + (total_hours - 3.0) * 6.67  # 8.0 -> 18.0
+            else:
+                duration_pts = max(0.0, total_hours * 2.67)      # 0.0 -> 8.0
+        else:
+            # Hypersomnia / oversleeping (> 8.5h)
+            if total_hours <= 9.5:
+                duration_pts = 35.0 - (total_hours - 8.5) * 2.0  # 35.0 -> 33.0
+            else:
+                duration_pts = max(25.0, 33.0 - (total_hours - 9.5) * 3.0)
+
+        # Check if sleep stages (deep / REM / light) are available
+        has_stages = (deep_hours > 0.0 or rem_hours > 0.0 or light_hours > 0.0)
+
+        deep_pts = 0.0
+        rem_pts = 0.0
+        if has_stages:
+            # 2. Deep Sleep score (max 20 points) - target: 15-25% of total sleep or >= 1.2h
+            deep_pct = (deep_hours / total_hours) * 100.0
+            if deep_pct >= 16.0 or deep_hours >= 1.2:
+                deep_pts = 20.0
+            else:
+                deep_pts = min(20.0, max(0.0, (deep_pct / 16.0) * 20.0))
+
+            # 3. REM Sleep score (max 20 points) - target: 20-25% of total sleep or >= 1.5h
+            rem_pct = (rem_hours / total_hours) * 100.0
+            if rem_pct >= 20.0 or rem_hours >= 1.5:
+                rem_pts = 20.0
+            else:
+                rem_pts = min(20.0, max(0.0, (rem_pct / 20.0) * 20.0))
+
+        # 4. Sleep Continuity / Awake score (max 15 points) - target: awake < 5-8% or < 20-30 min
+        total_in_bed = total_hours + awake_hours
+        awake_pct = (awake_hours / total_in_bed) * 100.0 if total_in_bed > 0.0 else 0.0
+        if awake_hours <= 0.35 or awake_pct <= 5.0:
+            awake_pts = 15.0
+        else:
+            awake_pts = max(0.0, 15.0 - (awake_pct - 5.0) * 0.6)
+
+        # 5. Physiological Recovery score (max 10 points)
+        rec_pts: Optional[float] = None
+        if body_battery_charged is not None and body_battery_charged > 0:
+            # Scale Body Battery charged during sleep/day: >= 55 is excellent
+            if body_battery_charged >= 55:
+                rec_pts = 10.0
+            elif body_battery_charged >= 40:
+                rec_pts = 8.0 + (body_battery_charged - 40) * (2.0 / 15.0)
+            elif body_battery_charged >= 25:
+                rec_pts = 6.0 + (body_battery_charged - 25) * (2.0 / 15.0)
+            elif body_battery_charged >= 10:
+                rec_pts = 3.0 + (body_battery_charged - 10) * (3.0 / 15.0)
+            else:
+                rec_pts = max(1.0, float(body_battery_charged) * 0.3)
+        elif avg_stress is not None and avg_stress > 0:
+            # Low average stress (< 15 restful, 15-25 low, 25-35 medium, > 35 high)
+            if avg_stress <= 15:
+                rec_pts = 10.0
+            elif avg_stress <= 25:
+                rec_pts = 8.0 + (25 - avg_stress) * 0.2
+            elif avg_stress <= 35:
+                rec_pts = 5.0 + (35 - avg_stress) * 0.3
+            elif avg_stress <= 50:
+                rec_pts = 2.0 + (50 - avg_stress) * 0.2
+            else:
+                rec_pts = 1.0
+
+        # Combine components
+        if has_stages:
+            if rec_pts is not None:
+                total_pts = duration_pts + deep_pts + rem_pts + awake_pts + rec_pts
+            else:
+                # Normalize the 90 base points (35 + 20 + 20 + 15) to 100
+                total_pts = (duration_pts + deep_pts + rem_pts + awake_pts) * (100.0 / 90.0)
+        else:
+            # Device only tracked duration and awake time: reweight components
+            # Duration: 55 pts, Awake: 35 pts (total 90 base points)
+            duration_reweighted = (duration_pts / 35.0) * 55.0
+            awake_reweighted = (awake_pts / 15.0) * 35.0
+            if rec_pts is not None:
+                total_pts = duration_reweighted + awake_reweighted + rec_pts
+            else:
+                total_pts = (duration_reweighted + awake_reweighted) * (100.0 / 90.0)
+
+        return int(round(max(0.0, min(100.0, total_pts))))
+
+    def recalculate_stored_sleep_scores(self, days: int = 90) -> int:
+        """
+        Scan database for historical sleep records where sleep_score is 0 or missing,
+        and calculate an estimated sleep score using stored sleep stage, Body Battery,
+        and Stress data.
+        Returns the number of updated records.
+        """
+        if not self.db:
+            return 0
+
+        try:
+            sleep_records = self.db.get_sleep_history(days=days)
+            if not sleep_records:
+                return 0
+
+            # Pre-fetch BB and Stress records for fast lookup by date
+            bb_map = {}
+            try:
+                for bb in self.db.get_body_battery_history(days=days):
+                    dt = bb.get("date")
+                    if dt:
+                        bb_map[dt] = bb.get("charged", 0)
+            except Exception:
+                pass
+
+            stress_map = {}
+            try:
+                for st in self.db.get_stress_history(days=days):
+                    dt = st.get("date")
+                    if dt:
+                        stress_map[dt] = st.get("average", 0)
+            except Exception:
+                pass
+
+            updated_count = 0
+            for s in sleep_records:
+                score = int(s.get("sleep_score") or s.get("score") or 0)
+                tot_h = float(s.get("total_sleep_hours") or s.get("total_hours") or 0.0)
+                dt = s.get("date")
+                if score <= 0 and tot_h > 0 and dt:
+                    deep_h = float(s.get("deep_sleep_hours") or s.get("deep_hours") or 0.0)
+                    light_h = float(s.get("light_sleep_hours") or s.get("light_hours") or 0.0)
+                    rem_h = float(s.get("rem_sleep_hours") or s.get("rem_hours") or 0.0)
+                    awake_h = float(s.get("awake_hours") or 0.0)
+                    bb_c = bb_map.get(dt)
+                    avg_st = stress_map.get(dt)
+
+                    calc_score = self.calculate_sleep_score(
+                        total_hours=tot_h,
+                        deep_hours=deep_h,
+                        light_hours=light_h,
+                        rem_hours=rem_h,
+                        awake_hours=awake_h,
+                        body_battery_charged=bb_c,
+                        avg_stress=avg_st,
+                    )
+
+                    if calc_score > 0:
+                        raw_d = s.get("raw_data") or s.get("raw_json")
+                        raw_obj = None
+                        if isinstance(raw_d, str):
+                            try:
+                                raw_obj = json.loads(raw_d)
+                            except Exception:
+                                raw_obj = None
+                        elif isinstance(raw_d, dict):
+                            raw_obj = raw_d
+
+                        if isinstance(raw_obj, dict):
+                            raw_obj["_calculated_sleep_score"] = True
+                            if "dailySleepDTO" in raw_obj and isinstance(raw_obj["dailySleepDTO"], dict):
+                                if "sleepScores" not in raw_obj["dailySleepDTO"] or not isinstance(raw_obj["dailySleepDTO"]["sleepScores"], dict):
+                                    raw_obj["dailySleepDTO"]["sleepScores"] = {}
+                                raw_obj["dailySleepDTO"]["sleepScores"]["overall"] = {"value": calc_score, "qualifierKey": "CALCULATED"}
+
+                        self.db.upsert_sleep(
+                            date=dt,
+                            total_hours=tot_h,
+                            deep_hours=deep_h,
+                            light_hours=light_h,
+                            rem_hours=rem_h,
+                            awake_hours=awake_h,
+                            score=calc_score,
+                            raw_data=raw_obj
+                        )
+                        updated_count += 1
+
+            if updated_count > 0:
+                logger.info(f"Recalculated sleep scores for {updated_count} historical sleep records.")
+            return updated_count
+        except Exception as e:
+            logger.debug(f"Failed to recalculate stored sleep scores: {e}")
+            return 0
 
     def get_body_battery(self, date: Optional[str] = None) -> Dict:
         """
@@ -1542,7 +1814,12 @@ class GarminDataHandler:
                     overall = sleep_data["sleepScores"]["overall"]
                     score = overall.get("value", "N/A")
                     qual = overall.get("qualifierKey", "")
-                    context_parts.append(f"Sleep Score: {score} ({qual})")
+                    if qual == "CALCULATED" or sleep.get("_calculated_sleep_score"):
+                        context_parts.append(f"Sleep Score: {score} (beräknad)")
+                    elif qual:
+                        context_parts.append(f"Sleep Score: {score} ({qual})")
+                    else:
+                        context_parts.append(f"Sleep Score: {score}")
                 context_parts.append(f"Deep Sleep: {(sleep_data.get('deepSleepSeconds') or 0) / 3600:.1f} hours")
                 context_parts.append(f"Light Sleep: {(sleep_data.get('lightSleepSeconds') or 0) / 3600:.1f} hours")
                 context_parts.append(f"REM Sleep: {(sleep_data.get('remSleepSeconds') or 0) / 3600:.1f} hours")
