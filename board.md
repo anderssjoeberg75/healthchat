@@ -10,7 +10,7 @@
 > **sök på citatet, lita inte på radnumret**. Hittar du inte koden på angiven rad: kontrollera om en
 > tidigare omgång redan åtgärdat uppgiften innan du gör något annat.
 >
-> **ID-serier:** `B-` buggar/korrekthet · `S-` säkerhet (fortsätter efter `S-12`) · `TLS-` transportkryptering · `UI-` frontend · `PF-` prestanda (fortsätter efter `PF-6`) · `Q-` kodkvalitet · `LEG-` juridik & regelefterlevnad.
+> **ID-serier:** `B-` buggar/korrekthet · `S-` säkerhet (fortsätter efter `S-12`) · `TLS-` transportkryptering · `UI-` frontend · `PF-` prestanda (fortsätter efter `PF-6`) · `Q-` kodkvalitet · `LEG-` juridik & regelefterlevnad · `I18N-` flerspråkighet.
 
 ---
 
@@ -77,6 +77,39 @@ nätet, vilket `S-20` och `S-21` förvärrar.
 och `UI-3` är dessutom spårade steg för steg genom anropskedjan. Testsviten kördes:
 **210 passed, 9 failed, 8 skipped**. Alla nio fel beror på att MariaDB saknas i granskningsmiljön
 (`503`) – inga är defekter. Se *Miljö* nedan.
+
+---
+
+## Sammanfattning – genomgång 2026-09-19 (flerspråkighet)
+
+Separat genomgång av vad som krävs för att köra HealthChat på **svenska, engelska och polska**.
+Detaljerna finns i avsnittet *Flerspråkighet*; uppgifterna är `I18N-1` … `I18N-10`.
+
+**Uppmätt omfattning:** ~730 strängar / ~4 980 ord per språk, fördelat på `static/index.html` (327),
+`static/app.js` (232), backend (171) och AI-systemprompten. Två nya språk ≈ 10 000 ord.
+
+**Ingen i18n-infrastruktur finns** – noll träffar på `Accept-Language|gettext|i18n|babel|locale`,
+och `<html lang="sv">` är hårdkodat.
+
+**Tre saker är redan rätt och kräver ingen åtgärd:** datumen är ISO överallt (fungerar i alla tre
+språken), `utf8mb4` hanterar polska tecken, och pluralformer används på så få ställen att polskans
+tre former blir hanterbara.
+
+**Tre saker är svårare än de ser ut:**
+
+1. **Strängarna är dubblerade.** Väderbeskrivningarna finns parallellt i `server.py` och `app.js`,
+   och felmeddelanden reser genom tre lager från `auth.py` till en `alert()`. Måste avdubblas
+   **innan** översättning påbörjas (`I18N-1`) – det löser samtidigt `S-23`.
+2. **Sifferformateringen är redan fel.** `toFixed()` ger punkt som decimaltecken på 24 ställen, så
+   appen visar engelsk notation (`5.51`) i ett svenskt gränssnitt i dag. `I18N-5` är alltså en
+   buggrättning, inte bara i18n-arbete.
+3. **AI-prompten är den enda posten med osäker insats.** En tredjedel av dess 44 rader är empiriskt
+   framtagna lappar för vad `gemma4:12b` gör fel *på svenska*. De går inte att översätta – för polska
+   måste motsvarande fel upptäckas genom utvärdering. Se `I18N-10`, som också förklarar varför detta
+   berör `LEG-9` och inte bara är en kvalitetsfråga.
+
+**Rekommendation:** engelska först (validerar mekaniken, och AI-sidan är nära gratis – sektion 2 och 5
+i systemprompten kan strykas helt), polska sist med ett eget utvärderingssteg.
 
 ## ▶️ Arbetskö för Antigravity
 
@@ -221,6 +254,29 @@ Ta dem i den här ordningen: `S-18` är en enradsfix som stoppar irreversibel da
 
 ---
 
+### Omgång 13 – Flerspråkighet (`I18N-1` … `I18N-10`)
+> Ordningen är viktig: `I18N-1` måste vara klar innan något översätts, annars översätts samma sträng
+> två gånger. `I18N-8` (engelska) före `I18N-9`/`I18N-10` (polska) – engelska validerar mekaniken
+> billigt och är referensspråk för `t()`-fallbacken.
+
+| Ordning | ID | Fil | Omfattning |
+|---|---|---|---|
+| 29 | `I18N-1` | `server.py`, `static/app.js`, `auth.py` | Avdubbla väderströmmar, inför felkoder (**gör först**, löser `S-23`) |
+| 30 | `I18N-2` | `static/i18n/*.json`, `static/app.js` | Katalogformat, `t()`, dynamiskt `lang`-attribut |
+| 31 | `I18N-5` | `static/app.js` | `Intl.NumberFormat` – rättar befintlig svensk decimalbugg |
+| 32 | `I18N-3` | `static/index.html` | Extrahera 327 strängar, varav 49 popover-block |
+| 33 | `I18N-4` | `static/app.js` | Extrahera 232 strängar, ersätt 18 `alert()` |
+| 34 | `I18N-7` | `datasource_store.py` | Onboarding-texter ut ur `PROVIDERS` |
+| 35 | `I18N-6` | `server.py`, `static/app.js` | Språkval: `Accept-Language` + cookie, sedan profilfält |
+| 36 | `I18N-8` | `static/i18n/en.json`, `ai_client.py` | Engelsk katalog + språkparametriserad AI-prompt |
+| 37 | `I18N-9` | `static/i18n/pl.json`, `static/styles.css` | Polsk katalog + layoutkontroll (10–20 % längre text) |
+| 38 | `I18N-10` | `ai_client.py`, `server.py` | **Polsk AI-prompt – kräver utvärdering, osäker insats** |
+
+`I18N-5` ligger tidigt trots låg ordning i analysen, eftersom den rättar en bugg som finns i dag och
+är oberoende av resten.
+
+---
+
 ### 🔧 Operatörsarbete – kan inte göras av en agent
 
 Dessa kräver åtkomst till servern och databasen. De blockerar inte kodarbetet ovan.
@@ -241,6 +297,9 @@ Dessa kräver åtkomst till servern och databasen. De blockerar inte kodarbetet 
   Se förbehållet i avsnittet *Regelefterlevnad*.
 - [ ] **Teckna biträdesavtal** för de mottagare `LEG-5` listar, eller ta bort tjänsterna.
 - [ ] **Genomför DPIA (`LEG-7`)** och utse ansvarig för incidentrutinen (`LEG-8`).
+- [ ] **Skaffa en polsk modersmålstalare för korrekturläsning** av katalogen i `I18N-9`, särskilt
+  popover-texterna om träningsfysiologi. Släpps polska AI-svar behövs samma granskning av de
+  skadeanpassade rekommendationerna (`I18N-10`).
 
 ---
 
@@ -1319,6 +1378,237 @@ av `Q-9` punkt 7.
   1. Lagringstiderna är dokumenterade och synliga för användaren.
   2. Ett gallringsjobb finns och raderar data äldre än fristen – med test.
   3. Historikdjupet vid första synk är antingen sänkt eller dokumenterat motiverat.
+
+---
+
+## 🌍 Flerspråkighet – svenska, engelska och polska
+
+> Genomgång 2026-09-19. Kartlägger vad som krävs för att köra HealthChat på **svenska (`sv`),
+> engelska (`en`) och polska (`pl`)**.
+>
+> **Nuläget:** ingen i18n-infrastruktur finns. Sökning på `Accept-Language|gettext|i18n|babel|locale`
+> i `server.py`, `auth.py` och `static/app.js` ger noll träffar, och `<html lang="sv">` är hårdkodat.
+> Allt byggs från grunden – men det finns heller inget halvfärdigt som står i vägen.
+>
+> **Uppmätt omfattning:**
+>
+> | Lager | Strängar | Ord |
+> |---|---|---|
+> | `static/index.html` | 327 | ~1 769 |
+> | `static/app.js` | 232 | ~1 597 |
+> | Backend (6 filer) | 171 | ~1 164 |
+> | AI-systemprompt | 1 block | ~450 |
+> | **Totalt per språk** | **~730** | **~4 980** |
+>
+> Två nya språk ≈ **10 000 ord översättning** plus mekanik.
+>
+> **Tyngdpunkten ligger inte i UI:t utan i AI-prompten** – se `I18N-10`, som är den enda uppgiften
+> med genuint osäker insats. Läs den innan ni utlovar polskt stöd.
+
+---
+
+### [ ] I18N-1: Avdubblera strängarna och inför felkoder innan något översätts
+- **Fil:** [server.py](server.py) (`_get_wmo_code_info`, `_evaluate_weather_advice`, samtliga `HTTPException(detail=...)`), [static/app.js](static/app.js) (`getWeatherCodeDescription`), [auth.py](auth.py) (`raise ValueError("...")`)
+- **Förutsättning för:** `I18N-3`, `I18N-4`, `I18N-8`, `I18N-9`. **Gör den först.**
+- **Problem:** Två mönster gör att en naiv översättning ger dubbelarbete och drift:
+  1. **Väderbeskrivningarna är implementerade parallellt** i backend och frontend. Samma sträng, två ställen:
+     ```python
+     # server.py – _get_wmo_code_info()
+     if c == 0: return "Klart & soligt", "☀️"
+     ```
+     ```javascript
+     // static/app.js – getWeatherCodeDescription()  (24 case-grenar)
+     case 0: return { desc: "Klart & soligt", icon: "☀️" };
+     ```
+     Översätts de var för sig får man två kataloger som glider isär.
+  2. **Felmeddelanden reser genom tre lager.** `auth.py` kastar `ValueError("Fel e-postadress eller lösenord.")`, `server.py` skickar vidare texten som `detail`, `app.js` visar den rått i en `alert()`. Backend äger alltså formuleringar som bara frontend kan lokalisera.
+- **Åtgärd:**
+  1. Ta bort väderbeskrivningarna ur **backend**. Låt `/api/weather` returnera `weather_code` (WMO-koden finns redan) och låt frontend äga texten. `summaryText` som skickas till AI-kontexten byggs då också i frontend, eller genereras på det språk användaren valt (se `I18N-6`).
+  2. Inför **felkoder** i backend: `HTTPException(detail={"code": "AUTH_INVALID_CREDENTIALS"})` i stället för svensk text. Frontend slår upp koden i sin katalog.
+  3. Samma för `auth.py`: låt undantagen bära en kod, inte en formulering.
+  4. Bevara bakåtkompatibilitet under övergången genom att skicka både `code` och en engelsk `detail` som fallback.
+- **Synergi:** Detta löser samtidigt `S-23` – en felkod kan inte läcka anslutningssträngar eller tokens, till skillnad från `str(e)`. Gör uppgifterna tillsammans.
+- **Acceptanskriterier:**
+  1. Väderbeskrivningar finns på exakt ett ställe i kodbasen.
+  2. Inget API-svar innehåller en svensk mening avsedd att visas för användaren.
+  3. Frontend renderar korrekt svensk text för alla tidigare felfall.
+  4. Test som hävdar att `/api/weather` returnerar `weather_code` och ingen `weatherDesc`-sträng.
+
+---
+
+### [ ] I18N-2: Bygg i18n-mekaniken – katalogformat, `t()` och `lang`-attribut
+- **Fil:** nya `static/i18n/sv.json`, `static/i18n/en.json`, `static/i18n/pl.json`, [static/app.js](static/app.js), [static/index.html](static/index.html)
+- **Problem:** Det finns ingen uppslagsmekanism och ingen katalog. `<html lang="sv">` är hårdkodat.
+- **Åtgärd:**
+  1. Välj **enkla JSON-kataloger + en `t(key, params)`-funktion i `app.js`**. Motivering: ingen byggkedja, inget nytt beroende, läsbara git-diffar. Backend behöver inga kataloger alls efter `I18N-1` – bara felkoder.
+  2. Nyckelschema: `omrade.underomrade.nyckel`, t.ex. `dashboard.recovery.title`, `error.auth.invalid_credentials`, `datasource.strava.step.1`. Platt struktur med punktnotation, inte djup nästling.
+  3. `t()` ska stödja interpolation (`t('sleep.hours', {h: 7.5})`) och falla tillbaka på `en` vid saknad nyckel, med en `console.warn` i utvecklingsläge.
+  4. Välj ett format som stöder **pluralregler** från start, även om behovet i dag är litet (se `I18N-4` punkt 3) – det är dyrt att byta format senare.
+  5. Sätt `<html lang>` dynamiskt från det valda språket.
+  6. Lägg till ett testskript som verifierar att alla tre katalogerna har **identiska nyckeluppsättningar**.
+- **Acceptanskriterier:**
+  1. `t('nagon.nyckel')` returnerar rätt sträng för aktuellt språk.
+  2. En saknad nyckel faller tillbaka på engelska och varnar, i stället för att rendera `undefined`.
+  3. Katalogerna har identiska nyckeluppsättningar – verifierat av test.
+  4. `<html lang>` speglar valt språk.
+
+---
+
+### [ ] I18N-3: Extrahera strängarna ur `index.html` (~327 strängar, ~1 769 ord)
+- **Fil:** [static/index.html](static/index.html)
+- **Problem:** All UI-text ligger som markup. Fördelningen: **135 textnoder**, **71 attribut** (`placeholder`, `title`, `alt`, `aria-label`) och **49 `chart-info-popover`-block** med förklarande brödtext. Popoverna är den stora volymen – varje innehåller två stycken domäntung prosa:
+  > "Din återhämtningsnivå och dagsform (0–100 %) baserad på Garmin Body Battery, vilopuls, HRV och sömnkvalitet."
+  > "75–100 % = Mycket god återhämtning, redo för tuffa pass; 45–74 % = God form för distansträning …"
+- **Åtgärd:**
+  1. Märk textnoder med `data-i18n="nyckel"` och attribut med `data-i18n-attr="placeholder:nyckel"`.
+  2. Kör en genomgång vid sidladdning som fyller i alla märkta element.
+  3. Popover-texterna är **facktext, inte UI-chrome**. De ska översättas av någon som förstår träningsfysiologi – markera dem i katalogen (t.ex. nyckelprefixet `info.`) så att de kan hanteras separat från knappar och etiketter.
+  4. Behåll emoji och enheter (`%`, `kg`, `bpm`, `kcal`) utanför de översatta strängarna där det går, så att de inte förvanskas.
+- **Acceptanskriterier:**
+  1. `grep -c "[åäöÅÄÖ]" static/index.html` ger 0 träffar utanför den svenska katalogen.
+  2. Alla 49 popovers renderar korrekt på valt språk.
+  3. Inga tomma eller `undefined`-element vid språkbyte.
+
+---
+
+### [ ] I18N-4: Extrahera strängarna ur `app.js` (~232 strängar, ~1 597 ord)
+- **Fil:** [static/app.js](static/app.js)
+- **Problem:** Strängarna sitter i mallsträngar, `alert()`-anrop (**18 stycken**) och statusmeddelanden (`'🔄 Uppdatera'`, `'⏳ Synkar datakällor...'`, `'⚠️ Fel vid uppdatering'`).
+- **Åtgärd:**
+  1. Ersätt varje användarvänd sträng med `t()`.
+  2. Byt ut `alert()`/`confirm()` mot en egen dialogkomponent i samma veva – 18 råa `alert()` är ändå ett UX-problem, och de visar i dag `detail`-texten rakt från servern (se `I18N-1`).
+  3. **Pluralformer:** i dag används hårdkodade former på bara en handfull ställen (`} steg`, `} st`, `8 timmar`). Polska har tre pluralformer (`1 dzień` / `2–4 dni` / `5+ dni`), så skriv om dessa med katalogens pluralstöd i stället för strängkonkatenering. Antalet är litet – utnyttja det nu, innan det växer.
+  4. Chatthistoriken lagras per användare och kan innehålla svar på ett tidigare valt språk. Bestäm om språkbyte ska rensa historiken eller bara påverka nya svar, och dokumentera valet. Se `S-22` och `UI-3`.
+- **Acceptanskriterier:**
+  1. Inga svenska strängliteraler kvar i `app.js` utanför katalogen.
+  2. Räkneord med enheter renderar grammatiskt korrekt på polska för 1, 2, 5 och 22.
+  3. Inga `alert()` som visar serverns `detail` ordagrant.
+
+---
+
+### [ ] I18N-5: Lokalisera siffror – rättar en befintlig bugg i den svenska versionen
+- **Fil:** [static/app.js](static/app.js) (`formatNumber`, samt 24 anrop till `toFixed()`)
+- **Status:** 🐛 **Detta är en befintlig bugg, inte bara i18n-arbete.**
+- **Problem:** Tusentalsavgränsaren är mellanslag, vilket är korrekt för svenska och polska men fel för engelska:
+  ```javascript
+  function formatNumber(num) {
+    return Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  }
+  ```
+  Värre: `toFixed()` används på **24 ställen** och ger alltid punkt som decimaltecken. **Appen visar alltså engelsk decimalnotation i ett svenskt gränssnitt redan i dag:**
+
+  | | Visas nu | Korrekt `sv` | Korrekt `pl` | Korrekt `en` |
+  |---|---|---|---|---|
+  | Tempo | `5.51` | `5,51` | `5,51` | `5.51` |
+  | Vikt | `78.4 kg` | `78,4 kg` | `78,4 kg` | `78.4 kg` |
+- **Åtgärd:**
+  1. Ersätt `formatNumber` med `Intl.NumberFormat(locale)`.
+  2. Gå igenom alla 24 `toFixed()`-anrop och formatera via `Intl.NumberFormat(locale, { minimumFractionDigits, maximumFractionDigits })`.
+  3. **Rör inte** datumformateringen. Alla datum är ISO (`YYYY-MM-DD` via `.slice(0, 10)`, och `MM-DD` / `YYYY-MM` i graferna). ISO är entydigt och fungerar i alla tre språken – det här är en av få saker som redan är rätt.
+  4. Kontrollera att Chart.js axeletiketter följer med.
+- **Acceptanskriterier:**
+  1. Svensk och polsk vy visar `5,51`; engelsk visar `5.51`.
+  2. Tusentalsavgränsare följer valt språk.
+  3. Datumvisningen är oförändrad.
+  4. Test som låser formateringen per språk.
+
+---
+
+### [ ] I18N-6: Språkval – två mekanismer krävs, profilen räcker inte
+- **Fil:** [server.py](server.py) (`ProfileUpdateRequest`, `_callback_page`, auth-endpoints), [static/app.js](static/app.js), [static/index.html](static/index.html)
+- **Problem:** Profilen är en krypterad JSON-blob, så att lägga till `language` kräver **ingen schemamigrering** – arkitektoniskt gratis. Men profilen kan bara läsas **efter** inloggning, när DEK:en finns i minnet. Följande sker före eller utanför det:
+  - inloggnings- och registreringsvyn
+  - felmeddelanden vid misslyckad inloggning (`auth.py`)
+  - OAuth-callbacksidan (`_callback_page` renderar svensk HTML direkt)
+  - kontoåterställningsflödet
+  Ett språkval som bara bor i profilen ger alltså svenska inloggningsskärmar för en polsk användare.
+- **Åtgärd:**
+  1. **Före inloggning:** läs `Accept-Language`, och låt ett explicit val skrivas till en `lang`-cookie (`SameSite=Lax`, ingen känslig data – den behöver inte `HttpOnly` eftersom frontend måste läsa den).
+  2. **Efter inloggning:** `language` i `encrypted_profile` är auktoritativ och skriver över cookien. Lägg till fältet i `ProfileUpdateRequest`.
+  3. Lägg en språkväljare i både auth-vyn och profilvyn.
+  4. `_callback_page` måste rendera på valt språk – den har ingen session att läsa från, så den får använda cookien.
+  5. Validera `language` mot `{"sv", "en", "pl"}`; avvisa okända värden (se `Q-11`).
+- **Acceptanskriterier:**
+  1. En webbläsare med `Accept-Language: pl` får polsk inloggningsskärm utan att vara inloggad.
+  2. Ett sparat profilspråk vinner över `Accept-Language` efter inloggning.
+  3. OAuth-callbacksidan renderar på valt språk.
+  4. Ett ogiltigt språkvärde avvisas med 422.
+
+---
+
+### [ ] I18N-7: Översätt datakällornas onboarding-instruktioner – utan att översätta portaltermerna
+- **Fil:** [datasource_store.py](datasource_store.py) (`PROVIDERS` – fälten `description`, `portal_label`, `steps`, `sync_label`)
+- **Problem:** Fem leverantörer × beskrivning + portaletikett + 4–5 `steps` = ~45 svenska strängar som hänvisar till engelska begrepp i respektive utvecklarportal:
+  > `"Skapa (eller öppna) din API-applikation under \"My API Application\"."`
+  > `"Application Type: Personal och Default Access Type: Read-Only räcker."`
+  De citerade engelska termerna är **vad användaren faktiskt ser på Stravas respektive Fitbits sajt** och får inte översättas – bara den omgivande meningen. Maskinöversättning kommer att översätta dem och göra instruktionerna obrukbara.
+- **Åtgärd:**
+  1. Flytta `description`, `portal_label`, `steps` och `sync_label` ur `PROVIDERS` till i18n-katalogen, med nycklar som `datasource.strava.step.2`. `PROVIDERS` behåller enbart teknisk metadata (`auth_kind`, `portal_url`, `sync_days`, färg, ikon).
+  2. Markera i katalogen vilka termer som ska stå kvar oöversatta, t.ex. genom att hålla dem utanför den översättbara strängen: `"…under {term}"` med `term: "My API Application"`.
+  3. Låt `public_status` returnera nycklar i stället för text, så att frontend slår upp dem.
+- **Acceptanskriterier:**
+  1. Instruktionerna renderar på valt språk med bevarade engelska portaltermer.
+  2. `PROVIDERS` innehåller ingen användarvänd text.
+  3. En polsk användare kan följa stegen och faktiskt hitta rätt fält i Stravas portal.
+
+---
+
+### [ ] I18N-8: Engelsk katalog och engelsk AI-prompt – gör detta språk först
+- **Fil:** `static/i18n/en.json`, [ai_client.py](ai_client.py) (`get_default_system_prompt`)
+- **Problem / möjlighet:** Engelska validerar hela mekaniken från `I18N-2` … `I18N-7` till låg kostnad, och **AI-sidan är nästan gratis**. Systemprompten är 3 396 tecken / 44 rader, varav ungefär **en tredjedel är ren svensk språkreparation**:
+  > `2. Förbjudna felöversättningar och påhittade ord (använd ALDRIG dessa):`
+  > `   - Skriv "Sömnpoäng" (ALDRIG "sömnskore" eller "sovvakt").`
+  > `   - Skriv "Dricka ordentligt" (ALDRIG "hålla dig hyddrad" eller "dricka tillflöde").`
+  > `5. SVENSKA SAMMANSATTA ORD (UNDVIK SÄRSKRIVNINGAR)`
+  Dessa regler finns bara för att `gemma4:12b` producerar dålig svenska. På engelska – modellens starkaste språk – behövs de inte alls och kan **strykas helt**.
+- **Åtgärd:**
+  1. Översätt katalogen till engelska (~4 980 ord). Detta är referensspråket som `t()` faller tillbaka på.
+  2. Gör `get_default_system_prompt` språkparametriserad: `get_default_system_prompt(lang)`. Skicka användarens språk från `chat_stream`.
+  3. Skriv den engelska prompten som en **ren** variant – behåll de språkneutrala reglerna (struktur, rubriker, skadehänsyn, målhänsyn, väderhänsyn) och stryk sektion 2 och 5.
+  4. Rubrikerna i sektion 6 (`### Analys & Bedömning` osv.) syns i AI-svaret och måste översättas konsekvent med katalogen.
+- **Acceptanskriterier:**
+  1. Hela gränssnittet renderar på engelska utan saknade nycklar.
+  2. `get_default_system_prompt("en")` innehåller inga svenska språkregler.
+  3. AI-svar på engelska följer den begärda rubrikstrukturen.
+  4. Test som hävdar att prompten byts med språkvalet.
+
+---
+
+### [ ] I18N-9: Polsk katalog
+- **Fil:** `static/i18n/pl.json`
+- **Problem:** ~4 980 ord, varav de 49 popover-texterna från `I18N-3` är facktext om träningsfysiologi.
+- **Vad som redan är löst:**
+  - **Teckenkodning.** `utf8mb4_unicode_ci` hanterar ł, ż, ź, ć, ń, ś, ą, ę. Hälsodata är dessutom krypterad, så kollationen spelar bara roll för e-postadresser.
+  - **Datumformat.** ISO överallt – ingen åtgärd (se `I18N-5` punkt 3).
+  - **Enheter.** Metriskt, gemensamt för alla tre språken.
+  - **Pluralformer.** Få förekomster, hanteras i `I18N-4`.
+- **Åtgärd:**
+  1. Översätt katalogen. Popover-texterna kräver någon som förstår domänen – inte enbart maskinöversättning.
+  2. **Låt en polsk modersmålstalare korrekturläsa**, särskilt facktexterna.
+  3. **Kontrollera layouten.** Polska blir typiskt 10–20 % längre än engelska. Granska knappar och kortrubriker i [static/styles.css](static/styles.css), särskilt de fyra korten som enligt commit-historiken tvingats ligga "strikt på samma rad" – de har ingen marginal.
+- **Acceptanskriterier:**
+  1. Hela gränssnittet renderar på polska utan saknade nycklar.
+  2. Ingen text som bryter layouten vid 1280 px och vid mobilbredd.
+  3. Korrekturläsning av modersmålstalare genomförd och noterad här.
+
+---
+
+### [ ] I18N-10: Polsk AI-prompt – den enda uppgiften med osäker insats
+- **Fil:** [ai_client.py](ai_client.py) (`get_default_system_prompt`), [server.py](server.py) (`chat_stream`)
+- **⚠️ Läs denna innan ni utlovar polskt stöd.**
+- **Problem:** De svenska språkreparationsreglerna i prompten går **inte att översätta**. De är empiriskt framtagna lappar för vad `gemma4:12b` råkar hitta på just på svenska – "sömnskore", "sovvakt", "hålla dig hyddrad". Inget av det betyder något på polska. För polska måste man köra modellen, samla in vad den faktiskt gör fel, och skriva nya regler. Det är ett **iterativt utvärderingsarbete, inte en översättning**.
+  Polska är dessutom morfologiskt betydligt svårare än svenska – sju kasus, tre genus, aspektsystem. Sannolikheten att en 12B-modell producerar godtagbar polska i en tränings- och hälsokontext är påtagligt lägre än för svenska, och långt lägre än för engelska.
+  **Detta är inte enbart ett kvalitetsproblem.** `chat_stream` injicerar användarens `injuries` och instruerar modellen att varna för rörelser som kan belasta det skadade området. Dålig polska i en skadeanpassad träningsrekommendation är ett säkerhetsproblem, inte ett kosmetiskt. Se `LEG-9`.
+- **Åtgärd:**
+  1. **Utvärdera först.** Kör ett tjugotal verkliga frågor på polska mot den konfigurerade modellen, med realistisk hälsokontext inklusive skador. Dokumentera resultatet här.
+  2. Skriv den polska prompten utifrån vad utvärderingen visar – inte utifrån den svenska.
+  3. **Blir kvaliteten otillräcklig, släpp inte polska AI-svar.** Alternativ, i fallande ordning: (a) använd en större modell enbart för polska, (b) behåll polskt gränssnitt men engelska AI-svar och var uttrycklig om det i UI:t, (c) skjut upp polskt AI-stöd.
+  4. Beslutet dokumenteras här oavsett utfall.
+- **Acceptanskriterier:**
+  1. En dokumenterad utvärdering finns med konkreta exempel på modellens polska utdata.
+  2. Ett medvetet beslut om (a), (b) eller (c) är fattat och nedskrivet.
+  3. Väljs (b): gränssnittet säger tydligt att AI-svaren är på engelska.
+  4. Släpps polska AI-svar: skadeanpassade rekommendationer är granskade av en polsktalande person.
 
 ---
 
