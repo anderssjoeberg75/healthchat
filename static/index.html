@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HealthChat Hub – Klientsideskrypterad Hälsoanalys</title>
   <meta name="description" content="Klientsideskrypterad AI-plattform för hälsa och träning med integrering mot Garmin, Fitbit, Withings, Strava och Whoop.">
-  <link rel="stylesheet" href="/static/styles.css?v=10.3.3">
+  <link rel="stylesheet" href="/static/styles.css?v=10.3.4">
   <script src="/static/chart.umd.min.js?v=4.4.8"></script>
   <script>
     if (typeof Chart === 'undefined') {
@@ -280,6 +280,26 @@
             </div>
             <div class="chart-canvas-wrapper">
               <canvas id="chart-calories"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card-box" style="position:relative;">
+            <button type="button" class="chart-info-btn" style="position:absolute; top:14px; right:16px; z-index:20;" onclick="toggleChartInfo('chart-info-steps', event)" title="Visa förklaring av grafen" aria-label="Information om grafen">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </button>
+            <h4>👟 Antal steg per dag</h4>
+            <div id="chart-info-steps" class="chart-info-popover hidden" style="position:absolute; top:46px; right:16px; z-index:100; display:none;" onclick="event.stopPropagation()">
+              <div class="chart-info-popover-header">
+                <span class="chart-info-title">💡 Om Steg per dag</span>
+                <button type="button" class="chart-info-close-btn" onclick="closeChartInfo('chart-info-steps', event)" aria-label="Stäng">&times;</button>
+              </div>
+              <div class="chart-info-popover-body">
+                <div class="chart-info-desc"><strong>Vad grafen visar:</strong> Antal registrerade steg per dygn från dina anslutna enheter och appar.</div>
+                <div class="chart-info-guidance"><strong>Tolkning & Riktvärden:</strong> Vardagsrörelse är grunden för god hälsa. 7 000–10 000 steg per dag rekommenderas ofta som ett sunt basmål för ökad ämnesomsättning och hjärthälsa.</div>
+              </div>
+            </div>
+            <div class="chart-canvas-wrapper">
+              <canvas id="chart-steps"></canvas>
             </div>
           </div>
 
@@ -900,7 +920,7 @@
     });
   </script>
 
-  <script src="/static/app.js?v=10.3.3"></script>
+  <script src="/static/app.js?v=10.3.4"></script>
 
 </body>
 </html>

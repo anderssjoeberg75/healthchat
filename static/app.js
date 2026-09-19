@@ -1091,6 +1091,33 @@ function renderHealthCharts() {
     console.error('Fel vid rendering av chart-calories:', err);
   }
 
+  // 3. Steps per Day (Antal steg per dag)
+  try {
+    const stepsMap = {};
+    (history.daily_summary || []).forEach(d => {
+      const dt = String(d.date || '').slice(0, 10);
+      if (!dt) return;
+      const st = Number(d.total_steps !== undefined ? d.total_steps : (d.steps || 0));
+      stepsMap[dt] = st;
+    });
+
+    const sortedStepDates = Object.keys(stepsMap).sort();
+    const hasSteps = sortedStepDates.length > 0 && sortedStepDates.some(d => stepsMap[d] > 0);
+    const stepLabels = hasSteps ? sortedStepDates.map(d => d.slice(5)) : fallbackDates;
+    const stepData = hasSteps ? sortedStepDates.map(d => stepsMap[d]) : [];
+    createChart('chart-steps', 'bar', {
+      labels: stepLabels,
+      datasets: [{
+        label: 'Antal steg',
+        data: stepData,
+        backgroundColor: '#0284C7',
+        borderRadius: 4
+      }]
+    });
+  } catch (err) {
+    console.error('Fel vid rendering av chart-steps:', err);
+  }
+
   // 3. Resting Heart Rate / Vilopuls (Pink/rose matching Desktop ax_health_rhr)
   try {
     const rhrMap = {};
