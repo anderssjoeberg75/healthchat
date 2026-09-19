@@ -142,6 +142,8 @@ def test_dashboard_summary_with_missing_weight_uses_fallback(monkeypatch, tmp_pa
         # Full day BMR with 70kg fallback: 10*70 + 6.25*180 - 5*40 + 5 = 1630
         assert data["calorie_burn_today"]["bmr_full"] > 1000
         assert data["calorie_burn_today"]["bmr_source"] == "mifflin"
+        assert "daily_summary_full" in data["history"]
+        assert "activities_full" in data["history"]
     finally:
         app.dependency_overrides.pop(get_current_session, None)
 

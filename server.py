@@ -715,6 +715,11 @@ def get_dashboard_summary(
     body_comp_hist = db.get_body_composition_history(days)
     calorie_burn_hist = db.get_calorie_burn_history(days)
     
+    # Pre-fetch 2*days for period-over-period trend comparisons (training & steps)
+    compare_days = min(days * 2, 3650)
+    daily_summary_full = db.get_daily_summary_history(compare_days)
+    activities_full = db.get_activities_history(compare_days)
+    
     # Calculate today's calorie burn estimate using calorie_calc
     today_str = datetime.now().strftime("%Y-%m-%d")
     daily_sum_today = db.get_daily_summary(today_str) or {}
@@ -812,11 +817,13 @@ def get_dashboard_summary(
         "hr_zones": hr_calc,
         "history": {
             "daily_summary": daily_summary_hist,
+            "daily_summary_full": daily_summary_full,
             "sleep": sleep_hist,
             "body_battery": bb_hist,
             "stress": stress_hist,
             "hrv": hrv_hist,
             "activities": activities_hist,
+            "activities_full": activities_full,
             "body_composition": body_comp_hist,
             "calorie_burn": calorie_burn_hist
         }

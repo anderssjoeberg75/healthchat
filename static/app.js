@@ -1356,8 +1356,9 @@ function renderTrainingCharts() {
   // Card 3: Training Summary (Period Totals & Trend)
   let currKm = 0, prevKm = 0, currCnt = 0, prevCnt = 0, currDur = 0, currCal = 0;
   const now = new Date();
+  const allActivities = history.activities_full || activities;
 
-  activities.forEach(a => {
+  allActivities.forEach(a => {
     const dtStr = String(a.date || a.start_time || '').slice(0, 10);
     let daysAgo = 0;
     if (dtStr.length === 10) {
@@ -1416,7 +1417,71 @@ function renderTrainingCharts() {
     sumCalEl.innerText = currCnt > 0 ? `🏋️ ${fmtCal} kcal träningsförbränning` : '🏋️ -- kcal';
   }
 
-  // Card 4: Local Weather & Running Conditions
+  // Card 4: Step Summary (Period Totals & Trend)
+  let currSteps = 0, prevSteps = 0, currStepDays = 0, prevStepDays = 0, currActiveCal = 0;
+  const allDailySummaries = history.daily_summary_full || history.daily_summary || [];
+
+  allDailySummaries.forEach(d => {
+    const dtStr = String(d.date || '').slice(0, 10);
+    let daysAgo = 0;
+    if (dtStr.length === 10) {
+      const dDate = new Date(dtStr);
+      daysAgo = Math.floor((now - dDate) / (1000 * 60 * 60 * 24));
+    }
+    const steps = Number(d.total_steps !== undefined ? d.total_steps : (d.steps || 0));
+    const actCal = Number(d.active_calories || 0);
+
+    if (daysAgo >= 0 && daysAgo < days) {
+      currSteps += steps;
+      if (steps > 0) currStepDays += 1;
+      currActiveCal += actCal;
+    } else if (daysAgo >= days && daysAgo < (2 * days)) {
+      prevSteps += steps;
+      if (steps > 0) prevStepDays += 1;
+    }
+  });
+
+  const stepTotalEl = document.getElementById('val-step-summary-total');
+  if (stepTotalEl) {
+    const fmtSteps = Math.round(currSteps).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    stepTotalEl.innerText = currStepDays > 0 ? `${fmtSteps} steg` : '-- steg';
+  }
+
+  const stepTrendEl = document.getElementById('val-step-summary-trend');
+  if (stepTrendEl) {
+    if (currStepDays > 0 || prevStepDays > 0) {
+      const diffSteps = currSteps - prevSteps;
+      const diffPct = prevSteps > 0 ? (diffSteps / prevSteps * 100.0) : (currSteps > 0 ? 100.0 : 0.0);
+      const icon = diffSteps > 0 ? "📈" : (diffSteps < 0 ? "📉" : "➡️");
+      const fmtDiff = Math.abs(Math.round(diffSteps)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+      stepTrendEl.innerText = `${icon} ${diffSteps >= 0 ? '+' : '-'}${fmtDiff} steg (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%) vs föregående ${daysLabel}`;
+      stepTrendEl.style.color = diffSteps >= 0 ? "#10B981" : "#EF4444";
+    } else {
+      stepTrendEl.innerText = '--';
+      stepTrendEl.style.color = '#9CA3AF';
+    }
+  }
+
+  const stepSubtextEl = document.getElementById('val-step-summary-subtext');
+  if (stepSubtextEl) {
+    if (currStepDays > 0) {
+      const avgSteps = Math.round(currSteps / Math.max(1, currStepDays));
+      const fmtAvg = avgSteps.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+      const distKm = (currSteps * 0.00075).toFixed(1);
+      stepSubtextEl.innerText = `Snitt: ${fmtAvg} steg/dag | Ca ${distKm} km gångdistans`;
+    } else {
+      stepSubtextEl.innerText = 'Inga steg registrerade under perioden';
+    }
+  }
+
+  const stepCalEl = document.getElementById('val-step-summary-cal');
+  if (stepCalEl) {
+    const calValue = currActiveCal > 0 ? currActiveCal : Math.round(currSteps * 0.04);
+    const fmtCal = Math.round(calValue).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    stepCalEl.innerText = currStepDays > 0 ? `🔥 ${fmtCal} kcal aktiv förbränning` : '🔥 -- kcal';
+  }
+
+  // Background: Fetch Local Weather for AI context
   fetchLocalWeather();
 
 
@@ -1606,8 +1671,6 @@ async function fetchLocalWeather(forceRefresh = false) {
   const windEl = document.getElementById('val-weather-wind');
   const rainEl = document.getElementById('val-weather-rain');
   const adviceEl = document.getElementById('val-weather-advice');
-
-  if (!tempEl) return;
 
   // 1. Check cached weather in sessionStorage (valid for 10 mins)
   const cached = sessionStorage.getItem('healthchat_weather');
