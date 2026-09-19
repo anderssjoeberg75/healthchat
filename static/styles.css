@@ -891,8 +891,79 @@ body {
 
 .ds-card-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ds-logo-lockup {
+  display: flex;
+  align-items: center;
+}
+
+.ds-brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ds-brand-icon {
+  flex-shrink: 0;
+  display: block;
+}
+
+.ds-brand-name {
+  font-size: 1.25rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.strava-text {
+  font-family: 'Montserrat', 'Segoe UI', -apple-system, sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.5px;
+  color: #FC4C02;
+}
+
+.garmin-text {
+  font-family: 'Segoe UI', -apple-system, Arial, sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: #0078D4;
+}
+
+.garmin-text .ds-subbrand {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #64748B;
+  text-transform: uppercase;
+}
+
+.withings-text {
+  font-family: 'Segoe UI', -apple-system, Arial, sans-serif;
+  font-weight: 800;
+  letter-spacing: 2.5px;
+  color: #0F172A;
+}
+
+.fitbit-text {
+  font-family: 'Segoe UI', -apple-system, Arial, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.5px;
+  color: #00B0B9;
+  font-size: 1.35rem;
+}
+
+.whoop-text {
+  font-family: 'Montserrat', 'Segoe UI', -apple-system, sans-serif;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 1.5px;
+  color: #111827;
 }
 
 .ds-icon {
@@ -910,7 +981,7 @@ body {
 .ds-desc {
   font-size: 0.82rem;
   color: #6B7280;
-  margin: 3px 0 0 0;
+  margin: 0 0 10px 0;
   line-height: 1.4;
 }
 

@@ -2359,19 +2359,69 @@ function renderDatasourceCards(providers) {
   ).join('');
 }
 
+function renderProviderLogo(provider, name) {
+  const p = (provider || '').toLowerCase();
+  if (p === 'strava') {
+    return `
+      <div class="ds-brand-logo strava" title="Strava">
+        <svg class="ds-brand-icon" viewBox="0 0 24 24" width="28" height="28" fill="#FC4C02" aria-hidden="true">
+          <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/>
+        </svg>
+        <span class="ds-brand-name strava-text">STRAVA</span>
+      </div>`;
+  }
+  if (p === 'garmin') {
+    return `
+      <div class="ds-brand-logo garmin" title="Garmin Connect">
+        <svg class="ds-brand-icon" viewBox="0 0 24 24" width="26" height="26" fill="#0078D4" aria-hidden="true">
+          <path d="M12 2L1.5 20.5h21L12 2zm0 4.2l7.1 12.3H4.9L12 6.2z"/>
+          <polygon points="12,9.5 16,16.5 8,16.5"/>
+        </svg>
+        <span class="ds-brand-name garmin-text">GARMIN <span class="ds-subbrand">CONNECT</span></span>
+      </div>`;
+  }
+  if (p === 'withings') {
+    return `
+      <div class="ds-brand-logo withings" title="Withings">
+        <svg class="ds-brand-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#10B981" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 8l3.5 10L10 11l2 4 4.5-8L21 16"/>
+        </svg>
+        <span class="ds-brand-name withings-text">WITHINGS</span>
+      </div>`;
+  }
+  if (p === 'fitbit') {
+    return `
+      <div class="ds-brand-logo fitbit" title="Fitbit">
+        <svg class="ds-brand-icon" viewBox="0 0 24 24" width="26" height="26" fill="#00B0B9" aria-hidden="true">
+          <path d="M13.298 1.825c0 .976-.81 1.785-1.786 1.785-.972 0-1.784-.81-1.784-1.785 0-.973.813-1.785 1.784-1.785.976 0 1.786.813 1.786 1.785zm-1.786 3.243c-1.052 0-1.863.81-1.863 1.866 0 1.053.81 1.865 1.865 1.865 1.053 0 1.865-.811 1.865-1.865s-.825-1.866-1.875-1.866h.008zm0 5.029c-1.052 0-1.945.891-1.945 1.945s.894 1.945 1.947 1.945 1.946-.891 1.946-1.945-.894-1.945-1.946-1.945h-.002zm0 5.107c-1.052 0-1.863.81-1.863 1.864s.81 1.866 1.865 1.866c1.053 0 1.865-.811 1.865-1.866 0-.972-.825-1.864-1.875-1.864h.008zm0 5.191c-.972 0-1.784.809-1.784 1.784 0 .97.813 1.781 1.784 1.781.977 0 1.786-.809 1.786-1.784 0-.973-.81-1.781-1.786-1.781zM16.46 4.823c-1.136 0-2.108.977-2.108 2.111 0 1.134.973 2.107 2.108 2.107 1.135 0 2.106-.975 2.106-2.107 0-1.135-.972-2.109-2.106-2.109v-.002zm0 5.03c-1.216 0-2.19.973-2.19 2.19 0 1.216.975 2.187 2.19 2.187 1.215 0 2.189-.971 2.189-2.189 0-1.216-.974-2.188-2.189-2.188zm0 5.108c-1.136 0-2.108.976-2.108 2.107 0 1.135.973 2.109 2.108 2.109 1.135 0 2.106-.976 2.106-2.109s-.971-2.107-2.106-2.107zm5.106-5.353c-1.296 0-2.43 1.055-2.43 2.434 0 1.297 1.051 2.433 2.43 2.433 1.381 0 2.434-1.065 2.434-2.444-.082-1.382-1.135-2.431-2.434-2.431v.008zM6.486 5.312c-.892 0-1.62.73-1.62 1.623 0 .891.729 1.62 1.62 1.62.893 0 1.619-.729 1.619-1.62 0-.893-.727-1.62-1.619-1.62v-.003zm0 5.027c-.973 0-1.703.729-1.703 1.703 0 .975.721 1.703 1.695 1.703s1.695-.73 1.695-1.703c0-.975-.735-1.703-1.71-1.703h.023zm0 5.107c-.892 0-1.62.731-1.62 1.62 0 .895.729 1.623 1.62 1.623.893 0 1.619-.735 1.619-1.635s-.727-1.62-1.619-1.62v.012zm-5.025-4.863c-.813 0-1.461.646-1.461 1.459 0 .81.648 1.459 1.46 1.459.81 0 1.459-.648 1.459-1.459s-.648-1.459-1.458-1.459z"/>
+        </svg>
+        <span class="ds-brand-name fitbit-text">fitbit</span>
+      </div>`;
+  }
+  if (p === 'whoop') {
+    return `
+      <div class="ds-brand-logo whoop" title="Whoop">
+        <svg class="ds-brand-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#111827" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6l3.5 12L10 10l2 6 3.5-12L21 18"/>
+        </svg>
+        <span class="ds-brand-name whoop-text">WHOOP</span>
+      </div>`;
+  }
+  return `<div class="ds-brand-logo"><h4>${escapeHtml(name || provider)}</h4></div>`;
+}
+
 function dsCardHeader(p) {
   const badgeClass = p.connected ? 'ds-badge connected' : 'ds-badge';
   const badgeText = p.connected ? '● Ansluten' : '○ Ej ansluten';
   const steps = (p.steps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
   return `
     <div class="ds-card-head">
-      <span class="ds-icon">${escapeHtml(p.icon)}</span>
-      <div>
-        <h4>${escapeHtml(p.name)}</h4>
-        <p class="ds-desc">${escapeHtml(p.description)}</p>
+      <div class="ds-logo-lockup">
+        ${renderProviderLogo(p.provider, p.name)}
       </div>
       <span class="${badgeClass}">${badgeText}</span>
     </div>
+    <p class="ds-desc">${escapeHtml(p.description)}</p>
     <ol class="ds-steps">${steps}</ol>
     <a class="ds-link" href="${escapeHtml(p.portal_url)}" target="_blank" rel="noopener noreferrer">🔗 ${escapeHtml(p.portal_label)}</a>
   `;
