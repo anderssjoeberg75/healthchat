@@ -19,9 +19,9 @@ TEST_USER_ID = 4242
 
 # --- PROVIDER CATALOGUE -----------------------------------------------------
 
-def test_provider_catalogue_covers_four_sources():
-    assert set(datasource_store.PROVIDERS) == {"strava", "garmin", "withings", "fitbit"}
-    assert datasource_store.PROVIDER_ORDER == ["strava", "garmin", "withings", "fitbit"]
+def test_provider_catalogue_covers_all_sources():
+    assert set(datasource_store.PROVIDERS) == {"strava", "garmin", "withings", "fitbit", "whoop"}
+    assert datasource_store.PROVIDER_ORDER == ["strava", "garmin", "withings", "fitbit", "whoop"]
 
 
 def test_every_provider_has_required_metadata():
@@ -36,7 +36,7 @@ def test_every_provider_has_required_metadata():
 
 def test_garmin_uses_credentials_and_the_rest_use_oauth():
     assert datasource_store.PROVIDERS["garmin"]["auth_kind"] == "credentials"
-    for provider in ("strava", "withings", "fitbit"):
+    for provider in ("strava", "withings", "fitbit", "whoop"):
         assert datasource_store.PROVIDERS[provider]["auth_kind"] == "oauth"
 
 
@@ -207,7 +207,7 @@ def test_list_datasources_requires_login():
     assert anon.get("/api/datasources").status_code == 401
 
 
-def test_list_datasources_returns_all_four(ds_api):
+def test_list_datasources_returns_all_providers(ds_api):
     client, _db = ds_api
     res = client.get("/api/datasources")
     assert res.status_code == 200, res.text

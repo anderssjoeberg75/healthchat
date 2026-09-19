@@ -107,9 +107,27 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "sync_days": 30,
         "sync_label": "dagar",
     },
+    "whoop": {
+        "name": "Whoop",
+        "icon": "⚡",
+        "color": "#111827",
+        "auth_kind": "oauth",
+        "description": "Hämtar återhämtning (Recovery), sömn, dagsbelastning (Strain) och träningspass från Whoop.",
+        "portal_url": "https://developer-dashboard.whoop.com/",
+        "portal_label": "Öppna Whoop Developer Dashboard (developer-dashboard.whoop.com)",
+        "steps": [
+            "Öppna länken nedan och logga in på Whoop Developer Dashboard.",
+            "Skapa en applikation under \"Create An App\".",
+            "Ange Callback-URL:en nedan exakt som Redirect URI i din app.",
+            "Kopiera Client ID och Client Secret och klistra in dem här.",
+            "Spara uppgifterna och klicka därefter på Anslut för att godkänna åtkomsten.",
+        ],
+        "sync_days": 30,
+        "sync_label": "mätvärden",
+    },
 }
 
-PROVIDER_ORDER: List[str] = ["strava", "garmin", "withings", "fitbit"]
+PROVIDER_ORDER: List[str] = ["strava", "garmin", "withings", "fitbit", "whoop"]
 
 # garth keeps its authenticated client in module state, so every Garmin login is
 # serialized through this lock. Data fetching afterwards still goes through that
@@ -462,6 +480,18 @@ def build_handler(provider: str, db, payload: Dict[str, Any], token_dir: Path) -
         handler.current_state = payload.get("oauth_state")
         return handler
 
+    if provider == "whoop":
+        from whoop_handler import WhoopHandler
+        handler = WhoopHandler(db=db, token_store_dir=token_dir)
+        handler.client_id = payload.get("client_id") or None
+        handler.client_secret = payload.get("client_secret") or None
+        handler.access_token = payload.get("access_token") or None
+        handler.refresh_token = payload.get("refresh_token") or None
+        handler.expires_at = payload.get("expires_at")
+        handler.current_state = payload.get("oauth_state")
+        handler._authenticated = bool(handler.access_token)
+        return handler
+
     if provider == "garmin":
         from garmin_handler import GarminDataHandler
         for name in ("garmin_tokens", "oauth1_token", "oauth2_token"):
@@ -489,7 +519,7 @@ def build_handler(provider: str, db, payload: Dict[str, Any], token_dir: Path) -
 def collect_tokens(provider: str, handler, token_dir: Optional[Path] = None) -> Dict[str, Any]:
     """Read back the tokens a handler ended up holding, for encrypted persistence."""
     tokens: Dict[str, Any] = {}
-    if provider in ("strava", "fitbit"):
+    if provider in ("strava", "fitbit", "whoop"):
         tokens["access_token"] = getattr(handler, "access_token", None)
         tokens["refresh_token"] = getattr(handler, "refresh_token", None)
         tokens["expires_at"] = getattr(handler, "expires_at", None)
@@ -598,6 +628,11 @@ def sync_provider(
             )
         elif provider == "fitbit":
             handler.sync_fitbit_history(
+                days=sync_days, force_full=force_full,
+                on_progress=progress_adapter, on_complete=on_complete,
+            )
+        elif provider == "whoop":
+            handler.sync_whoop_history(
                 days=sync_days, force_full=force_full,
                 on_progress=progress_adapter, on_complete=on_complete,
             )
